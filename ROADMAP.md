@@ -1121,6 +1121,15 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   calcula el detalle después (V21; las incidencias guardadas, solo si los dos
   censos siguen con la versión del análisis con la que se compararon), y el
   desplegable va por tipo (V22). Solo frontend.
+- **Un botón principal por vista y menos jerga** (revisión de UX del 25-oct,
+  3.5 y 3.9; decisión 200; en local, sin desplegar): barra fija «Cambios sin
+  guardar · Guardar» en la configuración del cliente (cómo se rastrea, datos,
+  integraciones, reglas) y en Ajustes, que pregunta antes de salir; «Eliminar»
+  dentro de «⋯» en perfiles, programaciones y reglas; pie fijo en los modales;
+  el aceptar de las preguntas ya no sale desactivado. Reglas de alertas en
+  frase, slug plegado, IA sin claves internas y con salida a Problemas, ayuda
+  para semillas y canario, tildes y números en castellano (`fmt.dec`,
+  `fmt.pct`, `fmt.pctDe`, `fmt.n`).
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 

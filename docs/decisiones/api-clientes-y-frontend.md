@@ -659,3 +659,44 @@
    Tests: `tests/test_config_niveles.py` (API: origen y origen por clave,
    borrador, avisos del mismo sitio, ajustes sin secretos) y
    `tests/test_config_niveles_frontend.py`.
+
+<a id="d200"></a>
+200. **Lo editado en la ficha del cliente se guarda con una barra fija y salir con cambios pregunta; borrar va dentro de «⋯»**
+
+   **Problema.** La pestaña Configuración tenía un «Guardar» por sección (la
+   configuración, los datos, las integraciones, las reglas), cada uno al final
+   de su bloque, y nada avisaba de lo que quedaba sin guardar: cambiar un
+   umbral, irse a Producción y volver era perderlo sin saberlo. Guardar una
+   sección recargaba la ficha y se llevaba por delante lo cambiado en otra. Las
+   «×» de borrar perfiles y programaciones estaban junto a «Lanzar» y
+   «Pausar». Y el botón de aceptar de todas las preguntas sin texto que
+   escribir («Eliminar», «Restablecer», «Cancelar el rastreo») salía
+   desactivado: su `:disabled` daba `''` y Alpine pone el atributo con
+   cualquier valor que no sea `false`, `null` o `undefined` (revisión de UX
+   del 25-oct, 3.5).
+
+   **Decisión.**
+
+   - Una barra fija abajo, «Cambios sin guardar en … · Descartar · Guardar»,
+     aparece en cuanto algo de la ficha del cliente (cómo se rastrea, datos,
+     integraciones, reglas de alertas) o de Ajustes (un token de Slack pegado)
+     difiere de lo guardado. Su «Guardar» guarda todo lo pendiente: primero las
+     reglas y luego lo del cliente en un solo PATCH. Los botones por sección se
+     quitan. Escribir en un campo el mismo número que había («20» frente a 20)
+     no cuenta como cambio.
+   - Salir de la ficha (otro cliente u otra vista, por enlace o con atrás)
+     con cambios pregunta antes y, si no se acepta, se queda donde estaba;
+     recargar o cerrar la pestaña usa el aviso del navegador. Cambiar de
+     pestaña dentro del mismo cliente no pregunta: los formularios siguen ahí y
+     la barra también. El modal del perfil pregunta al cerrarse con cambios y
+     su pie dice «Cambios sin guardar».
+   - Eliminar un perfil, una programación o una regla propia va dentro de
+     «⋯», con lo que no se borra dicho al lado.
+   - El pie de los modales queda fijo (Lanzar y Guardar a la vista) y el
+     «Nuevo rastreo» de arriba solo es el botón verde donde la vista no tiene
+     uno propio (Nuevo cliente, Nueva programación, Informe para el cliente).
+   - El `:disabled` de las preguntas se fuerza a booleano.
+
+   Tests: `tests/test_botones_jerga_frontend.py` (cambios por sección, salir
+   con y sin aceptar, el perfil, la expresión del `:disabled` tal cual está en
+   `index.html`, y los formatos de número).

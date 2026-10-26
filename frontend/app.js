@@ -300,7 +300,17 @@ const fmt = {
   // `useGrouping: 'always'`: en es-ES Intl no agrupa los numeros de cuatro
   // cifras, asi que la misma columna mezclaba `4319` con `15.026` (UX-14).
   num: n => n == null ? '—' : Number(n).toLocaleString('es-ES', { useGrouping: 'always' }),
-  pct: n => n == null ? '—' : n.toFixed(1) + '%',
+  // Decimales fijos con coma y miles con punto: «841,2», «1.234,5». Los
+  // porcentajes con espacio antes del signo, «32,1 %» (V42 y UX-14; revision
+  // de UX del 25-oct, 3.9): salian «32.1%» y «841.2 KB» junto a cifras ya en
+  // castellano. `pct` recibe el porcentaje (32.1) y `pctDe` la fraccion (0.321).
+  dec: (n, d = 1) => n == null || n === '' || isNaN(n) ? '—'
+    : Number(n).toLocaleString('es-ES', { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: 'always' }),
+  pct: (n, d = 1) => n == null || n === '' || isNaN(n) ? '—' : fmt.dec(n, d) + ' %',
+  pctDe: (x, d = 1) => x == null || x === '' || isNaN(x) ? '—' : fmt.pct(100 * x, d),
+  // «1 página», «3 páginas»: la cifra con su nombre en singular o plural
+  // (revision de UX del 25-oct, 3.9). Salia «1 rastreos no tienen cliente».
+  n: (n, uno, varios) => fmt.num(n) + ' ' + (Number(n) === 1 ? uno : varios),
   // Tiempos de respuesta (milisegundos de una peticion).
   ms:  n => n == null ? '—' : n < 1000 ? Math.round(n) + ' ms' : (n/1000).toFixed(1).replace('.', ',') + ' s',
   // Lo que dura un rastreo. Antes salia por `ms` y un censo se leia
@@ -438,10 +448,10 @@ const fmt = {
   bytes: b => {
     if (b == null) return '—';
     if (b < 1024) return b + ' B';
-    if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
-    if (b < 1073741824) return (b/1048576).toFixed(1) + ' MB';
-    if (b < 1099511627776) return (b/1073741824).toFixed(1).replace('.', ',') + ' GB';
-    return (b/1099511627776).toFixed(1).replace('.', ',') + ' TB';
+    if (b < 1048576) return fmt.dec(b/1024) + ' KB';
+    if (b < 1073741824) return fmt.dec(b/1048576) + ' MB';
+    if (b < 1099511627776) return fmt.dec(b/1073741824) + ' GB';
+    return fmt.dec(b/1099511627776) + ' TB';
   },
   status: s => STATUS_LABEL[s] || s,
   issue: t => ISSUE_LABEL[t] || ISSUE_LABEL_EXTRA[t] || t.replaceAll('_', ' '),
@@ -575,7 +585,7 @@ const fmt = {
   // Con coma decimal, como el resto de cifras (revision de UX del 25-oct, 2.9).
   usd: n => n == null ? '—' : (n === 0 ? '0 $' : Number(n).toLocaleString('es-ES',
     n < 0.01 ? { maximumSignificantDigits: 2 } : { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: 'always' }) + ' $'),
-  duracion: s => s == null ? '—' : s < 60 ? s + ' s' : s < 3600 ? Math.ceil(s / 60) + ' min' : (s / 3600).toFixed(1) + ' h',
+  duracion: s => s == null ? '—' : s < 60 ? s + ' s' : s < 3600 ? Math.ceil(s / 60) + ' min' : fmt.dec(s / 3600) + ' h',
   estadoEnriq: e => ({ pendiente: 'En cola', en_curso: 'En curso', cancelando: 'Cancelando…',
     completada: 'Completada', parcial: 'Parcial (presupuesto)', cancelada: 'Cancelada', fallida: 'Fallida' })[e] || e,
   colorEnriq: e => ({ completada: 'var(--green)', parcial: 'var(--orange)', fallida: 'var(--red)',
@@ -614,7 +624,7 @@ const fmt = {
     canonical_href: 'Canonical',
     title: 'Título',
     h1: 'H1',
-    word_count: 'Palabras (cambio de mas del 20%)',
+    word_count: 'Palabras (cambio de más del 20 %)',
     // Decision 131: con los mismos umbrales que las alertas
     meta_description: 'Meta description',
     sd_tipos: 'Tipos de datos estructurados',
@@ -668,7 +678,7 @@ const fmt = {
     if (al.variacion) {
       const v = al.variacion;
       return 'Suben ' + fmt.num(v.suben) + ', bajan ' + fmt.num(v.bajan)
-        + (v.mediana_pct !== null && v.mediana_pct !== undefined ? ' · variación mediana ' + (v.mediana_pct > 0 ? '+' : '') + v.mediana_pct + '%' : '');
+        + (v.mediana_pct !== null && v.mediana_pct !== undefined ? ' · variación mediana ' + (v.mediana_pct > 0 ? '+' : '') + fmt.num(v.mediana_pct) + ' %' : '');
     }
     if (al.transiciones && al.transiciones.length) {
       return al.transiciones.slice(0, 3).map(t => (t.antes || '—') + ' → ' + (t.ahora || '—') + ': ' + fmt.num(t.paginas)).join(' · ');
@@ -795,9 +805,9 @@ function app() {
     // siguiente paso: destaca el boton que toca.
     createSugerencia: '',
     cadencias: [
-      { etiqueta: 'Cada dia',      cron: '0 3 * * *' },
+      { etiqueta: 'Cada día',      cron: '0 3 * * *' },
       { etiqueta: 'Cada lunes',    cron: '0 3 * * 1' },
-      { etiqueta: 'Cada 15 dias',  cron: '0 3 1,15 * *' },
+      { etiqueta: 'Cada 15 días',  cron: '0 3 1,15 * *' },
       { etiqueta: 'Cada mes',      cron: '0 3 1 * *' },
     ],
     theme: document.documentElement.dataset.theme || 'light',
@@ -864,6 +874,7 @@ function app() {
     // Reglas de alerta y resumen semanal del cliente (decision 135)
     reglasCliente: null,      // GET /clients/{id}/reglas
     reglasForm: null,         // copia editable de `efectivas`
+    _reglasFoto: '',          // `reglasForm` tal cual se cargo o guardo (cambios sin guardar, 3.5)
     incidentes: null,         // GET /clients/{id}/incidentes (decision 139)
     // Search Console del cliente (decision 141)
     gsc: { estado: null, llaves: [], llave: '', nombreNueva: '', propiedades: null, propiedad: '', error: '', ocupado: false },
@@ -881,6 +892,9 @@ function app() {
     clienteJobs: [],
     perfilForm: null,
     perfilError: '',
+    _perfilFoto: '',          // el formulario del perfil al abrirlo (cambios sin guardar, 3.5)
+    _perfilCfgBase: null,     // la config propia del perfil al abrirlo
+    guardandoCambios: false,  // la barra «Cambios sin guardar · Guardar» esta guardando
 
     // Modal de creacion
     showCreate: false,
@@ -1050,7 +1064,11 @@ function app() {
       const inicial = location.hash && location.hash !== '#/' ? location.hash : '#/clientes';
       history.replaceState(null, '', inicial);
       this._irARuta(inicial);
-      window.addEventListener('popstate', () => this._irARuta(location.hash));
+      // Con cambios sin guardar, salir pregunta antes (revision de UX del 25-oct, 3.5).
+      window.addEventListener('popstate', () => this._alCambiarRuta());
+      window.addEventListener('beforeunload', e => {
+        if (this.cambiosSinGuardar().length) { e.preventDefault(); e.returnValue = ''; }
+      });
       // Cualquier cambio de vista, rastreo, pestana o filtro se refleja en la
       // URL. Un solo vigilante en vez de acordarse en cada metodo.
       // Si solo cambia lo que va despues del «?» (un filtro, el orden, la
@@ -2151,6 +2169,7 @@ function app() {
         this.reglasCliente = r;
         this.reglasForm = JSON.parse(JSON.stringify(r.efectivas));
         this.reglasForm.propias.forEach(x => { x.segmento = x.segmento || ''; });
+        this._reglasFoto = _fotoReglas(this.reglasForm);
         this.resumenes = res || [];
         this._reglasDe = this.cliente && this.cliente.id;
       } catch (e) { this.reglasError = e.message; }
@@ -2210,8 +2229,11 @@ function app() {
         this.reglasCliente = r;
         this.reglasForm = JSON.parse(JSON.stringify(r.efectivas));
         this.reglasForm.propias.forEach(x => { x.segmento = x.segmento || ''; });
+        this._reglasFoto = _fotoReglas(this.reglasForm);
         this.showToast('Reglas guardadas: valen para los rastreos que terminen desde ahora');
+        return true;
       } catch (e) { this.reglasError = e.message; }
+      return false;
     },
 
     async restablecerReglas() {
@@ -2226,6 +2248,7 @@ function app() {
         this.reglasCliente = r;
         this.reglasForm = JSON.parse(JSON.stringify(r.efectivas));
         this.reglasForm.propias.forEach(x => { x.segmento = x.segmento || ''; });
+        this._reglasFoto = _fotoReglas(this.reglasForm);
         this.showToast('Reglas de serie restablecidas');
       } catch (e) { this.reglasError = e.message; }
     },
@@ -2548,7 +2571,7 @@ function app() {
         const mal = cfgListoParaGuardar(this.cfgCliente);
         if (mal) {
           this.clienteError = mal;
-          return;
+          return false;
         }
         cuerpo.config_defecto = this.cfgCliente.propia;
       }
@@ -2570,8 +2593,11 @@ function app() {
         this.showToast(partes && partes.length === 1
           ? ({ datos: 'Datos guardados', config: 'Configuración guardada', integraciones: 'Integraciones guardadas' })[partes[0]]
           : 'Cliente guardado');
+        this.cfgClienteGuardando = false;
+        return true;
       } catch (e) { this.clienteError = e.message; }
       this.cfgClienteGuardando = false;
+      return false;
     },
 
     // La config del cliente con el mismo formulario que el perfil y el
@@ -2602,6 +2628,136 @@ function app() {
       };
       if (this.clienteTab !== 'config') { this.cambiarTabCliente('config'); this.$nextTick(() => setTimeout(ir, 50)); }
       else ir();
+    },
+
+    // ------- Cambios sin guardar (revision de UX del 25-oct, 3.5) -------
+    // Lo editado y no guardado de la vista: en la ficha del cliente, la
+    // configuracion, los datos, las integraciones y las reglas de alertas; en
+    // Ajustes, un token de Slack pegado y sin guardar. Una barra fija lo dice
+    // con un solo «Guardar» y salir de la vista pregunta antes de perderlo
+    // (antes cada seccion tenia su boton al final y nada avisaba).
+    datosClienteCambiados() {
+      if (!this.cliente) return false;
+      const a = this.clienteForm, b = _formCliente(this.cliente);
+      return ['nombre', 'slug', 'dominios', 'zona_horaria', 'notas'].some(k => (a[k] || '').trim() !== (b[k] || '').trim());
+    },
+    integracionesCambiadas() {
+      if (!this.cliente) return false;
+      const sin = l => JSON.stringify((l || []).map(({ configurada, ...i }) => i));
+      return sin(this.clienteForm.integraciones) !== sin(_formCliente(this.cliente).integraciones);
+    },
+    reglasCambiadas() {
+      return !!(this.reglasForm && this._reglasFoto) && this._reglasDe === (this.cliente && this.cliente.id)
+        && _fotoReglas(this.reglasForm) !== this._reglasFoto;
+    },
+    cambiosSinGuardar() {
+      const c = [];
+      if (this.view === 'client' && this.cliente) {
+        if (this.cfgClienteCambiada()) c.push({ id: 'config', texto: 'cómo se rastrea' });
+        if (this.datosClienteCambiados()) c.push({ id: 'datos', texto: 'los datos del cliente' });
+        if (this.integracionesCambiadas()) c.push({ id: 'integraciones', texto: 'las integraciones' });
+        if (this.reglasCambiadas()) c.push({ id: 'reglas', texto: 'las reglas de alertas' });
+      }
+      if (this.view === 'ajustes' && this.ajustes && this.ajustes.slack && (this.ajustes.slack.tokenTexto || '').trim())
+        c.push({ id: 'slack', texto: 'el token del bot de Slack' });
+      return c;
+    },
+    textoCambiosSinGuardar() {
+      const c = this.cambiosSinGuardar().map(x => x.texto);
+      if (!c.length) return '';
+      return 'Cambios sin guardar en ' + (c.length === 1 ? c[0] : c.slice(0, -1).join(', ') + ' y ' + c[c.length - 1]);
+    },
+    // Un solo «Guardar» para todo lo pendiente: primero las reglas (no
+    // recargan la ficha) y luego lo del cliente en un solo PATCH.
+    async guardarCambiosPendientes() {
+      const ids = this.cambiosSinGuardar().map(x => x.id);
+      if (!ids.length || this.guardandoCambios) return;
+      this.guardandoCambios = true;
+      try {
+        if (ids.includes('slack')) { await this.subirTokenSlackAgencia(); return; }
+        if (ids.includes('reglas') && !await this.guardarReglas()) {
+          this.irASeccionConfig('reglas-alertas'); return;
+        }
+        const partes = ids.filter(x => ['config', 'datos', 'integraciones'].includes(x));
+        if (partes.length) await this.guardarCliente(partes);
+      } catch (e) {
+        this.reglasError = e.message;
+      } finally { this.guardandoCambios = false; }
+    },
+    descartarCambiosPendientes() {
+      if (this.cliente) {
+        this.clienteForm = _formCliente(this.cliente);
+        if (this.cfgClienteCambiada()) this.cargarCfgCliente();
+        if (this.reglasCliente && this.reglasCambiadas()) {
+          this.reglasForm = JSON.parse(JSON.stringify(this.reglasCliente.efectivas));
+          this.reglasForm.propias.forEach(x => { x.segmento = x.segmento || ''; });
+          this._reglasFoto = _fotoReglas(this.reglasForm);
+        }
+      }
+      if (this.ajustes && this.ajustes.slack) this.ajustes.slack.tokenTexto = '';
+    },
+    // ¿La ruta `destino` deja atras lo que esta sin guardar? Cambiar de
+    // pestaña dentro del mismo cliente no: los formularios siguen ahi y la
+    // barra tambien.
+    _saleDeLosCambios(destino) {
+      const ruta = (destino || '').replace(/^#/, '').split('?')[0];
+      if (this.view === 'client' && this.cliente) return !ruta.startsWith('/clientes/' + this.cliente.id);
+      if (this.view === 'ajustes') return ruta !== '/ajustes';
+      return true;
+    },
+    // Atras, adelante o un enlace con cambios sin guardar: se vuelve a la
+    // ruta de antes y se pregunta. Si se aceptan perder, se descartan y se va.
+    async _alCambiarRuta() {
+      const destino = location.hash;
+      if (this.cambiosSinGuardar().length && this._saleDeLosCambios(destino)) {
+        const aqui = this._ruta();
+        if (aqui && aqui !== destino) history.pushState(null, '', aqui);
+        const ok = await this.preguntar({
+          titulo: 'Hay cambios sin guardar',
+          mensaje: this.textoCambiosSinGuardar() + '. Si sales ahora, se pierden.',
+          aceptar: 'Salir sin guardar', peligro: true,
+        });
+        if (!ok) return;
+        this.descartarCambiosPendientes();
+        history.pushState(null, '', destino);
+      }
+      await this._irARuta(destino);
+    },
+    // El modal del perfil: cerrar con cambios pregunta antes (3.5).
+    perfilCambiado() {
+      if (!this.perfilForm) return false;
+      return JSON.stringify(this.perfilForm) !== this._perfilFoto
+        || !!(this.cfgPerfil && !_cfgIgual(this.cfgPerfil.propia, this._perfilCfgBase || {}));
+    },
+    async cerrarPerfil() {
+      // Escape con la pregunta abierta la cierra a ella, no abre otra.
+      if (this.dialogo) return;
+      if (this.perfilCambiado() && !await this.preguntar({
+        titulo: 'Descartar los cambios del perfil',
+        mensaje: 'Lo que has cambiado en este perfil no se ha guardado y se perderá.',
+        aceptar: 'Descartar', peligro: true,
+      })) return;
+      this.perfilForm = null;
+      this.cfgPerfil = null;
+    },
+    // El nombre de una regla en llano, para «sin evaluar»: las propias por su
+    // nombre y las de la comparacion por su frase (fmt.reglaDiff).
+    nombreRegla(id) {
+      const p = ((this.reglasForm && this.reglasForm.propias) || []).find(r => r.id === id);
+      if (p) return p.nombre || this.fraseRegla(p);
+      return fmt.reglaDiff(id);
+    },
+    // La pregunta de la IA que corresponde a un tipo de Problemas, al reves
+    // que PROBLEMA_PREGUNTA_IA: la salida de la pestaña IA a Problemas (V32).
+    problemaDePreguntaIA(preg) {
+      const e = Object.entries(PROBLEMA_PREGUNTA_IA).find(([, v]) => v.pregunta === preg);
+      return e ? e[0] : null;
+    },
+    // Un boton principal por vista (revision de UX del 25-oct, 3.5): el
+    // «Nuevo rastreo» de arriba solo es el verde donde la vista no tiene uno
+    // propio (Nuevo cliente, Nueva programacion, Informe para el cliente).
+    principalPropia() {
+      return ['clients', 'programados', 'detail', 'client'].includes(this.view);
     },
 
     // Una linea junto al titulo de cada seccion plegada: su estado.
@@ -2675,6 +2831,7 @@ function app() {
       this.perfilError = '';
       this.cfgPerfil = null;
       this.perfilForm = { id: null, nombre: '', rol: 'propio', seeds: '', notas: '', activo: true };
+      this._perfilFoto = JSON.stringify(this.perfilForm); this._perfilCfgBase = {};
       await this._cargarCfgPerfil(null, {});
     },
 
@@ -2685,6 +2842,7 @@ function app() {
         id: p.id, nombre: p.nombre, rol: p.rol, seeds: (p.seeds || []).join('\n'),
         notas: p.notas || '', activo: p.activo,
       };
+      this._perfilFoto = JSON.stringify(this.perfilForm); this._perfilCfgBase = p.config || {};
       await this._cargarCfgPerfil(p.id, p.config || {});
     },
 
@@ -2739,8 +2897,8 @@ function app() {
     },
 
     async borrarPerfil(p) {
-      if (!await this.preguntar({ titulo: `Borrar el perfil «${p.nombre}»`,
-        mensaje: 'Se quita también su programación, si la tiene. Sus rastreos NO se borran: quedan colgados del cliente.', aceptar: 'Borrar perfil', peligro: true })) return;
+      if (!await this.preguntar({ titulo: `Eliminar el perfil «${p.nombre}»`,
+        mensaje: 'Se quita también su programación, si la tiene. Sus rastreos NO se borran: quedan colgados del cliente.', aceptar: 'Eliminar perfil', peligro: true })) return;
       try {
         await api(`/clients/${this.cliente.id}/profiles/${p.id}`, { method: 'DELETE' });
         await this.abrirCliente(this.cliente.id, 'config');
@@ -3538,8 +3696,8 @@ function app() {
       // Se avisa de lo que NO se borra: los rastreos que ya lanzo son
       // censos entregados o comparables, y tirarlos por cambiar de idea
       // sobre la hora seria perder el historico del cliente.
-      if (!await this.preguntar({ titulo: `Quitar la programación «${p.nombre}»`,
-        mensaje: 'Deja de lanzarse sola. Los rastreos que ya ha lanzado NO se borran.', aceptar: 'Quitar', peligro: true })) return;
+      if (!await this.preguntar({ titulo: `Eliminar la programación «${p.nombre}»`,
+        mensaje: 'Deja de lanzarse sola. Los rastreos que ya ha lanzado NO se borran.', aceptar: 'Eliminar', peligro: true })) return;
       try {
         await api('/programaciones/' + p.id, { method: 'DELETE' });
         if (this.view === 'client') await this.cargarProgramacionesCliente();
@@ -3655,7 +3813,7 @@ function app() {
     scoreLabel(score) {
       if (score >= 80) return 'Bueno';
       if (score >= 50) return 'Mejorable';
-      return 'Critico';
+      return 'Crítico';
     },
 
     priorityClass(p) {
@@ -3755,7 +3913,7 @@ function app() {
           this.semanticProgress = { stage: status.stage, progress: status.progress };
           this._pollSemanticStatus();
         } else if (status.status === 'failed') {
-          this.semanticError = status.error_message || 'El analisis fallo.';
+          this.semanticError = status.error_message || 'El análisis falló.';
         }
       } catch (_) {}
     },
@@ -3778,7 +3936,7 @@ function app() {
             clearInterval(this.semanticPollTimer);
             this.semanticPollTimer = null;
             this.semanticLoading = false;
-            this.semanticError = status.error_message || 'El analisis fallo.';
+            this.semanticError = status.error_message || 'El análisis falló.';
           }
         } catch (_) {}
       }, 2000);
@@ -3787,7 +3945,7 @@ function app() {
     async runSemanticAnalysis() {
       if (!this.job) return;
       if (!this.semanticGeminiAccountId) {
-        this.semanticError = 'Selecciona una API key de Gemini antes de lanzar el analisis.';
+        this.semanticError = 'Elige una clave de Gemini antes de lanzar el análisis.';
         return;
       }
       this.semanticLoading = true;
@@ -3816,7 +3974,7 @@ function app() {
       const name = (this.geminiFormName || '').trim();
       const key = (this.geminiFormKey || '').trim();
       if (!key) {
-        this.geminiFormError = 'La API key no puede estar vacia.';
+        this.geminiFormError = 'La clave no puede estar vacía.';
         return;
       }
       try {
@@ -5128,7 +5286,7 @@ function app() {
       const r = ((this.enriqRun && this.enriqRun.resultados) || {})[d.pregunta] || {};
       if (r.tipo === 'score') {
         const n = Number(d.respuesta);
-        return this.etiquetaEnriq(d.pregunta, d.nivel) + (isNaN(n) ? '' : ' (' + n.toFixed(2) + ')');
+        return this.etiquetaEnriq(d.pregunta, d.nivel) + (isNaN(n) ? '' : ' (' + fmt.dec(n, 2) + ')');
       }
       return this.etiquetaEnriq(d.pregunta, d.respuesta);
     },
@@ -6428,27 +6586,27 @@ const EXP_COLUMN_DEFS = {
   // Search Console en los 90 dias del rastreo (decision 142)
   gsc_clics:            { label: 'Clics Google',     type: 'numeric', sortable: true,  filterKey: 'gsc_clics',               width: 140, fmt: r => r.gsc_clics != null ? fmt.num(r.gsc_clics) : '' },
   gsc_impresiones:      { label: 'Impresiones Google', type: 'numeric', sortable: true, filterKey: 'gsc_impresiones',       width: 170, fmt: r => r.gsc_impresiones != null ? fmt.num(r.gsc_impresiones) : '' },
-  gsc_posicion:         { label: 'Posición Google',  type: 'numeric', sortable: true,  filterKey: 'gsc_posicion',            width: 150, fmt: r => r.gsc_posicion != null ? r.gsc_posicion.toLocaleString('es-ES') : '' },
+  gsc_posicion:         { label: 'Posición Google',  type: 'numeric', sortable: true,  filterKey: 'gsc_posicion',            width: 150, fmt: r => r.gsc_posicion != null ? fmt.num(r.gsc_posicion) : '' },
   click_depth:          { label: 'Clics desde home', type: 'numeric', sortable: true,  filterKey: 'click_depth',             width: 160, fmt: r => r.click_depth ?? '' },
   crawl_depth:          { label: 'Prof. rastreo',    type: 'numeric', sortable: true,  filterKey: 'crawl_depth',             width: 140, fmt: r => r.crawl_depth ?? '' },
   folder_depth:         { label: 'Niveles',          type: 'numeric', sortable: true,  filterKey: 'folder_depth',            width: 130, fmt: r => r.folder_depth ?? '' },
-  word_count:           { label: 'Palabras',         type: 'numeric', sortable: true,  filterKey: 'word_count',              width: 140, fmt: r => r.word_count != null ? r.word_count.toLocaleString('es-ES') : '' },
-  content_word_count:   { label: 'Palabras contenido', type: 'numeric', sortable: true, filterKey: 'content_word_count',   width: 170, fmt: r => r.content_word_count != null ? r.content_word_count.toLocaleString('es-ES') : '' },
-  text_ratio:           { label: '% texto', grupo: 'otros', type: 'numeric', sortable: true,  filterKey: 'text_ratio',              width: 130, fmt: r => r.text_ratio != null ? r.text_ratio.toFixed(1) + '%' : '' },
+  word_count:           { label: 'Palabras',         type: 'numeric', sortable: true,  filterKey: 'word_count',              width: 140, fmt: r => r.word_count != null ? fmt.num(r.word_count) : '' },
+  content_word_count:   { label: 'Palabras contenido', type: 'numeric', sortable: true, filterKey: 'content_word_count',   width: 170, fmt: r => r.content_word_count != null ? fmt.num(r.content_word_count) : '' },
+  text_ratio:           { label: '% texto', grupo: 'otros', type: 'numeric', sortable: true,  filterKey: 'text_ratio',              width: 130, fmt: r => r.text_ratio != null ? fmt.pct(r.text_ratio) : '' },
   url_length:           { label: 'Long. URL',        type: 'numeric', sortable: true,  filterKey: 'url_length',              width: 140, fmt: r => r.url_length ?? '' },
-  inlinks_count:        { label: 'Inlinks',          type: 'numeric', sortable: true,  filterKey: 'inlinks_count',           width: 130, fmt: r => r.inlinks_count != null ? r.inlinks_count.toLocaleString('es-ES') : '' },
-  unique_inlinks_count: { label: 'Inlinks únicos',   type: 'numeric', sortable: true,  filterKey: 'unique_inlinks_count',    width: 140, fmt: r => r.unique_inlinks_count != null ? r.unique_inlinks_count.toLocaleString('es-ES') : '' },
-  outlinks_count:       { label: 'Outlinks',         type: 'numeric', sortable: true,  filterKey: 'outlinks_count',          width: 130, fmt: r => r.outlinks_count != null ? r.outlinks_count.toLocaleString('es-ES') : '' },
-  external_outlinks_count: { label: 'Outlinks ext.', type: 'numeric', sortable: true,  filterKey: 'external_outlinks_count', width: 140, fmt: r => r.external_outlinks_count != null ? r.external_outlinks_count.toLocaleString('es-ES') : '' },
+  inlinks_count:        { label: 'Inlinks',          type: 'numeric', sortable: true,  filterKey: 'inlinks_count',           width: 130, fmt: r => r.inlinks_count != null ? fmt.num(r.inlinks_count) : '' },
+  unique_inlinks_count: { label: 'Inlinks únicos',   type: 'numeric', sortable: true,  filterKey: 'unique_inlinks_count',    width: 140, fmt: r => r.unique_inlinks_count != null ? fmt.num(r.unique_inlinks_count) : '' },
+  outlinks_count:       { label: 'Outlinks',         type: 'numeric', sortable: true,  filterKey: 'outlinks_count',          width: 130, fmt: r => r.outlinks_count != null ? fmt.num(r.outlinks_count) : '' },
+  external_outlinks_count: { label: 'Outlinks ext.', type: 'numeric', sortable: true,  filterKey: 'external_outlinks_count', width: 140, fmt: r => r.external_outlinks_count != null ? fmt.num(r.external_outlinks_count) : '' },
   // La que hay que leer y ordenar es `pagerank_score` (0-100 logaritmica,
   // decision 34): con la escala 0-10 lineal el 85% de las paginas de un censo
   // queda en 0,00xx y no se distingue la 250 de la 25.000. La 0-10 se queda por
   // compatibilidad con informes ya entregados.
   pagerank_score:       { label: 'PageRank (0-100)',  type: 'numeric', sortable: true,  filterKey: 'pagerank_score',          width: 160, fmt: r => r.pagerank_score != null ? String(r.pagerank_score) : '' },
-  pagerank_raw:         { label: 'PageRank (x media)', grupo: 'otros', type: 'numeric', sortable: true, filterKey: 'pagerank_raw',            width: 170, fmt: r => r.pagerank_raw != null ? (r.pagerank_raw * 1e4).toFixed(2) : '' },
-  pagerank:             { label: 'PageRank (0-10, antiguo)', grupo: 'otros', type: 'numeric', sortable: true,  filterKey: 'pagerank',                width: 140, fmt: r => r.pagerank != null ? r.pagerank.toFixed(4) : '' },
+  pagerank_raw:         { label: 'PageRank (x media)', grupo: 'otros', type: 'numeric', sortable: true, filterKey: 'pagerank_raw',            width: 170, fmt: r => r.pagerank_raw != null ? fmt.dec(r.pagerank_raw * 1e4, 2) : '' },
+  pagerank:             { label: 'PageRank (0-10, antiguo)', grupo: 'otros', type: 'numeric', sortable: true,  filterKey: 'pagerank',                width: 140, fmt: r => r.pagerank != null ? fmt.dec(r.pagerank, 4) : '' },
   near_duplicate_count: { label: 'Casi duplicadas', type: 'numeric', sortable: true,  filterKey: 'near_duplicate_count',    width: 150, fmt: r => r.near_duplicate_count ?? '' },
-  closest_similarity:   { label: 'Similitud máx.', type: 'numeric', sortable: true,  filterKey: 'closest_similarity',      width: 150, fmt: r => r.closest_similarity != null ? (r.closest_similarity * 100).toFixed(1) + '%' : '' },
+  closest_similarity:   { label: 'Similitud máx.', type: 'numeric', sortable: true,  filterKey: 'closest_similarity',      width: 150, fmt: r => r.closest_similarity != null ? fmt.pctDe(r.closest_similarity) : '' },
   redirect_url:         { label: 'Redirige a',      type: 'string',  sortable: false, filterKey: 'redirect_url_contains', vacio: 'redirect_url',   width: 260, fmt: r => r.redirect_url ?? '' },
   redirect_type:        { label: 'Cód. redir.',     type: 'numeric', sortable: false, filterKey: 'redirect_type',            width: 130, fmt: r => r.redirect_type ?? '' },
   indexable:            { label: 'Indexable',        type: 'boolean', sortable: false, filterKey: 'indexable',               width: 130, fmt: r => r.indexable === true ? 'Sí' : r.indexable === false ? 'No' : '' },
@@ -7754,14 +7912,23 @@ const MODOS_REGLA = { valor: 'el valor del rastreo', cambio: 'el cambio frente a
 function etiquetaMedida(medida, catalogo) {
   const m = catalogo && catalogo.medidas && catalogo.medidas[medida];
   if (m) return m.etiqueta;
-  if ((medida || '').startsWith('incidencia:')) return 'Páginas con «' + medida.slice(11) + '»';
+  if ((medida || '').startsWith('incidencia:')) return 'Páginas con «' + fmt.issue(medida.slice(11)) + '»';
   return medida;
 }
+// Revision de UX del 25-oct, 3.9: la frase sin simbolos («es menor o igual
+// que −10 %» y no «<= -10%») ni claves internas de las incidencias.
+const OPERADOR_REGLA = { '>': 'es mayor que', '>=': 'es mayor o igual que', '<': 'es menor que', '<=': 'es menor o igual que' };
 function fraseReglaPropia(r, catalogo) {
   let que = etiquetaMedida(r.medida, catalogo);
   if (r.segmento) que += ' en «' + r.segmento + '»';
-  return que + ': ' + (MODOS_REGLA[r.modo] || r.modo) + ' ' + r.operador + ' '
-       + r.umbral + (r.modo === 'cambio_pct' ? '%' : '');
+  const umbral = r.umbral === '' || r.umbral == null || isNaN(r.umbral) ? '…' : fmt.num(Number(r.umbral)).replace(/^-/, '−');
+  return que + ': ' + (MODOS_REGLA[r.modo] || r.modo) + ' ' + (OPERADOR_REGLA[r.operador] || r.operador) + ' '
+       + umbral + (r.modo === 'cambio_pct' ? ' %' : '');
+}
+// Lo que se compara para saber si las reglas tienen cambios sin guardar: los
+// numeros de un campo editado llegan como texto («20» frente a 20).
+function _fotoReglas(f) {
+  return JSON.stringify(f, (k, v) => (typeof v === 'string' && v.trim() !== '' && !isNaN(v) ? Number(v) : v));
 }
 const DIAS_SEMANA = ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
 

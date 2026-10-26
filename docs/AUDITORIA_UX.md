@@ -392,6 +392,41 @@ Cosas que no estaban en la auditoría y aparecieron al hacerla:
 - Lo abierto: la fila de un hallazgo agrupado de otros tipos sigue contando «1
   página» (la de anclaje).
 
+### Revisión del 25-oct · 3.5 y 3.9 Botones y jerga (V09, V32, V33, V38, V42, V44, V47, UX-20/14)
+
+- [x] **Cambios sin guardar** (decisión 200): una barra fija con un solo
+  «Guardar» para lo editado en la ficha del cliente (cómo se rastrea, datos,
+  integraciones, reglas de alertas) o en Ajustes (token de Slack); salir de la
+  ficha con cambios pregunta y recargar usa el aviso del navegador. El modal
+  del perfil pregunta al cerrar y su pie lo dice. Fuera los «Guardar» por
+  sección.
+- [x] **«×» → «Eliminar» dentro de «⋯»** en programaciones, perfiles y reglas
+  propias, con lo que no se borra dicho al lado. Pie fijo en los modales
+  (Lanzar a la vista en Nuevo rastreo). El aceptar de las preguntas sin texto
+  que escribir salía desactivado (`:disabled` daba `''`): arreglado.
+- [x] **Un verde por vista:** el «Nuevo rastreo» de arriba solo es verde
+  donde la vista no tiene principal propio; «Lanzar» de cada perfil, sin verde.
+- [x] **Menos jerga (3.9):** reglas de la comparación en frase («Páginas que
+  ahora responden con error») y las propias sin «<=» («es menor o igual que
+  −10 %») ni claves de incidencia; slug plegado en «Identificador para los
+  backups»; «?» con ayuda en las semillas, título en los chips canario/prueba,
+  «Enlaces que recibe/salen» en la ficha de URL.
+- [x] **V32:** la pestaña IA ya no enseña `es_soft_404` ni la clave de
+  «solo donde»; columnas con mayúscula, «De dónde sale» en llano y «Ver
+  «Posible soft 404» en Problemas».
+- [x] **V42 / UX-20/14:** tildes en Semántico, Puntuación, ficha de URL,
+  importar backup y cadenas sueltas de app.js; `fmt.pct` da «32,1 %»,
+  `fmt.bytes` «841,2 KB», nuevos `fmt.dec`, `fmt.pctDe` y `fmt.n` usados en
+  todas las cifras con decimales (Explorador, IA, Semántico, alertas,
+  Google, Limpieza). Concordancia: «1 rastreo no tiene cliente… Asígnalo»,
+  «1 incidencia», «1 resultado», «1 regla evaluada».
+- [x] **V38:** en «Todos los rastreos» un rastreo en curso dice su tope y
+  lleva a Producción, que es donde se mide la hora estimada (no se inventa).
+- Ya estaban cerrados: V47 (un solo «Nuevo rastreo» en la ficha, 2.1), V09 (el
+  editor de reglas salió de Alertas a Configuración, 2.1), V44 (cron y «toca»,
+  2.2), V33 (modal de Jev, 2.9), el alta sin slug ni JSON (2.14) y la
+  configuración sin JSON (2.4).
+
 ### Cómo se probó
 
 Cada fase, con una API local montada sobre el worktree (`docker run … -v
