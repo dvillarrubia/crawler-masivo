@@ -15,7 +15,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152, 183 |
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157, 161, 168, 190 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
-| [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165, 188, 191 |
+| [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165, 188, 191, 192 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151, 189 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
 | [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 177, 178, 179, 180, 181, 182, 184, 185 |
@@ -218,6 +218,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 189 | La ficha de una URL trae la última inspección de Google (`google_inspeccion`), fechada y con la canonical que elige Google comparada con `misma_url`, no solo cuando no cuadra | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d189) |
 | 190 | Una plantilla que responde 200 a una URL que no existe es UN aviso agrupado por host (`soft_404_plantilla`), aunque ninguna página del censo sea la página de error; el Resumen deja de decir «0 páginas» en verde | [`incidencias`](incidencias.md#d190) |
 | 191 | La comparación automática sella con qué versión del análisis estaban los dos censos, y Problemas solo enseña la diferencia por tipo («+12 frente al 14 oct») si los dos siguen así | [`comparacion-y-alertas`](comparacion-y-alertas.md#d191) |
+| 192 | Validar una migración es una acción aparte con casos comunes sin regex (una regla por combinación, porque gana la primera que casa) y vista previa con URLs reales; Comparar ya no mapea y abre con la comparación guardada | [`comparacion-y-alertas`](comparacion-y-alertas.md#d192) |
 
 ## Anadir una decision
 

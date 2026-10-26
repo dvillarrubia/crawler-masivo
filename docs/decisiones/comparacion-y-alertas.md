@@ -1023,3 +1023,78 @@
      que puede faltar alguna sección pequeña.
 
    Tests: `tests/test_comparacion.py::test_la_comparacion_sella_con_que_version_se_analizaron_los_dos`.
+
+<a id="d192"></a>
+192. **Validar una migración es una acción aparte, con casos comunes sin regex
+   que se traducen a las reglas de `map_rutas`; Comparar solo sigue censos y
+   abre con lo guardado** (revisión de UX del 25-oct, 2.13, V21-V23; solo
+   frontend).
+
+   **Problema.** El mapeo de una migración (131) era una casilla dentro de
+   Comparar que pedía expresiones regulares de Python: estorbaba en el
+   seguimiento de cada semana y nadie sin conocer regex podía validar una
+   migración. Además, Comparar volvía a pedir el diff entero aunque la
+   comparación automática ya estuviera guardada (V21), y su desplegable
+   separaba por tamaño, así que una réplica grande salía entre los censos (V22).
+
+   **Decisión.**
+   - «Validar migración» (`#/rastreos/<id>/migracion`, desde el menú «…» del
+     censo o desde Comparar) es un asistente: 1) censo de antes y de después,
+     cualquiera completado del cliente y de cualquier dominio, en grupos por
+     tipo (censo, canario, prueba); 2) cómo cambian las URLs; 3) el resultado.
+     El resultado es el mismo `GET /api/jobs/{id}/diff/{otro}` con `map_host` y
+     `map_rutas`: no se calcula nada nuevo ni hay endpoint nuevo (GET, se puede
+     abrir contra producción).
+   - **Casos comunes → reglas.** Dominio (`map_host`), carpeta que cambia
+     (prefijo), trozo que cambia (primera aparición) y el final (quitar la
+     extensión, quitarla y acabar en barra, añadir o quitar la barra final). El
+     servidor aplica solo la primera regla que casa con cada URL, así que dos
+     casos a la vez no pueden ir como dos reglas (la URL con carpeta y
+     extensión cambiaría una sola cosa): se genera **una regla por combinación
+     de casos**, de la más completa a la más simple. Cada combinación con
+     final lleva delante su **regla de borde**, para la ruta que acaba justo en
+     la carpeta o el trozo: estos ya se comen la barra o la extensión, la regla
+     con el final no casa y ganaría la del final solo, sin cambiar la carpeta
+     (con «/blog/ → /» y «quitar la barra», /blog/ quedaba en /blog y no en /;
+     hallazgo de la revisión). En el borde el final se aplica al texto que
+     entra, como si los cambios se hicieran uno detrás de otro, y la portada
+     «/» se queda como está. Son como mucho 13 reglas (el tope es 50). Cada regla se guarda como partes (texto o grupo), y de ellas salen a
+     la vez el reemplazo de Python (`\g<n>`, barras dobladas) y la vista previa
+     del navegador, que por eso no pueden discrepar. Las regex a mano quedan
+     plegadas en «Avanzado» (parten de lo marcado) y se previsualizan con una
+     traducción mínima (`(?P<`, `\g<n>`); lo que el navegador no lee se dice y
+     lo valida el servidor.
+   - **Vista previa con 5 URLs reales** del censo de antes (primero las que
+     cambian) y, para cada una, si la nueva está **tal cual** en el censo de
+     después (búsqueda ordenada por URL + igualdad exacta). Lo que no aparece
+     se dice como «no aparece tal cual» y, si el censo de después no terminó
+     entero, se añade: no se afirma que falte (67, 70). Si la búsqueda trae más
+     URLs de las que caben en una página (200) y la exacta no está entre ellas,
+     dice «no se ha podido comprobar» y no «no aparece».
+   - **Resultado:** cuántas URLs de antes tienen pareja (`mapeo_rutas` o
+     `urls`), cuántas cambian con lo marcado y cuántas de ellas casan, las
+     colisiones, y ejemplos de las que se quedan sin pareja y de las nuevas.
+     Sin concluir (truncado u otro alcance), «Sin pareja: no se puede afirmar».
+     Debajo, el mismo detalle que en Comparar (una sola copia del marcado). El
+     antes tiene que ser anterior al después: el servidor mapea siempre el más
+     antiguo, y si no, el asistente pide intercambiarlos.
+   - **Comparar** ya no manda mapeos. Si se compara con el censo de la
+     comparación automática, pinta al instante lo guardado (`job.comparacion`:
+     alertas, URLs, incidencias, avisos) y el detalle página a página llega
+     después, con un indicador visible. Las incidencias guardadas solo se
+     enseñan si se puede afirmar que siguen valiendo: este censo con la
+     `analisis_version` de la comparación y el anterior con su
+     `analisis_version_anterior` (191). Si cualquiera de los dos se re-analizó,
+     se dice cuál; si la comparación es de antes de la 191 (sin sello) o aún no
+     se sabe la versión del anterior, se espera al diff completo. Los
+     candidatos son los completados del mismo host (del cliente si lo tiene)
+     agrupados por tipo. Un enlace viejo a Comparar con `map_host`/`map_rutas`
+     abre el asistente con lo mismo.
+
+   Tests: `tests/test_migracion_frontend.py` (la vista previa de cada caso
+   contra `shared.comparacion._aplicar_rutas`, las combinaciones, las regex a
+   mano, las reglas de borde, la comprobación que no afirma sin haberlo visto
+   todo, la petición a `/diff`, el orden de los censos y la ruta) y
+   `tests/test_comparar_frontend.py` (sin mapeo, lo guardado al instante, la
+   vigencia de sus incidencias, la carrera de respuestas y el desplegable por
+   tipo).

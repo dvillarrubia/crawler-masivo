@@ -378,6 +378,10 @@ referencia de «frente al anterior», en Chromium) y `test_ia_frontend.py`
 de Problemas que cuenta solo las paginas del problema y calla sin listas
 completas, los textos de la clave; en Chromium con la API simulada, y las
 parejas pregunta-problema contra el catalogo y el analizador).
+`test_comparar_frontend.py` (Comparar sin mapeo, lo guardado al instante y el
+desplegable por tipo, UX 2.13/V21/V22) y `test_migracion_frontend.py`
+(«Validar migración», decision 192: la vista previa de cada caso comun contra
+`shared.comparacion._aplicar_rutas`, en Chromium).
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el

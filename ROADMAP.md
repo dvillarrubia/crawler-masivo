@@ -1061,6 +1061,17 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   «Opciones avanzadas». Problemas enseña «Revisado con IA» en la canibalización
   y en los candidatos a soft 404; la ficha de una URL, lo que dijo la IA de
   ella. «Avanzado» pasa a «Más» con nombre fijo (V34). Solo frontend.
+- **Validar migración como acción aparte** (revisión de UX del 25-oct, 2.13,
+  decisión 192; en local, sin desplegar): un asistente desde el menú «…» del
+  censo o desde Comparar, con los dos censos (por tipo, de cualquier dominio del
+  cliente), los casos comunes sin regex (dominio, carpeta, trozo, extensión,
+  barra final) con 5 URLs reales de muestra y si están en el censo de después,
+  las regex plegadas en «Avanzado» y el resultado del `GET /diff` de siempre
+  (cuántas URLs viejas tienen pareja y cuáles no). Comparar queda para el
+  seguimiento: sin la casilla, abre al instante con la comparación guardada y
+  calcula el detalle después (V21; las incidencias guardadas, solo si los dos
+  censos siguen con la versión del análisis con la que se compararon), y el
+  desplegable va por tipo (V22). Solo frontend.
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 

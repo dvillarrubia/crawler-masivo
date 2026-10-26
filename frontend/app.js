@@ -205,6 +205,9 @@ const POSITION_LABEL = {
 const TAB_SLUG = {
   overview: 'resumen', issues: 'problemas', links: 'enlaces', insights: 'puntuacion',
   semantic: 'semantico', diff: 'comparar', enriquecido: 'ia', cleaning: 'limpieza',
+  // Sin pestana propia: se llega desde el menu «…» del censo o desde Comparar
+  // (revision de UX del 25-oct, 2.13).
+  migracion: 'migracion',
 };
 // `informe` era el tramo de la pestana Puntuacion antes de la revision de UX
 // del 25-oct, y `enriquecido` el de la pestana IA (2.9): los enlaces
@@ -696,6 +699,7 @@ function app() {
   return {
     ...extraccionUI(),   // pestaña «Extracción» del modal (#34, decision 166)
     ...robotsPruebaUI(), // robots.txt de prueba en el resumen (decision 171)
+    ...migracionUI(),    // «Validar migración» (revision de UX del 25-oct, 2.13; decision 192)
     // Navegacion
     view: 'jobs',
     programaciones: [],
@@ -1035,6 +1039,12 @@ function app() {
       if (t === 'diff' && this.diffOtro && this.diffOtro !== (this.job.comparacion || {}).comparado_con) {
         h += '?con=' + this.diffOtro;
       }
+      // La validacion de una migracion se comparte con un enlace: los dos
+      // censos, el paso y como cambian las URLs (2.13).
+      if (t === 'migracion') {
+        const q = this.migRutaQuery();
+        if (q) h += '?' + q;
+      }
       return h;
     },
 
@@ -1097,7 +1107,20 @@ function app() {
           } else {
             if (this.view === 'explorer') this._unbindExplorerKeyNav();
             this.view = 'detail';
-            const tab = SLUG_TAB[sub] || 'overview';
+            let tab = SLUG_TAB[sub] || 'overview';
+            // Un enlace a Comparar con el mapeo de una migracion (lo que hacia
+            // la casilla que ya no esta) abre «Validar migración» con lo mismo.
+            if (tab === 'diff' && (q.get('map_host') || q.get('map_rutas'))) {
+              const casos = {};
+              const par = (q.get('map_host') || '').split(',')[0].split('=');
+              if (par.length === 2 && par[0].trim() && par[1].trim()) Object.assign(casos, { dominio: true, hostDe: par[0].trim(), hostA: par[1].trim() });
+              let rutas = '';
+              try { rutas = (JSON.parse(q.get('map_rutas') || '[]') || []).map(r => r[0] + ' => ' + r[1]).join('\n'); } catch (e) { rutas = ''; }
+              this._migDesdeRuta = { antes: q.get('con') || '', despues: '', casos, rutas, paso: 2 };
+              tab = 'migracion';
+            } else if (tab === 'migracion') {
+              this.migLeerRuta(q);
+            }
             if (tab === 'issues') {
               const tipo = q.get('tipo') || '', grav = q.get('gravedad') || '';
               const vista = tipo || q.get('vista') === 'lista' ? 'lista' : 'tipos';
@@ -1212,6 +1235,8 @@ function app() {
         // la miga es el camino de vuelta, con los filtros que habia.
         if (v === 'explorer') m.push({ texto: 'URLs' });
         if (v === 'informe') m.push({ texto: 'Informe para el cliente' });
+        // Sin pestana propia (2.13): la miga dice donde se esta.
+        if (v === 'detail' && this.detailTab === 'migracion') m.push({ texto: 'Validar migración' });
         if (v === 'url-detail') {
           m.push({ texto: 'URLs', href: this._rutaUrls() });
           const u = this.urlDetail && this.urlDetail.url;
@@ -2358,7 +2383,8 @@ function app() {
       this.principales = null;
       this.segmentosJob = null; this.issuesSegmento = '';
       this.linksPage = 1; this.issuesPage = 1;
-      this.diff = null; this.diffOtro = ''; this.diffCandidatos = [];
+      this.diff = null; this.diffOtro = ''; this.diffCandidatos = []; this._diffPedido++;
+      this._migReiniciar();
       this.veredicto = null;
       this.urlsTotal = 0; this.issuesTotal = 0; this.linksTotal = 0;
       this.loading = true;
@@ -2533,30 +2559,58 @@ function app() {
 
     // ------- Pestanas -------
     // ------- Comparar con otro censo (#32) -------
+    // Solo el seguimiento entre censos: el mapeo de una migracion es una
+    // accion aparte, «Validar migración» (revision de UX del 25-oct, 2.13).
     diff: null,
     diffOtro: '',
     diffCandidatos: [],
     diffCargando: false,
-    // Migracion (decision 131): host y rutas del censo ANTERIOR reescritos
-    // antes de emparejar. Las rutas, una regla por linea: `patron => reemplazo`.
-    diffMigracion: false,
-    diffMapHost: '',
-    diffMapRutas: '',
-    diffOtrosSitios: false,
+    _diffPedido: 0,
 
-    // `patron => reemplazo` por linea; el separador lleva espacios para no
-    // partir una regex que contenga `=>` pegado.
-    reglasMapRutas() {
-      return (this.diffMapRutas || '').split('\n').map(l => l.trim()).filter(Boolean).map(l => {
-        const i = l.indexOf(' => ');
-        return i < 0 ? [l, ''] : [l.slice(0, i).trim(), l.slice(i + 4).trim()];
-      });
+    // Lo que se pinta en Comparar (V21). El diff pedido si ya ha llegado; si
+    // no, y se compara con el censo de la comparacion automatica, lo que esta
+    // guardado de ella (`job.comparacion`: alertas, URLs, incidencias,
+    // avisos), al instante. Lo que no se guarda (que cambio pagina a pagina,
+    // la extraccion a medida, los ejemplos) llega con el diff, con un
+    // indicador de carga a la vista. Las incidencias guardadas solo se
+    // ensenan si se puede afirmar que siguen valiendo: los dos censos con la
+    // version del analisis con la que se compararon (decision 191). Si
+    // cualquiera de los dos se volvio a analizar, ya no son las que se
+    // compararon (`_incidenciasViejas`); si la comparacion es de antes de la
+    // 191 (sin sello) o aun no se sabe la version del anterior, se esperan al
+    // diff (`_incidenciasPendientes`; revision de UX del 25-oct, 2.13,
+    // hallazgo de la revision).
+    diffVista() {
+      if (this.diff && this.diff._para === this.diffOtro) return this.diff;
+      const j = this.job, c = j && j.comparacion;
+      if (!c || !this.diffOtro || c.comparado_con !== this.diffOtro) return null;
+      const va = this.versionAnterior && this.versionAnterior.jobId === j.id ? this.versionAnterior : null;
+      const firmaVa = va ? String(va.version) + '|' + (va.error ? 'e' : '') : '';
+      // Fuera del estado de Alpine: escribir estado reactivo mientras se pinta
+      // volveria a disparar el pintado.
+      if (_diffGuardadoCache.jobId === j.id && _diffGuardadoCache.c === c && _diffGuardadoCache.va === firmaVa) {
+        return _diffGuardadoCache.valor;
+      }
+      let viejas = null;
+      if (c.analisis_version && j.analisis_version && c.analisis_version !== j.analisis_version) viejas = 'este';
+      else if (c.analisis_version_anterior && va && va.version && va.version !== c.analisis_version_anterior) viejas = 'anterior';
+      const vigentes = !viejas && !!(c.analisis_version && c.analisis_version === j.analisis_version
+        && c.analisis_version_anterior && va && !va.error && va.version === c.analisis_version_anterior);
+      const valor = {
+        ...c, _clave: 'g-' + j.id, _jobId: j.id, _guardada: true, _incidenciasViejas: viejas,
+        _incidenciasPendientes: !viejas && !vigentes && !!c.incidencias,
+        incidencias: vigentes ? c.incidencias : null, cambios: null, extraido: null,
+        antes: { fecha: c.fecha_anterior, nombre: c.nombre_anterior },
+        ahora: { fecha: j.started_at || j.created_at, nombre: j.name },
+      };
+      Object.assign(_diffGuardadoCache, { jobId: j.id, c, va: firmaVa, valor });
+      return valor;
     },
 
     // Las nuevas de un tipo, separadas entre URL que ya estaba (algo se ha
     // roto) y URL nueva (algo se ha publicado mal), decision 131.
-    nuevasPorUrl(tipo) {
-      const n = this.diff && this.diff.incidencias && this.diff.incidencias.nuevas;
+    nuevasPorUrl(tipo, d = this.diff) {
+      const n = d && d.incidencias && d.incidencias.nuevas;
       if (!n || !n.en_url_existente) return null;
       const de = l => ((l.por_tipo || []).find(f => f.tipo === tipo) || {}).total || 0;
       return { existente: de(n.en_url_existente), nueva: de(n.en_url_nueva) };
@@ -2565,8 +2619,8 @@ function app() {
     // Las tres columnas (resueltas / nuevas / siguen) en una sola fila por
     // tipo: tres tablas separadas obligan a cruzarlas a ojo, que es lo que
     // nadie hace.
-    tiposDeIncidencia() {
-      const inc = this.diff && this.diff.incidencias;
+    tiposDeIncidencia(d = this.diff) {
+      const inc = d && d.incidencias;
       if (!inc) return [];
       const filas = {};
       const meter = (lista, campo) => (lista || []).forEach(f => {
@@ -2829,43 +2883,41 @@ function app() {
     async cargarCandidatosDiff() {
       // Solo rastreos COMPLETADOS del mismo host: comparar con uno truncado
       // se puede, pero el resultado no afirma ausencias, y comparar con otro
-      // sitio lo rechaza el servidor.
+      // sitio lo rechaza el servidor (una migracion de dominio va por
+      // «Validar migración», 2.13). Del mismo cliente si lo tiene: antes se
+      // miraban los 100 ultimos de toda la agencia y uno viejo no salia.
       if (!this.job) return;
-      const miHost = (this.job.seeds && this.job.seeds[0] || '').replace(/^https?:\/\//, '').split('/')[0];
-      const d = await api('/jobs?page=1&page_size=100');
-      this.diffCandidatos = (d.items || []).filter(j => {
-        if (j.id === this.job.id) return false;
-        if (j.status !== 'completed') return false;
-        // Una migracion de dominio se compara con otro host, con el mapeo de
-        // host explicito: el servidor rechaza dos origenes sin el.
-        if (this.diffOtrosSitios) return true;
-        const h = (j.seeds && j.seeds[0] || '').replace(/^https?:\/\//, '').split('/')[0];
-        return h && h === miHost;
-      });
+      const jobId = this.job.id;
+      const miHost = _hostDe(this.job);
+      const q = new URLSearchParams({ page: 1, page_size: 100, status: 'completed' });
+      if (this.job.cliente_id) q.set('client_id', this.job.cliente_id);
+      else if (miHost) q.set('buscar', miHost);
+      const d = await api('/jobs?' + q);
+      if (!this.job || this.job.id !== jobId) return;
+      this.diffCandidatos = (d.items || []).filter(j => j.id !== jobId && j.status === 'completed' && _hostDe(j) === miHost);
     },
 
-    // Tamano parecido = al menos la mitad de URLs que este censo.
-    candidatosDiff(parecidos) {
-      const mio = (this.stats && this.stats.total_urls) || this.job?.total_urls_crawled || 0;
-      return this.diffCandidatos.filter(j => ((j.total_urls_crawled || 0) >= mio * 0.5) === parecidos);
-    },
+    // Los candidatos en grupos por tipo (censo, canario, prueba), no por
+    // tamano (V22): la «réplica julio» salia entre los censos por tener su tamano.
+    gruposDiff() { return censosPorTipo(this.diffCandidatos); },
 
     async cargarDiff() {
-      if (!this.job || !this.diffOtro) { this.diff = null; return; }
+      const pedido = ++this._diffPedido;
+      if (!this.job || !this.diffOtro) { this.diff = null; this.diffCargando = false; return; }
+      const otro = this.diffOtro, jobId = this.job.id;
       this.diffCargando = true;
       try {
-        const q = new URLSearchParams();
-        if (this.diffMigracion && this.diffMapHost.trim()) q.set('map_host', this.diffMapHost.trim());
-        const reglas = this.diffMigracion ? this.reglasMapRutas() : [];
-        if (reglas.length) q.set('map_rutas', JSON.stringify(reglas));
-        const qs = q.toString();
-        this.diff = await api(`/jobs/${this.job.id}/diff/${this.diffOtro}` + (qs ? '?' + qs : ''));
+        const r = await api(`/jobs/${jobId}/diff/${otro}`);
+        if (pedido !== this._diffPedido) return;
+        this.diff = { ...r, _para: otro, _clave: 'd' + pedido };
       } catch (e) {
-        // Un 422 de una regex que no compila dice cual: se ensena tal cual.
-        this.diff = { comparable: false, motivo: 'No se pudo comparar: ' + (e.message || e) };
+        if (pedido !== this._diffPedido) return;
+        this.diff = { comparable: false, motivo: 'No se pudo comparar: ' + (e.message || e), _para: otro, _clave: 'd' + pedido };
       } finally {
-        this.diffCargando = false;
-        this.$nextTick(() => lucide.createIcons());
+        if (pedido === this._diffPedido) {
+          this.diffCargando = false;
+          this.$nextTick(() => lucide.createIcons());
+        }
       }
     },
 
@@ -2891,9 +2943,12 @@ function app() {
         if (!this.diffCandidatos.length) this.cargarCandidatosDiff();
         // Se abre con la comparacion que el worker hizo al cerrar el rastreo
         // (UX-12): un desplegable vacio obligaba a saber con cual comparar.
+        // Lo guardado se pinta ya (`diffVista`) y el detalle llega despues (V21).
         const auto = this.job && this.job.comparacion && this.job.comparacion.comparado_con;
+        if (auto) this.cargarVersionAnterior();
         if (auto && !this.diffOtro) { this.diffOtro = auto; this.cargarDiff(); }
       }
+      if (tab === 'migracion') this.prepararMigracion();
       if (tab === 'enriquecido') this.cargarEjecuciones();
       this.$nextTick(() => lucide.createIcons());
     },
@@ -6720,6 +6775,575 @@ function _extraccionAConfig(f) {
     }
   }
   return Object.keys(salida).length ? salida : null;
+}
+
+/* ===== Validar una migracion (revision de UX del 25-oct, 2.13; decision 192) =====
+   Antes era una casilla dentro de Comparar que pedia expresiones regulares de
+   Python (V23). Ahora es una accion aparte, con un asistente: los dos censos,
+   como cambian las URLs (casos comunes sin regex; las regex, plegadas en
+   «Avanzado») y el resultado, que es el mismo GET /diff de siempre con
+   `map_host` y `map_rutas` (decision 131): aqui no se calcula nada nuevo. */
+
+// Los casos comunes se traducen a reglas `patron => reemplazo` de `map_rutas`.
+// El servidor aplica SOLO la primera regla que casa con cada URL (como un mapa
+// de redirecciones), asi que dos casos a la vez (carpeta y extension) no se
+// pueden mandar como dos reglas: la URL que tiene las dos cosas solo cambiaria
+// una. Se genera una regla por combinacion de casos, de la mas completa a la
+// mas simple, y cada URL cae en la que le toca. Las partes de cada regla
+// (texto o grupo) sirven a la vez para escribir el reemplazo de Python y para
+// la vista previa del navegador: las dos salen de lo mismo y no pueden
+// discrepar (lo comprueba tests/test_migracion_frontend.py contra
+// `shared.comparacion._aplicar_rutas`).
+const MIG_FINALES = [
+  { valor: 'igual', texto: 'Igual' },
+  { valor: 'quitar_ext', texto: 'Se quita la extensión (/hotel.html → /hotel)' },
+  { valor: 'quitar_ext_barra', texto: 'Se quita la extensión y acaba en barra (/hotel.html → /hotel/)' },
+  { valor: 'poner_barra', texto: 'Se añade la barra final (/hotel → /hotel/)' },
+  { valor: 'quitar_barra', texto: 'Se quita la barra final (/hotel/ → /hotel)' },
+];
+
+function migCasosVacios() {
+  return { dominio: false, hostDe: '', hostA: '', prefijo: false, prefDe: '/es/', prefA: '/',
+           texto: false, textoDe: '', textoA: '', final: 'igual', ext: '.html' };
+}
+
+function _escRx(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+// [{patron, partes}] de los casos elegidos. `partes`: texto o {g: grupo}.
+function reglasDeMigracion(c) {
+  if (!c) return [];
+  const rasgos = [];
+  if (c.prefijo && c.prefDe) rasgos.push('prefijo');
+  if (c.texto && c.textoDe) rasgos.push('texto');
+  const conExt = ['quitar_ext', 'quitar_ext_barra'].includes(c.final);
+  if (c.final && c.final !== 'igual' && (!conExt || c.ext)) rasgos.push('final');
+  const combinaciones = [];
+  for (let m = (1 << rasgos.length) - 1; m > 0; m--) combinaciones.push(rasgos.filter((_, i) => m & (1 << i)));
+  // La mas completa primero. Una URL que casa con dos del mismo tamano tiene
+  // los rasgos de las dos, y la que los junta va antes. Salvo en un borde:
+  // cuando la ruta acaba JUSTO en la carpeta o el trozo, estos ya se comen la
+  // barra o la extension, la regla con el final no casa y ganaria la del
+  // final solo, sin cambiar la carpeta (/blog/ con «/blog/ → /» y «quitar la
+  // barra» quedaba en /blog y no en /). Para eso cada combinacion con final
+  // lleva antes su regla de borde: el final se aplica al texto que entra,
+  // como si los cambios se hicieran uno detras de otro (revision de UX del
+  // 25-oct, 2.13, hallazgo de la revision).
+  combinaciones.sort((a, b) => b.length - a.length);
+  const reglas = [];
+  for (const s of combinaciones) {
+    for (const borde of _bordesDeCasos(c, s)) reglas.push(_reglaDeCasos(c, s, borde));
+    reglas.push(_reglaDeCasos(c, s));
+  }
+  return reglas;
+}
+
+// El final aplicado al texto que entra (lo que queda al final de la ruta
+// cuando esta acaba en la carpeta o el trozo).
+function _finalSobreTexto(c, t) {
+  if (c.final === 'quitar_ext') return t.endsWith(c.ext) ? t.slice(0, -c.ext.length) : t;
+  if (c.final === 'quitar_ext_barra') return t.endsWith(c.ext) ? t.slice(0, -c.ext.length) + '/' : t;
+  if (c.final === 'poner_barra') return t.endsWith('/') ? t : t + '/';
+  if (c.final === 'quitar_barra') return t.length > 1 && t.endsWith('/') ? t.slice(0, -1) : t;
+  return t;
+}
+
+// Las reglas de borde de una combinacion: [{t, mas}], donde `t` es lo que
+// sustituye a la carpeta o al trozo del final y `mas` pide algo delante del
+// trozo. Sin final, o sin texto que entre (vacio: el final caeria en lo de
+// delante, que no se conoce al escribir la regla), no hay borde.
+function _bordesDeCasos(c, s) {
+  if (!s.includes('final') || !(s.includes('prefijo') || s.includes('texto'))) return [];
+  const ultimo = s.includes('texto') ? 'texto' : 'prefijo';
+  const t = (ultimo === 'texto' ? c.textoA : c.prefA) || '';
+  if (!t) return [];
+  if (c.final === 'quitar_barra' && t === '/') {
+    // La portada «/» se queda como esta: la carpeta que pasa a la raiz
+    // (/blog/ → /) da la portada, no una ruta vacia.
+    if (ultimo === 'prefijo') return [{ t: '/' }];
+    // El trozo que pasa a «/» detras de algo pierde la barra; si no hay
+    // nada delante, es la portada.
+    if (s.includes('prefijo') && c.prefA) return [{ t: '' }];
+    return [{ t: '', mas: true }, { t: '/' }];
+  }
+  return [{ t: _finalSobreTexto(c, t) }];
+}
+
+function _reglaDeCasos(c, s, borde) {
+  let patron = '^', g = 0;
+  const partes = [];
+  const grupo = expr => { patron += expr; g += 1; partes.push({ g }); };
+  const ultimo = s.includes('texto') ? 'texto' : 'prefijo';
+  if (s.includes('prefijo')) {
+    patron += _escRx(c.prefDe);
+    partes.push(borde && ultimo === 'prefijo' ? borde.t : (c.prefA || ''));
+  }
+  if (!(borde && ultimo === 'prefijo')) grupo(borde && borde.mas ? '(.+?)' : '(.*?)');
+  if (s.includes('texto')) {
+    patron += _escRx(c.textoDe);
+    partes.push(borde ? borde.t : (c.textoA || ''));
+    if (!borde) grupo('(.*?)');
+  }
+  if (s.includes('final') && !borde) {
+    if (c.final === 'quitar_ext') patron += _escRx(c.ext);
+    else if (c.final === 'quitar_ext_barra') { patron += _escRx(c.ext); partes.push('/'); }
+    // Solo si no acaba ya en barra; la portada «/» se queda como esta.
+    else if (c.final === 'poner_barra') { patron += '(?<=[^/])'; partes.push('/'); }
+    else if (c.final === 'quitar_barra') patron += '(?<=.)/';
+  }
+  grupo('(\\?.*)?');
+  patron += '$';
+  return { patron, partes };
+}
+
+// El reemplazo en la sintaxis de `re.sub` de Python: `\g<1>` (y no `\1`, que
+// pegado a una cifra del texto seria otro grupo) y las barras invertidas dobladas.
+function reemplazoPython(partes) {
+  return partes.map(p => typeof p === 'string' ? p.replace(/\\/g, '\\\\') : '\\g<' + p.g + '>').join('');
+}
+
+// Lo que se manda a /diff: `[[patron, reemplazo], ...]`.
+function reglasParaApi(reglas) {
+  return reglas.map(r => [r.patron, r.reemplazo !== undefined ? r.reemplazo : reemplazoPython(r.partes)]);
+}
+
+// Una regla escrita a mano (Python) para la vista previa del navegador. Lo que
+// JavaScript no entiende no se previsualiza: lo valida el servidor al calcular.
+function _reglaJsDePython(patron, reemplazo) {
+  let fuente = String(patron), flags = '';
+  const inline = fuente.match(/^\(\?([aiLmsux]+)\)/);
+  if (inline) {
+    if (/[aLux]/.test(inline[1])) return { error: 'usa opciones de Python que el navegador no entiende' };
+    flags = inline[1];
+    fuente = fuente.slice(inline[0].length);
+  }
+  fuente = fuente.replace(/\(\?P</g, '(?<').replace(/\(\?P=(\w+)\)/g, '\\k<$1>').replace(/\\A/g, '^').replace(/\\Z/g, '$');
+  let re;
+  try { re = new RegExp(fuente, flags); } catch (e) { return { error: 'el navegador no puede leer el patrón: ' + e.message }; }
+  const partes = [];
+  let lit = '';
+  const s = String(reemplazo);
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch !== '\\' || i === s.length - 1) { lit += ch; continue; }
+    const sig = s[i + 1];
+    let m;
+    if (sig === 'g' && (m = s.slice(i).match(/^\\g<(\w+)>/))) {
+      if (lit) { partes.push(lit); lit = ''; }
+      partes.push({ g: /^\d+$/.test(m[1]) ? +m[1] : m[1] });
+      i += m[0].length - 1;
+    } else if (/\d/.test(sig)) {
+      const n = s.slice(i + 1).match(/^\d{1,2}/)[0];
+      if (lit) { partes.push(lit); lit = ''; }
+      partes.push({ g: +n });
+      i += n.length;
+    } else if (sig === '\\') { lit += '\\'; i += 1; }
+    else if (sig === 'n') { lit += '\n'; i += 1; }
+    else if (sig === 't') { lit += '\t'; i += 1; }
+    else { lit += ch; }
+  }
+  if (lit) partes.push(lit);
+  return { re, partes };
+}
+
+// Lo mismo que `shared.comparacion._aplicar_mapa` y `_aplicar_rutas`: el host
+// por el mapa y la RUTA (con su `?query`) por la primera regla que casa.
+// Devuelve { url, regla } (regla = indice o null) o { error }.
+function aplicarMigracion(url, reglas, mapaHost) {
+  let u = String(url || '');
+  let h = '';
+  try { h = new URL(u).hostname.toLowerCase(); } catch (e) { h = ''; }
+  if (h && mapaHost && mapaHost[h]) u = u.replace('//' + h, '//' + mapaHost[h]);
+  const m = u.match(/^([a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^/?#]*)([^?#]*)(\?[^#]*)?/);
+  if (!m || !reglas || !reglas.length) return { url: u, regla: null };
+  const origen = m[1];
+  const ruta = m[2] + (m[3] && m[3] !== '?' ? m[3] : '');
+  for (let i = 0; i < reglas.length; i++) {
+    const r = reglas[i];
+    let re = r.re, partes = r.partes;
+    if (!re) {
+      if (r.reemplazo !== undefined) {
+        const js = _reglaJsDePython(r.patron, r.reemplazo);
+        if (js.error) return { error: 'Regla ' + (i + 1) + ': ' + js.error };
+        re = js.re; partes = js.partes;
+      } else {
+        re = new RegExp(r.patron);
+      }
+    }
+    const x = re.exec(ruta);
+    if (!x) continue;
+    const grupos = x.length - 1;
+    let fuera = null;
+    const nuevo = partes.map(p => {
+      if (typeof p === 'string') return p;
+      if (typeof p.g === 'number') {
+        if (p.g > grupos) fuera = p.g;
+        return x[p.g] ?? '';
+      }
+      if (!x.groups || !(p.g in x.groups)) fuera = p.g;
+      return (x.groups || {})[p.g] ?? '';
+    }).join('');
+    if (fuera !== null) return { error: 'Regla ' + (i + 1) + ': el reemplazo usa el grupo ' + fuera + ' y el patrón no lo tiene' };
+    return { url: origen + ruta.slice(0, x.index) + nuevo + ruta.slice(x.index + x[0].length), regla: i };
+  }
+  return { url: u, regla: null };
+}
+
+// `viejo.com=nuevo.com` (lo que espera `map_host`) -> { 'viejo.com': 'nuevo.com' }.
+function mapaDeHosts(texto) {
+  const mapa = {};
+  for (const par of String(texto || '').split(',')) {
+    const i = par.indexOf('=');
+    if (i > 0) mapa[par.slice(0, i).trim().toLowerCase()] = par.slice(i + 1).trim().toLowerCase();
+  }
+  return mapa;
+}
+
+// Censos en grupos por TIPO (V22): la «réplica julio» de 5.000 URLs no es un
+// censo de la serie aunque tenga su tamano. El tipo es el marcado o el que
+// dice el nombre (`tipo_efectivo`, `shared.clientes.tipo_de_rastreo`).
+const GRUPOS_DE_TIPO = [
+  { tipo: 'censo', etiqueta: 'Censos' },
+  { tipo: 'canario', etiqueta: 'Canarios' },
+  { tipo: 'prueba', etiqueta: 'Pruebas' },
+];
+// La comparacion guardada de un censo puesta en la forma del diff (V21), una
+// vez por censo.
+const _diffGuardadoCache = { jobId: null, c: null, va: '', valor: null };
+
+function censosPorTipo(lista) {
+  const grupos = GRUPOS_DE_TIPO.map(g => ({ ...g, items: [] }));
+  for (const j of lista || []) {
+    const t = j.tipo_efectivo || j.tipo || 'censo';
+    (grupos.find(g => g.tipo === t) || grupos[0]).items.push(j);
+  }
+  return grupos.filter(g => g.items.length);
+}
+
+function _hostDe(j) {
+  return ((j && j.seeds && j.seeds[0]) || '').replace(/^https?:\/\//, '').split('/')[0].toLowerCase();
+}
+
+function migracionUI() {
+  return {
+    migPaso: 1,
+    migAntes: '',
+    migDespues: '',
+    migCandidatos: [],
+    migCandCargando: false,
+    migCandError: '',
+    migCasos: migCasosVacios(),
+    migAvanzado: false,
+    migReglasTexto: '',
+    migMuestra: [],          // URLs reales del censo de antes, para la vista previa
+    migMuestraDe: '',
+    migMuestraCargando: false,
+    migExiste: {},           // URL ya reescrita -> true / false / 'cargando' / 'error'
+    _migExisteDe: '',
+    _migTemporizador: null,
+    migDiff: null,
+    migCargando: false,
+    _migPedido: 0,
+    _migDesdeRuta: null,     // lo que trae el enlace (#/rastreos/<id>/migracion?...)
+
+    // Al abrir otro censo: lo elegido era para el anterior.
+    _migReiniciar() {
+      clearTimeout(this._migTemporizador);
+      this._migPedido++;
+      Object.assign(this, { migPaso: 1, migAntes: '', migDespues: '', migCandidatos: [], migCandError: '',
+        migCasos: migCasosVacios(), migAvanzado: false, migReglasTexto: '', migMuestra: [], migMuestraDe: '',
+        migExiste: {}, _migExisteDe: '', migDiff: null, migCargando: false });
+    },
+
+    // Desde el menú «…» del censo o desde Comparar.
+    abrirMigracion() {
+      this.menuAbierto = '';
+      this.switchTab('migracion');
+    },
+
+    async prepararMigracion() {
+      if (!this.job) return;
+      const r = this._migDesdeRuta;
+      this._migDesdeRuta = null;
+      if (r) {
+        this.migDiff = null; this.migMuestraDe = ''; this.migExiste = {};
+        this.migCasos = migCasosVacios(); this.migAvanzado = false; this.migReglasTexto = '';
+        this.migAntes = r.antes || '';
+        this.migDespues = r.despues || this.job.id;
+        if (r.casos) this.migCasos = { ...migCasosVacios(), ...r.casos };
+        if (r.rutas) { this.migAvanzado = true; this.migReglasTexto = r.rutas; }
+        this.migPaso = r.paso || 1;
+      }
+      if (!this.migDespues) this.migDespues = this.job.id;
+      if (!this.migAntes) {
+        const auto = this.job.comparacion && this.job.comparacion.comparado_con;
+        if (auto && auto !== this.migDespues) this.migAntes = auto;
+      }
+      if (!this.migCandidatos.length || this.migCandidatos._de !== this.job.id) await this.cargarCandidatosMig();
+      if (!this.migAntes) {
+        const desp = this.migJob(this.migDespues);
+        const previo = this.migCandidatos.find(j => j.id !== this.migDespues
+          && (!desp || String(j.created_at) < String(desp.created_at)));
+        if (previo) this.migAntes = previo.id;
+      }
+      this.migElegido(false);
+      if (this.migPaso === 3 && !this.migDiff && !this.migCargando) this.calcularMigracion();
+      else if (this.migPaso === 2) this.cargarMuestraMig();
+    },
+
+    // Cualquier rastreo completado del cliente (o, sin cliente, de los
+    // ultimos), de cualquier dominio: una migracion cambia a menudo de dominio.
+    async cargarCandidatosMig() {
+      const jobId = this.job.id;
+      this.migCandCargando = true;
+      this.migCandError = '';
+      try {
+        const q = new URLSearchParams({ page: 1, page_size: 100, status: 'completed' });
+        if (this.job.cliente_id) q.set('client_id', this.job.cliente_id);
+        const d = await api('/jobs?' + q);
+        if (!this.job || this.job.id !== jobId) return;
+        const lista = d.items || [];
+        // El censo abierto, aunque no este completado, para poder elegirlo.
+        if (!lista.some(j => j.id === this.job.id)) lista.unshift(this.job);
+        lista._de = jobId;
+        this.migCandidatos = lista;
+      } catch (e) {
+        this.migCandError = 'No se pudieron cargar los rastreos: ' + e.message;
+      } finally {
+        this.migCandCargando = false;
+      }
+    },
+
+    migJob(id) { return this.migCandidatos.find(j => j.id === id) || (this.job && this.job.id === id ? this.job : null); },
+    migGrupos() { return censosPorTipo(this.migCandidatos); },
+    migEtiqueta(j) {
+      return j.name + ' · ' + fmt.num(j.total_urls_crawled) + ' URLs · ' + fmt.dia(j.started_at || j.created_at);
+    },
+    migFecha(j) { return j ? String(j.started_at || j.created_at || '') : ''; },
+
+    // Que hay de malo en la pareja elegida, o '' si nada.
+    migProblemaPareja() {
+      if (!this.migAntes || !this.migDespues) return 'Elige los dos censos.';
+      if (this.migAntes === this.migDespues) return 'Son el mismo censo: elige uno de antes y otro de después de la migración.';
+      const a = this.migJob(this.migAntes), d = this.migJob(this.migDespues);
+      if (a && d && this.migFecha(a) && this.migFecha(d) && this.migFecha(a) > this.migFecha(d)) {
+        return 'El censo de «antes» es posterior al de «después». El mapeo de URLs se aplica siempre al más antiguo.';
+      }
+      return '';
+    },
+    migIntercambiar() {
+      [this.migAntes, this.migDespues] = [this.migDespues, this.migAntes];
+      this.migElegido(true);
+    },
+
+    // Al cambiar de censo: si son de dominios distintos, el cambio de dominio
+    // se propone ya relleno (sin el, el servidor rechaza dos origenes).
+    migElegido(cambio = true) {
+      const a = this.migJob(this.migAntes), d = this.migJob(this.migDespues);
+      const ha = _hostDe(a), hd = _hostDe(d);
+      if (ha && hd && ha !== hd && (cambio || !this.migCasos.hostDe)) {
+        this.migCasos.dominio = true;
+        this.migCasos.hostDe = ha;
+        this.migCasos.hostA = hd;
+      } else if (!this.migCasos.hostDe && ha) {
+        this.migCasos.hostDe = ha;
+        this.migCasos.hostA = hd || ha;
+      }
+      if (cambio) { this.migDiff = null; this.migMuestra = []; this.migMuestraDe = ''; this.migExiste = {}; }
+    },
+    migHostsDistintos() {
+      const ha = _hostDe(this.migJob(this.migAntes)), hd = _hostDe(this.migJob(this.migDespues));
+      return !!(ha && hd && ha !== hd);
+    },
+
+    // Las reglas que se van a mandar: las de los casos o, en «Avanzado», las
+    // escritas a mano (una por linea, `patron => reemplazo`).
+    migReglas() {
+      if (this.migAvanzado) {
+        return (this.migReglasTexto || '').split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+          const i = l.indexOf(' => ');
+          return i < 0 ? { patron: l, reemplazo: '' } : { patron: l.slice(0, i).trim(), reemplazo: l.slice(i + 4).trim() };
+        });
+      }
+      return reglasDeMigracion(this.migCasos);
+    },
+    migMapHost() {
+      const c = this.migCasos;
+      if (!c.dominio) return '';
+      const de = (c.hostDe || '').trim().toLowerCase(), a = (c.hostA || '').trim().toLowerCase();
+      return de && a && de !== a ? de + '=' + a : '';
+    },
+    migSinCambios() { return !this.migMapHost() && !this.migReglas().length; },
+
+    // Pasar de los casos a las regex, con lo elegido ya escrito.
+    migEditarRegex() {
+      this.migReglasTexto = reglasParaApi(reglasDeMigracion(this.migCasos)).map(([p, r]) => p + ' => ' + r).join('\n');
+      this.migAvanzado = true;
+      this.migProgramarComprobacion();
+    },
+    migVolverACasos() {
+      this.migAvanzado = false;
+      this.migProgramarComprobacion();
+    },
+
+    migIrAPaso(n) {
+      if (n >= 2 && this.migProblemaPareja()) return;
+      this.migPaso = n;
+      window.scrollTo({ top: 0 });
+      if (n === 2) this.cargarMuestraMig();
+      if (n === 3) this.calcularMigracion();
+    },
+
+    // Unas URLs reales del censo de antes: paginas HTML internas.
+    async cargarMuestraMig() {
+      const id = this.migAntes;
+      if (!id || this.migMuestraDe === id) { this.migProgramarComprobacion(); return; }
+      this.migMuestraCargando = true;
+      try {
+        const q = new URLSearchParams({ page: 1, page_size: 200, ligero: 'true', is_internal: 'true', resource_type: 'html' });
+        const d = await api(`/jobs/${id}/urls?` + q);
+        if (this.migAntes !== id) return;
+        this.migMuestra = (d.items || []).map(u => u.url).filter(Boolean);
+        this.migMuestraDe = id;
+      } catch (e) {
+        this.migMuestra = [];
+      } finally {
+        this.migMuestraCargando = false;
+      }
+      this.migProgramarComprobacion();
+    },
+
+    // Cinco URLs con como quedan: primero las que alguna regla cambia (de
+    // tramos distintos de la lista, para que no salgan cinco iguales), y si no
+    // hay bastantes, las primeras.
+    migVistaPrevia() {
+      const reglas = this.migReglas(), mapa = mapaDeHosts(this.migMapHost());
+      const filas = [];
+      for (const u of this.migMuestra) {
+        const r = aplicarMigracion(u, reglas, mapa);
+        if (r.error) return [{ antes: u, error: r.error }];
+        filas.push({ antes: u, despues: r.url, regla: r.regla, cambia: r.url !== u });
+      }
+      const cambian = filas.filter(f => f.cambia), quietas = filas.filter(f => !f.cambia);
+      const elegidas = [];
+      if (cambian.length) {
+        const paso = Math.max(1, Math.floor(cambian.length / 5));
+        for (let i = 0; i < cambian.length && elegidas.length < 5; i += paso) elegidas.push(cambian[i]);
+      }
+      for (const f of quietas) { if (elegidas.length >= 5) break; elegidas.push(f); }
+      return elegidas;
+    },
+    migCuantasCambian() {
+      const reglas = this.migReglas(), mapa = mapaDeHosts(this.migMapHost());
+      let n = 0;
+      for (const u of this.migMuestra) { const r = aplicarMigracion(u, reglas, mapa); if (!r.error && r.url !== u) n++; }
+      return n;
+    },
+
+    // ¿Existe la URL ya reescrita en el censo de después? Se busca y se mira
+    // que este tal cual: la busqueda casa por trozo. Con un retardo, para no
+    // pedir nada mientras se escribe. Ordenada por URL, la exacta va antes que
+    // las que empiezan por ella; aun asi, si la busqueda trae mas de lo que
+    // cabe en una pagina y la exacta no esta, no se afirma que falte: se dice
+    // que no se ha podido comprobar (lo que no se puede afirmar no se afirma;
+    // revision de UX del 25-oct, 2.13, hallazgo de la revision).
+    migProgramarComprobacion() {
+      clearTimeout(this._migTemporizador);
+      this._migTemporizador = setTimeout(() => this.comprobarVistaPrevia(), 450);
+    },
+    async comprobarVistaPrevia() {
+      const desp = this.migDespues;
+      if (!desp || this.migPaso !== 2) return;
+      if (this._migExisteDe !== desp) { this.migExiste = {}; this._migExisteDe = desp; }
+      for (const f of this.migVistaPrevia()) {
+        if (f.error || !f.despues || this.migExiste[f.despues] !== undefined) continue;
+        this.migExiste = { ...this.migExiste, [f.despues]: 'cargando' };
+        try {
+          const q = new URLSearchParams({ page: 1, page_size: 200, ligero: 'true', sort_by: 'url',
+                                          sort_dir: 'asc', search: f.despues });
+          const d = await api(`/jobs/${desp}/urls?` + q);
+          const sin = x => String(x).split('#')[0];
+          const items = d.items || [];
+          const esta = items.some(x => sin(x.url) === sin(f.despues))
+            || ((d.total || 0) > items.length ? 'sin_comprobar' : false);
+          if (this.migDespues === desp) this.migExiste = { ...this.migExiste, [f.despues]: esta };
+        } catch (e) {
+          if (this.migDespues === desp) this.migExiste = { ...this.migExiste, [f.despues]: 'error' };
+        }
+      }
+    },
+    migTextoExiste(f) {
+      const v = this.migExiste[f.despues];
+      if (v === undefined || v === 'cargando') return 'buscando en el censo de después…';
+      if (v === 'error') return 'no se ha podido comprobar';
+      if (v === 'sin_comprobar') return 'no se ha podido comprobar (hay demasiadas URLs parecidas en el censo de después)';
+      if (v) return 'está en el censo de después';
+      const d = this.migJob(this.migDespues);
+      // Lo que no se puede afirmar no se afirma: un censo incompleto puede no
+      // haberla visto.
+      return 'no aparece tal cual en el censo de después' + (d && (d.status !== 'completed' || d.finish_reason !== 'finished') ? ' (que no terminó entero)' : '');
+    },
+
+    // El resultado es el GET /diff de siempre con el mapeo (decision 131).
+    async calcularMigracion() {
+      if (this.migProblemaPareja()) { this.migPaso = 1; return; }
+      const pedido = ++this._migPedido;
+      this.migCargando = true;
+      this.migDiff = null;
+      try {
+        const q = new URLSearchParams();
+        const host = this.migMapHost();
+        if (host) q.set('map_host', host);
+        const reglas = reglasParaApi(this.migReglas());
+        if (reglas.length) q.set('map_rutas', JSON.stringify(reglas));
+        const qs = q.toString();
+        const r = await api(`/jobs/${this.migDespues}/diff/${this.migAntes}` + (qs ? '?' + qs : ''));
+        if (pedido !== this._migPedido) return;
+        this.migDiff = { ...r, _clave: 'm' + pedido, _migracion: true };
+      } catch (e) {
+        if (pedido !== this._migPedido) return;
+        // Un 422 de una regex que no compila dice cual: se ensena tal cual.
+        this.migDiff = { comparable: false, motivo: 'No se pudo calcular: ' + (e.message || e), _clave: 'm' + pedido, _migracion: true };
+      } finally {
+        if (pedido === this._migPedido) this.migCargando = false;
+      }
+    },
+
+    // Cuantas URLs de antes tienen pareja despues: con reglas lo da
+    // `mapeo_rutas`; sin ellas (solo dominio), `urls`.
+    migEmparejadas() {
+      const d = this.migDiff;
+      if (!d || !d.comparable) return null;
+      const m = d.mapeo_rutas;
+      if (m) return { de: m.urls_del_anterior, si: m.emparejadas, pct: m.pct_emparejadas };
+      const u = d.urls || {};
+      const de = (u.en_ambos || 0) + (u.desaparecidas ?? u.desaparecidas_no_afirmables ?? 0);
+      return { de, si: u.en_ambos || 0, pct: u.pct_emparejadas_del_anterior ?? (de ? Math.round(1000 * (u.en_ambos || 0) / de) / 10 : null) };
+    },
+    migRutaQuery() {
+      const q = new URLSearchParams();
+      if (this.migAntes) q.set('antes', this.migAntes);
+      if (this.migDespues && this.job && this.migDespues !== this.job.id) q.set('despues', this.migDespues);
+      if (this.migPaso > 1) q.set('paso', this.migPaso);
+      if (this.migAvanzado) {
+        if (this.migReglasTexto.trim()) q.set('rutas', this.migReglasTexto.trim());
+      } else {
+        const c = this.migCasos, v = migCasosVacios();
+        // Los dominios solo si se ha marcado el cambio: si no, son el relleno.
+        const dif = Object.fromEntries(Object.entries(c).filter(([k, x]) => x !== v[k]
+          && (c.dominio || !['hostDe', 'hostA'].includes(k))));
+        if (Object.keys(dif).length) q.set('casos', JSON.stringify(dif));
+      }
+      if (this.migAvanzado && this.migCasos.dominio) q.set('casos', JSON.stringify({ dominio: true, hostDe: this.migCasos.hostDe, hostA: this.migCasos.hostA }));
+      return q.toString();
+    },
+    migLeerRuta(q) {
+      let casos = null;
+      try { casos = q.get('casos') ? JSON.parse(q.get('casos')) : null; } catch (e) { casos = null; }
+      if (casos && typeof casos !== 'object') casos = null;
+      const paso = Math.min(3, Math.max(1, +(q.get('paso') || 1) || 1));
+      this._migDesdeRuta = { antes: q.get('antes') || '', despues: q.get('despues') || '', casos, rutas: q.get('rutas') || '', paso };
+    },
+  };
 }
 
 function extraccionUI() {
