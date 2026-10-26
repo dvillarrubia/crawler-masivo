@@ -426,6 +426,13 @@ Cosas que no estaban en la auditoría y aparecieron al hacerla:
   editor de reglas salió de Alertas a Configuración, 2.1), V44 (cron y «toca»,
   2.2), V33 (modal de Jev, 2.9), el alta sin slug ni JSON (2.14) y la
   configuración sin JSON (2.4).
+- [x] **Tras la revisión independiente:** guardar o eliminar un perfil, o
+  lanzar un rastreo desde la ficha, ya no tira los datos e integraciones a
+  medias (decisión 200); V44 seguía abierto en «Repetir este rastreo» (el
+  cron crudo siempre a la vista): ahora va en «Otra», como en el modal del
+  perfil; V42: «Sí» en la ficha de URL y del censo, tildes en Semántico y en
+  Reanudar; los desplegables «Sobre» y «Si» de las reglas propias ya no se
+  cortan a 1440; el error de las reglas sin claves internas.
 
 ### Cómo se probó
 

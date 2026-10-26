@@ -149,3 +149,50 @@ def test_el_aceptar_de_las_preguntas_no_sale_desactivado():
                 e({ escribir: '', pedir: 'Nombre', entrada: ' ' })]; }""" % json.dumps(expr))
     # Alpine solo quita `disabled` con false, null o undefined: '' lo pondria.
     assert r == [False, True, False, True]
+
+
+def test_recargar_la_ficha_conserva_lo_no_guardado_de_otras_secciones():
+    # Guardar o eliminar un perfil, o lanzar un rastreo desde la ficha,
+    # recargan el cliente: lo editado y sin guardar en los datos o en las
+    # integraciones no se pierde sin preguntar (revision de UX del 25-oct, 3.5).
+    r = _evaluar("""async () => { const a = app(); const servidor = %s;
+        window.api = async (ruta) => {
+          if (ruta === '/clients/c1') return JSON.parse(JSON.stringify(servidor));
+          if (ruta.endsWith('/profiles')) return [];
+          if (ruta.startsWith('/jobs')) return { items: [] };
+          return [];
+        };
+        for (const f of ['cargarAlertasAbiertas', 'cargarEstadoCliente', 'cargarProgramacionesCliente', '_cargarTabCliente']) a[f] = () => {};
+        a.view = 'client'; a.cliente = JSON.parse(JSON.stringify(servidor)); a.clienteForm = _formCliente(a.cliente);
+        a.clienteForm.notas = 'NOTA PENDIENTE';
+        a.clienteForm.integraciones.push({ tipo: 'gsc', etiqueta: '', parametros: '', credencial_env: '', activa: true });
+        await a.abrirCliente('c1', 'config');
+        const tras = [a.clienteForm.notas, a.clienteForm.integraciones.length, a.cambiosSinGuardar().map(x => x.id)];
+        // lo que se acaba de guardar se toma del servidor
+        servidor.notas = 'guardada';
+        await a.abrirCliente('c1', 'config', { guardado: ['datos'] });
+        const trasGuardar = [a.clienteForm.notas, a.cambiosSinGuardar().map(x => x.id)];
+        // otro cliente: nada se arrastra
+        a.cliente = { ...a.cliente, id: 'c0' };
+        await a.abrirCliente('c1', 'estado');
+        return { tras, trasGuardar, otro: [a.clienteForm.notas, a.clienteForm.integraciones.length] }; }"""
+                 % json.dumps(CLIENTE))
+    assert r["tras"] == ["NOTA PENDIENTE", 1, ["datos", "integraciones"]]
+    assert r["trasGuardar"] == ["guardada", ["integraciones"]]
+    assert r["otro"] == ["guardada", 0]
+
+
+def test_el_error_de_las_reglas_no_usa_claves_internas():
+    r = _evaluar("""() => { const a = app(); const out = [];
+        a.reglasCliente = { de_serie: { comparacion: { rotas: { activa: true, avisar: true, pct_sitio: 5, min_paginas: 1, pct_plantilla: 5 } },
+                                        propias: [], resumen_semanal: { activo: true, dia: 1, hora: 8 } },
+                            catalogo: { medidas: { indexables: { etiqueta: 'Páginas indexables' } } } };
+        a.reglasForm = { comparacion: { rotas: { activa: true, avisar: true, pct_sitio: '', min_paginas: 1, pct_plantilla: 5 } },
+                         propias: [], resumen_semanal: { activo: true, dia: 1, hora: 8 } };
+        try { a._cuerpoReglas(); } catch (e) { out.push(e.message); }
+        a.reglasForm.comparacion.rotas.pct_sitio = 5;
+        a.reglasForm.propias = [{ id: 'regla-3', nombre: '', medida: 'indexables', modo: 'valor', operador: '<', umbral: '' }];
+        try { a._cuerpoReglas(); } catch (e) { out.push(e.message); }
+        return out; }""")
+    assert r == ["«Páginas que ahora responden con error»: falta el número",
+                 "«Páginas indexables: el valor del rastreo es menor que …»: falta el número"]

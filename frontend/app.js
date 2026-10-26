@@ -1941,7 +1941,20 @@ function app() {
         || String(a.nombre).localeCompare(String(b.nombre)));
     },
 
-    async abrirCliente(id, tab = 'estado') {
+    // `guardado`: las secciones que se acaban de guardar (las demas, si
+    // estaban a medias, se conservan al recargar la ficha del mismo cliente).
+    async abrirCliente(id, tab = 'estado', { guardado = [] } = {}) {
+      // Recargar la ficha del mismo cliente (guardar o eliminar un perfil,
+      // lanzar un rastreo, guardar una seccion) no se lleva por delante lo
+      // editado y sin guardar en los datos o en las integraciones (revision
+      // de UX del 25-oct, 3.5; decision 200).
+      const pendiente = {};
+      if (this.view === 'client' && this.cliente && this.cliente.id === id) {
+        if (!guardado.includes('datos') && this.datosClienteCambiados())
+          for (const k of ['nombre', 'slug', 'dominios', 'zona_horaria', 'notas']) pendiente[k] = this.clienteForm[k];
+        if (!guardado.includes('integraciones') && this.integracionesCambiadas())
+          pendiente.integraciones = this.clienteForm.integraciones;
+      }
       this.view = 'client';
       // El tramo de la URL o el nombre interno: un nombre viejo («rastreos»)
       // o desconocido no puede dejar la ficha sin pestana (revision de UX del
@@ -1966,7 +1979,7 @@ function app() {
         this.clientePerfiles = perfiles;
         this.clienteJobs = jobs.items || [];
         this.clienteSerie = serie || [];
-        this.clienteForm = _formCliente(c);
+        this.clienteForm = Object.assign(_formCliente(c), pendiente);
       } catch (e) { this.error = e.message; }
       // Lo de cada pestana, y lo que necesita Estado (que es la de entrada y
       // la que cuenta las alertas abiertas de la pestana Alertas).
@@ -2193,19 +2206,19 @@ function app() {
       const numero = (v, que) => {
         // `Number('')` es 0: un campo vaciado se guardaba como umbral 0.
         if (v === '' || v === null || v === undefined || Number.isNaN(Number(v)))
-          throw new Error(que + ': falta el número');
+          throw new Error('«' + que + '»: falta el número');
         return Number(v);
       };
       for (const [regla, c] of Object.entries(f.comparacion)) {
         const d = serie.comparacion[regla] || {}, cambios = {};
         for (const k of ['activa', 'avisar', 'pct_sitio', 'min_paginas', 'pct_plantilla']) {
-          const v = ['activa', 'avisar'].includes(k) ? !!c[k] : numero(c[k], regla.replaceAll('_', ' '));
+          const v = ['activa', 'avisar'].includes(k) ? !!c[k] : numero(c[k], fmt.reglaDiff(regla));
           if (v !== d[k]) cambios[k] = v;
         }
         if (Object.keys(cambios).length) comparacion[regla] = cambios;
       }
       const propias = f.propias.map(r => ({
-        ...r, umbral: numero(r.umbral, r.nombre || r.id), segmento: (r.segmento || '').trim() || null,
+        ...r, umbral: numero(r.umbral, (r.nombre || '').trim() || this.fraseRegla(r)), segmento: (r.segmento || '').trim() || null,
         nombre: (r.nombre || '').trim(),
       }));
       const cuerpo = {};
@@ -2493,8 +2506,7 @@ function app() {
           alertas: this.slack.alertas, resumen: this.slack.resumen, informe: this.slack.informe }) });
         // La integracion vive en el cliente: que el formulario generico no la
         // pise con la copia de antes al guardar otra cosa.
-        this.cliente = await api(`/clients/${this.cliente.id}`);
-        this.clienteForm = _formCliente(this.cliente);
+        this._recargarFormCliente(await api(`/clients/${this.cliente.id}`));
         this.showToast('Slack guardado');
         await this.probarSlack();
         const prueba = this.slack.prueba;
@@ -2516,8 +2528,7 @@ function app() {
       if (!ok) return;
       try {
         await api(`/clients/${this.cliente.id}/slack`, { method: 'DELETE' });
-        this.cliente = await api(`/clients/${this.cliente.id}`);
-        this.clienteForm = _formCliente(this.cliente);
+        this._recargarFormCliente(await api(`/clients/${this.cliente.id}`));
         await this.cargarSlack();
       } catch (e) { this.slack.error = e.message; }
     },
@@ -2588,7 +2599,7 @@ function app() {
       try {
         const c = await api(`/clients/${this.cliente.id}`, { method: 'PATCH', body: JSON.stringify(cuerpo) });
         this.clientes = await api('/clients');
-        await this.abrirCliente(c.id, 'config');
+        await this.abrirCliente(c.id, 'config', { guardado: partes || ['datos', 'integraciones', 'config'] });
         if (quiere('config')) await this.cargarCfgCliente();
         this.showToast(partes && partes.length === 1
           ? ({ datos: 'Datos guardados', config: 'Configuración guardada', integraciones: 'Integraciones guardadas' })[partes[0]]
@@ -2649,6 +2660,14 @@ function app() {
     reglasCambiadas() {
       return !!(this.reglasForm && this._reglasFoto) && this._reglasDe === (this.cliente && this.cliente.id)
         && _fotoReglas(this.reglasForm) !== this._reglasFoto;
+    },
+    // Slack vive en las integraciones del cliente: tras guardarlo o quitarlo
+    // se refrescan, pero los datos a medias se conservan (3.5).
+    _recargarFormCliente(c) {
+      const datos = this.datosClienteCambiados()
+        ? Object.fromEntries(['nombre', 'slug', 'dominios', 'zona_horaria', 'notas'].map(k => [k, this.clienteForm[k]])) : {};
+      this.cliente = c;
+      this.clienteForm = Object.assign(_formCliente(c), datos);
     },
     cambiosSinGuardar() {
       const c = [];

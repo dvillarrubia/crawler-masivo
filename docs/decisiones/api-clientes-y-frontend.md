@@ -696,7 +696,15 @@
      «Nuevo rastreo» de arriba solo es el botón verde donde la vista no tiene
      uno propio (Nuevo cliente, Nueva programación, Informe para el cliente).
    - El `:disabled` de las preguntas se fuerza a booleano.
+   - Recargar la ficha del mismo cliente (guardar o eliminar un perfil, lanzar
+     un rastreo desde la ficha, guardar o quitar Slack, guardar una sección)
+     conserva lo editado y sin guardar en los datos y en las integraciones; solo
+     se toma del servidor lo que se acaba de guardar (`abrirCliente(..., {
+     guardado })`). Las reglas y «cómo se rastrea» ya no se recargaban.
+   - El error de validación de las reglas nombra la regla en llano («Páginas
+     que ahora responden con error»: falta el número), no por su clave.
 
    Tests: `tests/test_botones_jerga_frontend.py` (cambios por sección, salir
-   con y sin aceptar, el perfil, la expresión del `:disabled` tal cual está en
+   con y sin aceptar, el perfil, la recarga de la ficha con cambios a medias,
+   el error de las reglas, la expresión del `:disabled` tal cual está en
    `index.html`, y los formatos de número).
