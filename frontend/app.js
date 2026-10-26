@@ -6972,7 +6972,7 @@ function cfgLlano(ruta, v) {
   if (Array.isArray(v)) return v.length ? v.join(', ') : 'ninguna';
   if (typeof v === 'object') {
     const n = Object.keys(v).length;
-    return n ? Object.entries(v).map(([k, x]) => `${k} ${c.sep || '='} ${x}`).join(', ') : 'ninguna';
+    return n ? Object.entries(v).map(([k, x]) => (c.sep === ':' ? `${k}: ${x}` : `${k} ${c.sep || '='} ${x}`)).join(', ') : 'ninguna';
   }
   return String(v);
 }
