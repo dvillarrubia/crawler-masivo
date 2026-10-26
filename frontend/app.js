@@ -3430,11 +3430,6 @@ function app() {
       return { error:'var(--red)', warning:'var(--orange)', info:'var(--blue)' }[sev] || 'var(--text-dim)';
     },
 
-    erroresDelJob() {
-      if (!this.stats) return 0;
-      return this.stats.issues_by_type.filter(i => i.severity === 'error').reduce((a, i) => a + i.count, 0);
-    },
-
     get issueTypes() {
       if (!this.stats) return [];
       return [...new Set(this.stats.issues_by_type.map(i => i.issue_type))];
