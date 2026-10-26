@@ -219,6 +219,36 @@ cubre los 90 días, la ventana empieza en `datos_desde` y lo avisa.
   de Problemas solo se ha visto con datos simulados. Las demás preguntas
   (title genérico, marcado frente a lo visible…) no se cruzan con Problemas.
 
+### Revisión del 25-oct · 2.13 Validar migración (V21, V22, V23)
+
+- [x] **«Validar migración»** como acción aparte (`#/rastreos/<id>/migracion`),
+  desde el menú «…» del censo y desde un enlace en Comparar; sin pestaña propia,
+  la miga dice «Validar migración». Asistente en tres pasos:
+  1. **Censos**: antes y después, cualquiera completado del cliente (de
+     cualquier dominio; sin cliente, los últimos de la agencia), en grupos por
+     tipo. Si el antes es posterior al después, lo dice y ofrece intercambiarlos.
+  2. **Cómo cambian las URLs**, sin regex: cambia el dominio (relleno solo si
+     los censos son de dominios distintos), una carpeta cambia o desaparece,
+     cambia un trozo, el final (quitar la extensión, con o sin barra, añadir o
+     quitar la barra final). Vista previa con 5 URLs reales del censo de antes y
+     si la nueva está tal cual en el de después. Las regex, plegadas en
+     «Avanzado» y partiendo de lo marcado (decisión 192).
+  3. **Resultado**: «96,1 % · De las 3.883 URLs del censo de antes, 3.731 tienen
+     su equivalente en el de después», cuántas cambian con lo marcado y casan,
+     colisiones, ejemplos sin pareja y nuevas, y debajo el detalle de Comparar.
+     Es el `GET /diff` de siempre con `map_host` y `map_rutas`.
+- [x] **Comparar** sin la casilla (V23). Con el censo de la comparación
+  automática, enseña al instante lo guardado y calcula el detalle después, con
+  un indicador azul que se ve y dice qué falta (V21); el «Ha cambiado algo»
+  repetido ya no sale en Comparar. Desplegable por tipo (V22), con los
+  candidatos del cliente y no los 100 últimos de la agencia. Sus tablas tienen
+  su propio scroll en móvil (desbordaban a 626 px).
+- El enlace guarda censos, paso y casos; uno viejo a Comparar con
+  `map_host`/`map_rutas` abre el asistente con lo mismo.
+- Lo abierto: Lopesan no ha migrado, así que el asistente se ha probado con un
+  caso simulado («el blog pasa a la raíz») sobre sus censos reales. «Por qué
+  se eligió el 14-oct y no el 19-oct» (1.8) sigue sin decirse.
+
 ### Lo que salió por el camino (2026-10-14)
 
 Cosas que no estaban en la auditoría y aparecieron al hacerla:

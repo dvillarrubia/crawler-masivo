@@ -1898,6 +1898,9 @@
                 <div class="menu" x-show="menuAbierto === 'mas'" x-transition.opacity role="menu">
                   <button role="menuitem" @click="menuAbierto = ''; abrirEditarJob()">
                     <i data-lucide="pencil" style="width:14px;height:14px"></i> Nombre, tipo y cliente</button>
+                  <!-- Accion aparte y no una casilla de Comparar (revision de UX del 25-oct, 2.13). -->
+                  <button role="menuitem" data-testid="menu-validar-migracion" @click="abrirMigracion()">
+                    <i data-lucide="route" style="width:14px;height:14px"></i> Validar una migración</button>
                   <hr>
                   <button role="menuitem" class="danger" @click="menuAbierto = ''; deleteJob()">
                     <i data-lucide="trash-2" style="width:14px;height:14px"></i> Eliminar este rastreo</button>
@@ -2334,10 +2337,9 @@
             </template>
           </div>
         </template>
-        <!-- En Comparar, solo mientras carga la comparacion con el mismo censo: luego
-             sus alertas salen en el resultado y se veian dos veces; con otro
-             censo elegido no son las suyas. -->
-        <template x-if="job.comparacion && (job.comparacion.alertas || []).length && (detailTab === 'overview' || (detailTab === 'diff' && !diff && (!diffOtro || diffOtro === job.comparacion.comparado_con)))">
+        <!-- Solo en el Resumen: en Comparar las alertas guardadas ya salen al
+             instante en el resultado (V21) y se veian dos veces. -->
+        <template x-if="job.comparacion && (job.comparacion.alertas || []).length && detailTab === 'overview'">
           <div class="card mb-2"
                :style="'border-left:3px solid ' + fmt.colorSeveridad(job.comparacion.alertas[0].severidad)">
             <div class="text-sm">
@@ -2667,30 +2669,37 @@
         </template>
 
         <!-- ===== PESTANA: COMPARAR ===== -->
+        <!-- ===== PESTANA: COMPARAR =====
+             Solo el seguimiento entre censos del mismo sitio. La migracion es
+             una accion aparte, «Validar migración» (revision de UX del 25-oct,
+             2.13; V23): su casilla con regex de Python estorbaba aqui cada semana. -->
         <template x-if="detailTab === 'diff'">
           <div>
             <div class="card" style="margin-bottom:1rem">
-              <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
-                <span style="font-size:.85rem">Comparar con:</span>
-                <!-- Censos comparables primero; las pruebas pequenas aparte
-                     (UX-12): comparar un censo de 5.000 URLs con un canario de
-                     26 no dice nada de lo que ha cambiado. -->
-                <select @change="diffOtro = $el.value; cargarDiff()" style="padding:.35rem .5rem;font-size:.85rem;max-width:34rem">
+              <div class="comparar-fila">
+                <label for="diff-otro" style="font-size:.85rem">Comparar con:</label>
+                <!-- Por tipo y no por tamano (V22): la «réplica julio» de 5.000
+                     URLs no es un censo de la serie aunque tenga su tamano. -->
+                <select id="diff-otro" @change="diffOtro = $el.value; cargarDiff()" class="comparar-select">
                   <option value="">— elige otro rastreo del mismo sitio —</option>
-                  <optgroup label="Censos de tamaño parecido">
-                    <template x-for="j in candidatosDiff(true)" :key="j.id">
-                      <option :value="j.id" :selected="j.id === diffOtro"
-                              x-text="(j.id === (job.comparacion || {}).comparado_con ? '★ ' : '') + j.name + '  ·  ' + fmt.num(j.total_urls_crawled) + ' URLs  ·  ' + fmt.dia(j.created_at)"></option>
-                    </template>
-                  </optgroup>
-                  <optgroup label="Rastreos de prueba o parciales">
-                    <template x-for="j in candidatosDiff(false)" :key="j.id">
-                      <option :value="j.id" :selected="j.id === diffOtro"
-                              x-text="j.name + '  ·  ' + fmt.num(j.total_urls_crawled) + ' URLs  ·  ' + fmt.dia(j.created_at)"></option>
-                    </template>
-                  </optgroup>
+                  <template x-for="g in gruposDiff()" :key="g.tipo">
+                    <optgroup :label="g.etiqueta">
+                      <template x-for="j in g.items" :key="j.id">
+                        <option :value="j.id" :selected="j.id === diffOtro"
+                                x-text="(j.id === (job.comparacion || {}).comparado_con ? '★ ' : '') + j.name + '  ·  ' + fmt.num(j.total_urls_crawled) + ' URLs  ·  ' + fmt.dia(j.started_at || j.created_at)"></option>
+                      </template>
+                    </optgroup>
+                  </template>
                 </select>
-                <span x-show="diffCargando" class="text-dim" style="font-size:.8rem">comparando…</span>
+              </div>
+              <!-- V21: lo guardado sale al instante y el detalle se calcula
+                   despues, con un indicador que se ve (antes, solo un
+                   «comparando…» gris mientras se volvia a pedir todo). -->
+              <div x-show="diffCargando" class="diff-cargando" data-testid="diff-cargando" style="margin-top:.6rem">
+                <span class="spinner" style="width:14px;height:14px"></span>
+                <span x-text="diffVista() && diffVista()._guardada
+                  ? 'Esto es lo que se guardó al terminar el rastreo. El detalle (qué cambió en cada página) se está calculando; tarda unos segundos en un censo grande.'
+                  : 'Comparando los dos rastreos; tarda unos segundos en un censo grande.'"></span>
               </div>
               <div x-show="job.comparacion && job.comparacion.comparado_con === diffOtro" class="text-dim" style="font-size:.8rem;margin-top:.5rem">
                 ★ Es el censo con el que se comparó automáticamente al terminar el rastreo.
@@ -2698,48 +2707,297 @@
               <div x-show="!diffCandidatos.length" class="text-dim" style="font-size:.8rem;margin-top:.5rem">
                 No hay otro rastreo completado del mismo sitio con el que comparar.
               </div>
-              <!-- Migracion (decision 131): sin decirle como se corresponden
-                   las rutas viejas con las nuevas, una migracion se lee como
-                   «han desaparecido 3.000 paginas y han aparecido 3.000». -->
-              <div style="margin-top:.6rem">
-                <label style="font-size:.8rem;display:inline-flex;gap:.35rem;align-items:center">
-                  <input type="checkbox" id="diff-migracion" x-model="diffMigracion"> Es una migración: mapear URLs del censo anterior
-                </label>
-              </div>
-              <div x-show="diffMigracion" style="margin-top:.5rem;max-width:44rem">
-                <label style="font-size:.8rem;display:flex;gap:.35rem;align-items:center;margin-bottom:.45rem">
-                  <input type="checkbox" x-model="diffOtrosSitios" @change="cargarCandidatosDiff()"> Ofrecer rastreos de otros sitios (cambio de dominio)
-                </label>
-                <label style="font-size:.8rem;display:block;margin-bottom:.45rem">Host (opcional): <code>viejo.com=nuevo.com</code>, separados por comas
-                  <input type="text" id="diff-map-host" x-model="diffMapHost" placeholder="www.viejo.com=www.nuevo.com"
-                         style="width:100%;padding:.3rem .45rem;font-size:.85rem;font-family:monospace">
-                </label>
-                <label style="font-size:.8rem;display:block;margin-bottom:.45rem">Rutas: una regla por línea, <code>patrón =&gt; reemplazo</code> (regex de Python sobre la ruta y la query; gana la primera que casa)
-                  <textarea id="diff-map-rutas" x-model="diffMapRutas" rows="3"
-                            placeholder="^/es/hoteles/([^/]+)\.html$ => /es/hotel/\1/"
-                            style="width:100%;padding:.3rem .45rem;font-size:.85rem;font-family:monospace"></textarea>
-                </label>
-                <div><button class="btn btn-sm" id="diff-aplicar-mapeo" @click="cargarDiff()" :disabled="!diffOtro || diffCargando">Comparar con el mapeo</button></div>
+              <div class="text-sm" style="margin-top:.6rem">
+                ¿Han cambiado las direcciones de las páginas (migración, cambio de dominio)?
+                <a href="#" data-testid="ir-a-migracion" @click.prevent="abrirMigracion()">Validar migración →</a>
               </div>
             </div>
+          </div>
+        </template>
 
-            <template x-if="diff && !diff.comparable">
-              <div class="card" style="border-left:3px solid var(--red)">
-                <strong>No se pueden comparar</strong>
-                <div style="margin-top:.35rem;font-size:.85rem" x-text="diff.motivo"></div>
+        <!-- ===== VALIDAR MIGRACION (revision de UX del 25-oct, 2.13; decision 192) =====
+             Asistente en tres pasos: los dos censos, como cambian las URLs (casos
+             comunes sin regex, con 5 URLs reales de muestra; las regex plegadas
+             en «Avanzado») y el resultado, que es el GET /diff de siempre con el
+             mapeo (decision 131). -->
+        <template x-if="detailTab === 'migracion'">
+          <div class="migracion" data-testid="migracion">
+            <div class="card mb-2">
+              <h2 class="migracion-titulo">Validar migración</h2>
+              <div class="text-sm text-dim">
+                Compara un censo de antes de la migración con uno de después, diciéndole cómo han cambiado las direcciones,
+                para saber cuántas páginas viejas tienen su equivalente nueva y qué se ha roto por el camino.
+              </div>
+              <ol class="pasos" aria-label="Pasos">
+                <template x-for="(t, i) in ['Censos', 'Cómo cambian las URLs', 'Resultado']" :key="i">
+                  <li :class="{ 'paso-activo': migPaso === i + 1, 'paso-hecho': migPaso > i + 1 }"
+                      :aria-current="migPaso === i + 1 ? 'step' : null">
+                    <button type="button" class="paso-boton" @click="migIrAPaso(i + 1)" :disabled="i > 0 && !!migProblemaPareja()">
+                      <span class="paso-num" x-text="i + 1"></span> <span x-text="t"></span>
+                    </button>
+                  </li>
+                </template>
+              </ol>
+            </div>
+
+            <!-- Paso 1: los dos censos, de cualquier tipo y dominio del cliente,
+                 en grupos por tipo (V22). -->
+            <template x-if="migPaso === 1">
+              <div class="card mb-2" data-testid="migracion-paso-1">
+                <div class="migracion-censos">
+                  <label class="campo">
+                    <span class="campo-etiqueta">Censo de antes de la migración</span>
+                    <select x-model="migAntes" @change="migElegido()" data-testid="mig-antes">
+                      <option value="">— elige —</option>
+                      <template x-for="g in migGrupos()" :key="g.tipo">
+                        <optgroup :label="g.etiqueta">
+                          <template x-for="j in g.items" :key="j.id">
+                            <option :value="j.id" :selected="j.id === migAntes" x-text="migEtiqueta(j)"></option>
+                          </template>
+                        </optgroup>
+                      </template>
+                    </select>
+                    <span class="text-dim campo-ayuda" x-show="migJob(migAntes)" x-text="'Dominio: ' + (_hostDe(migJob(migAntes)) || '—')"></span>
+                  </label>
+                  <button type="button" class="btn btn-sm migracion-cambiar" @click="migIntercambiar()" title="Intercambiar antes y después" aria-label="Intercambiar antes y después">
+                    <i data-lucide="arrow-left-right" style="width:14px;height:14px"></i>
+                  </button>
+                  <label class="campo">
+                    <span class="campo-etiqueta">Censo de después</span>
+                    <select x-model="migDespues" @change="migElegido()" data-testid="mig-despues">
+                      <option value="">— elige —</option>
+                      <template x-for="g in migGrupos()" :key="g.tipo">
+                        <optgroup :label="g.etiqueta">
+                          <template x-for="j in g.items" :key="j.id">
+                            <option :value="j.id" :selected="j.id === migDespues" x-text="migEtiqueta(j)"></option>
+                          </template>
+                        </optgroup>
+                      </template>
+                    </select>
+                    <span class="text-dim campo-ayuda" x-show="migJob(migDespues)" x-text="'Dominio: ' + (_hostDe(migJob(migDespues)) || '—')"></span>
+                  </label>
+                </div>
+                <div class="text-sm text-dim" x-show="migCandCargando" style="margin-top:.5rem">Cargando los rastreos…</div>
+                <div class="text-sm red" x-show="migCandError" x-text="migCandError" style="margin-top:.5rem"></div>
+                <div class="text-sm" x-show="!migCandCargando && !migCandError" style="margin-top:.5rem"
+                     x-text="job.cliente_id ? 'Salen todos los rastreos completados de ' + (job.cliente_nombre || 'este cliente') + ', de cualquier dominio.' : 'Este rastreo no tiene cliente: salen los últimos rastreos completados de la agencia.'"></div>
+                <div class="aviso-linea orange" x-show="migProblemaPareja()" style="margin-top:.6rem">
+                  <span x-text="migProblemaPareja()"></span>
+                  <a href="#" x-show="migProblemaPareja().startsWith('El censo de')" @click.prevent="migIntercambiar()">Intercambiarlos</a>
+                </div>
+                <div class="migracion-acciones">
+                  <button class="btn btn-primary" @click="migIrAPaso(2)" :disabled="!!migProblemaPareja()" data-testid="mig-siguiente-1">Siguiente: cómo cambian las URLs</button>
+                </div>
               </div>
             </template>
 
-            <template x-if="diff && diff.comparable">
+            <!-- Paso 2: como cambian las URLs. Casos comunes sin regex y vista
+                 previa con 5 URLs reales del censo de antes. -->
+            <template x-if="migPaso === 2">
+              <div class="card mb-2" data-testid="migracion-paso-2">
+                <div class="text-sm" style="margin-bottom:.6rem">
+                  Marca lo que ha cambiado en las direcciones. Debajo ves cómo quedan cinco páginas reales del censo de antes
+                  y si están en el de después.
+                </div>
+
+                <div class="caso">
+                  <label class="caso-titulo"><input type="checkbox" x-model="migCasos.dominio" @change="migProgramarComprobacion()"> Cambia el dominio</label>
+                  <div class="caso-cuerpo" x-show="migCasos.dominio">
+                    <input type="text" x-model="migCasos.hostDe" @input="migProgramarComprobacion()" placeholder="www.viejo.com" aria-label="Dominio de antes" class="campo-mono">
+                    <span aria-hidden="true">→</span>
+                    <input type="text" x-model="migCasos.hostA" @input="migProgramarComprobacion()" placeholder="www.nuevo.com" aria-label="Dominio de después" class="campo-mono">
+                  </div>
+                  <div class="text-sm orange" x-show="migHostsDistintos() && !migMapHost()" style="margin-top:.3rem">
+                    Los dos censos son de dominios distintos: sin decir cómo se corresponden no se pueden comparar.
+                  </div>
+                </div>
+
+                <template x-if="!migAvanzado">
+                  <div>
+                    <div class="caso">
+                      <label class="caso-titulo"><input type="checkbox" x-model="migCasos.prefijo" @change="migProgramarComprobacion()"> Una carpeta cambia de nombre o desaparece</label>
+                      <div class="caso-cuerpo" x-show="migCasos.prefijo">
+                        <span class="text-sm">Las que empiezan por</span>
+                        <input type="text" x-model="migCasos.prefDe" @input="migProgramarComprobacion()" placeholder="/es/" aria-label="Carpeta de antes" class="campo-mono campo-corto">
+                        <span class="text-sm">pasan a empezar por</span>
+                        <input type="text" x-model="migCasos.prefA" @input="migProgramarComprobacion()" placeholder="/" aria-label="Carpeta de después" class="campo-mono campo-corto">
+                        <div class="text-dim campo-ayuda" style="flex-basis:100%">Con las dos barras: «/es/» → «/» deja /es/hoteles/ en /hoteles/.</div>
+                      </div>
+                    </div>
+                    <div class="caso">
+                      <label class="caso-titulo"><input type="checkbox" x-model="migCasos.texto" @change="migProgramarComprobacion()"> Cambia un trozo de la dirección</label>
+                      <div class="caso-cuerpo" x-show="migCasos.texto">
+                        <input type="text" x-model="migCasos.textoDe" @input="migProgramarComprobacion()" placeholder="/hoteles/" aria-label="Texto de antes" class="campo-mono campo-corto">
+                        <span class="text-sm">pasa a ser</span>
+                        <input type="text" x-model="migCasos.textoA" @input="migProgramarComprobacion()" placeholder="/hotel/" aria-label="Texto de después" class="campo-mono campo-corto">
+                        <div class="text-dim campo-ayuda" style="flex-basis:100%">La primera vez que aparece en cada dirección.</div>
+                      </div>
+                    </div>
+                    <div class="caso">
+                      <label class="caso-titulo" for="mig-final">El final de la dirección</label>
+                      <div class="caso-cuerpo">
+                        <select id="mig-final" x-model="migCasos.final" @change="migProgramarComprobacion()">
+                          <template x-for="f in MIG_FINALES" :key="f.valor">
+                            <option :value="f.valor" :selected="f.valor === migCasos.final" x-text="f.texto"></option>
+                          </template>
+                        </select>
+                        <template x-if="['quitar_ext', 'quitar_ext_barra'].includes(migCasos.final)">
+                          <span class="caso-ext">
+                            <span class="text-sm">Extensión</span>
+                            <input type="text" x-model="migCasos.ext" @input="migProgramarComprobacion()" placeholder=".html" aria-label="Extensión" class="campo-mono campo-corto">
+                          </span>
+                        </template>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+
+                <!-- Las expresiones regulares, plegadas: para quien las necesite. -->
+                <details class="caso-avanzado" :open="migAvanzado">
+                  <summary>Avanzado: expresiones regulares</summary>
+                  <div class="text-sm text-dim" style="margin:.4rem 0">
+                    Una regla por línea, <code>patrón =&gt; reemplazo</code>, en expresiones regulares de Python sobre la ruta y la query
+                    (gana la primera que casa). Sustituyen a los casos de arriba.
+                  </div>
+                  <template x-if="!migAvanzado">
+                    <button type="button" class="btn btn-sm" @click="migEditarRegex()" data-testid="mig-editar-regex">Escribirlas a mano (parto de lo marcado arriba)</button>
+                  </template>
+                  <template x-if="migAvanzado">
+                    <div>
+                      <textarea x-model="migReglasTexto" @input="migProgramarComprobacion()" rows="4" data-testid="mig-reglas"
+                                placeholder="^/es/hoteles/([^/]+)\.html$ => /es/hotel/\1/" class="campo-mono" style="width:100%"></textarea>
+                      <button type="button" class="btn btn-sm" @click="migVolverACasos()">Volver a los casos comunes</button>
+                    </div>
+                  </template>
+                </details>
+
+                <div class="vista-previa" data-testid="mig-vista-previa">
+                  <div class="vista-previa-titulo">
+                    <strong>Así quedan</strong>
+                    <span class="text-dim text-sm" x-show="migMuestra.length && !migSinCambios()"
+                          x-text="'(cambian ' + fmt.num(migCuantasCambian()) + ' de las ' + fmt.num(migMuestra.length) + ' primeras páginas del censo de antes)'"></span>
+                  </div>
+                  <div class="text-sm text-dim" x-show="migMuestraCargando">Cargando páginas del censo de antes…</div>
+                  <div class="text-sm text-dim" x-show="!migMuestraCargando && !migMuestra.length">No hay páginas en el censo de antes para enseñar.</div>
+                  <div class="text-sm text-dim" x-show="!migMuestraCargando && migMuestra.length && migSinCambios()">
+                    No has marcado ningún cambio: se compararán las direcciones tal cual.
+                  </div>
+                  <template x-for="(f, i) in migVistaPrevia()" :key="i + (f.antes || '') + (f.despues || '')">
+                    <div class="vista-previa-fila">
+                      <template x-if="f.error">
+                        <div class="text-sm red" x-text="f.error + '. El servidor la comprueba al calcular.'"></div>
+                      </template>
+                      <template x-if="!f.error">
+                        <div>
+                          <div class="vp-url vp-antes" x-text="f.antes"></div>
+                          <div class="vp-url" :class="f.cambia ? 'vp-despues' : 'text-dim'">
+                            <span aria-hidden="true">→ </span><span x-text="f.cambia ? f.despues : 'sin cambios'"></span>
+                          </div>
+                          <div class="vp-estado text-sm" :class="migExiste[f.despues] === true ? 'green' : (migExiste[f.despues] === false ? 'orange' : 'text-dim')"
+                               x-text="migTextoExiste(f)"></div>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+                </div>
+
+                <div class="migracion-acciones">
+                  <button class="btn" @click="migIrAPaso(1)">Atrás</button>
+                  <button class="btn btn-primary" @click="migIrAPaso(3)" data-testid="mig-calcular">Calcular el resultado</button>
+                </div>
+              </div>
+            </template>
+
+            <!-- Paso 3: el resultado. Arriba, cuantas URLs de antes tienen pareja
+                 despues y cuales no; debajo, el detalle de siempre de Comparar. -->
+            <template x-if="migPaso === 3">
+              <div data-testid="migracion-paso-3">
+                <div class="card mb-2" x-show="migCargando">
+                  <div class="diff-cargando">
+                    <span class="spinner" style="width:14px;height:14px"></span>
+                    Emparejando las URLs de los dos censos; tarda unos segundos en un censo grande.
+                  </div>
+                </div>
+                <template x-if="migDiff && migDiff.comparable && migEmparejadas()">
+                  <div class="card mb-2" data-testid="mig-resumen">
+                    <div class="migracion-cifra">
+                      <strong x-text="fmt.num(migEmparejadas().pct) + ' %'"></strong>
+                      <span x-text="'De las ' + fmt.num(migEmparejadas().de) + ' URLs del censo de antes, ' + fmt.num(migEmparejadas().si) + ' tienen su equivalente en el de después.'"></span>
+                    </div>
+                    <div class="text-sm" x-show="migDiff.mapeo_rutas"
+                         x-text="migDiff.mapeo_rutas ? fmt.num(migDiff.mapeo_rutas.reescritas) + ' direcciones cambian con lo que has marcado, y de ellas ' + fmt.num(migDiff.mapeo_rutas.reescritas_emparejadas) + ' están en el censo de después.' : ''"></div>
+                    <div class="text-sm text-dim" x-show="migDiff.mapeo_rutas && migDiff.mapeo_rutas.colisiones"
+                         x-text="migDiff.mapeo_rutas ? fmt.num(migDiff.mapeo_rutas.colisiones) + ' URLs viejas acaban en la misma dirección nueva que otra: solo una de cada grupo entra en la comparación.' : ''"></div>
+                    <!-- Lo que no se puede afirmar no se afirma: con un censo
+                         truncado o de otro alcance no hay «sin pareja». -->
+                    <div class="migracion-listas">
+                      <div>
+                        <strong class="text-sm" x-text="migDiff.urls.desaparecidas === null ? 'Sin pareja: no se puede afirmar' : 'Sin pareja en el censo de después: ' + fmt.num(migDiff.urls.desaparecidas)"></strong>
+                        <div class="text-sm text-dim" x-show="migDiff.urls.desaparecidas === null">
+                          Uno de los dos censos no terminó entero o no rastreó lo mismo (mira los avisos de abajo): una URL que no sale puede no haberse visto.
+                        </div>
+                        <ul class="lista-urls" x-show="migDiff.urls.desaparecidas !== null">
+                          <template x-for="u in (migDiff.urls.ejemplos_desaparecidas || []).slice(0, 8)" :key="u">
+                            <li x-text="u"></li>
+                          </template>
+                        </ul>
+                      </div>
+                      <div>
+                        <strong class="text-sm" x-text="'Nuevas, sin equivalente en el de antes: ' + fmt.num(migDiff.urls.nuevas)"></strong>
+                        <ul class="lista-urls">
+                          <template x-for="u in (migDiff.urls.ejemplos_nuevas || []).slice(0, 8)" :key="u">
+                            <li x-text="u"></li>
+                          </template>
+                        </ul>
+                      </div>
+                    </div>
+                    <template x-if="migAvanzado && migDiff.mapeo_rutas">
+                      <div style="margin-top:.5rem">
+                        <template x-for="(rg, i) in migDiff.mapeo_rutas.reglas" :key="'mr' + i">
+                          <div class="text-dim" style="font-size:.78rem">
+                            <code x-text="rg.patron"></code> → <code x-text="rg.reemplazo"></code>:
+                            <span x-text="fmt.num(rg.reescritas) + ' URLs'"></span>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                    <div class="migracion-acciones">
+                      <button class="btn" @click="migIrAPaso(2)">Ajustar cómo cambian las URLs</button>
+                    </div>
+                  </div>
+                </template>
+                <template x-if="migDiff && !migDiff.comparable">
+                  <div class="migracion-acciones" style="margin-bottom:.75rem">
+                    <button class="btn" @click="migIrAPaso(2)">Ajustar cómo cambian las URLs</button>
+                  </div>
+                </template>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <!-- El resultado de una comparacion: en Comparar (lo guardado al
+             instante y luego el diff, V21) y en el paso 3 de «Validar
+             migración». Una sola copia; `d` es el diff que toca. -->
+        <template x-for="d in [detailTab === 'diff' ? diffVista() : (detailTab === 'migracion' && migPaso === 3 ? migDiff : null)].filter(Boolean)" :key="d._clave">
+          <div>
+            <template x-if="!d.comparable">
+              <div class="card" style="border-left:3px solid var(--red)">
+                <strong>No se pueden comparar</strong>
+                <div style="margin-top:.35rem;font-size:.85rem" x-text="d.motivo"></div>
+              </div>
+            </template>
+
+            <template x-if="d.comparable">
               <div>
                 <div class="text-dim" style="font-size:.8rem;margin-bottom:.6rem"
-                     x-show="diff.antes && diff.ahora">
-                  Antes: <strong x-text="(diff.antes.fecha || '').slice(0,10)"></strong>
-                  <span x-text="diff.antes.nombre"></span>
-                  · Ahora: <strong x-text="(diff.ahora.fecha || '').slice(0,10)"></strong>
-                  <span x-text="diff.ahora.nombre"></span>
+                     x-show="d.antes && d.ahora">
+                  Antes: <strong x-text="fmt.dia(d.antes.fecha)"></strong>
+                  <span x-text="d.antes.nombre"></span>
+                  · Ahora: <strong x-text="fmt.dia(d.ahora.fecha)"></strong>
+                  <span x-text="d.ahora.nombre"></span>
                 </div>
-                <template x-for="aviso in diff.avisos" :key="aviso">
+                <template x-for="aviso in d.avisos" :key="aviso">
                   <div class="card" style="border-left:3px solid var(--orange);margin-bottom:.75rem">
                     <div style="font-size:.85rem" x-text="aviso"></div>
                   </div>
@@ -2747,7 +3005,7 @@
 
                 <!-- Las alertas primero: un cambio que afecta a una parte
                      grande de las indexables no es trabajo editorial. -->
-                <template x-for="al in (diff.alertas || [])" :key="al.regla + (al.extraccion || '')">
+                <template x-for="al in (d.alertas || [])" :key="al.regla + (al.extraccion || '')">
                   <div class="card"
                        :style="'margin-bottom:.75rem;border-left:3px solid ' + fmt.colorSeveridad(al.severidad)">
                     <div style="display:flex;justify-content:space-between;gap:1rem;align-items:baseline">
@@ -2788,50 +3046,29 @@
                   </div>
                 </template>
 
-                <template x-if="diff.mapeo_rutas">
-                  <div class="card mb-2" id="diff-mapeo-resultado">
-                    <div class="text-sm">
-                      <strong>Mapeo de rutas:</strong>
-                      <strong x-text="fmt.num(diff.mapeo_rutas.emparejadas)"></strong> de
-                      <span x-text="fmt.num(diff.mapeo_rutas.urls_del_anterior)"></span> URLs del censo anterior emparejadas
-                      (<strong x-text="diff.mapeo_rutas.pct_emparejadas + '%'"></strong>);
-                      <span x-text="fmt.num(diff.mapeo_rutas.reescritas)"></span> reescritas por el mapeo, de las que casan
-                      <span x-text="fmt.num(diff.mapeo_rutas.reescritas_emparejadas)"></span>.
-                    </div>
-                    <template x-for="(rg, i) in diff.mapeo_rutas.reglas" :key="'mr' + i">
-                      <div class="text-dim" style="font-size:.78rem;margin-left:.6rem">
-                        <code x-text="rg.patron"></code> → <code x-text="rg.reemplazo"></code>:
-                        <span x-text="fmt.num(rg.reescritas) + ' URLs'"></span>
-                      </div>
-                    </template>
-                    <div class="text-dim" style="font-size:.78rem;margin-top:.3rem" x-show="diff.mapeo_rutas.colisiones"
-                         x-text="fmt.num(diff.mapeo_rutas.colisiones) + ' URLs viejas caen en la misma URL nueva que otra: solo una de cada grupo entra en la comparación.'"></div>
-                  </div>
-                </template>
-
                 <div class="stats-grid" style="margin-bottom:1rem">
                   <div class="stat-card">
-                    <div class="stat-value" x-text="fmt.num(diff.urls.en_ambos)"></div>
+                    <div class="stat-value" x-text="fmt.num(d.urls.en_ambos)"></div>
                     <div class="stat-label">en los dos</div>
                   </div>
                   <div class="stat-card">
-                    <div class="stat-value" x-text="fmt.num(diff.urls.nuevas)"></div>
+                    <div class="stat-value" x-text="fmt.num(d.urls.nuevas)"></div>
                     <div class="stat-label">nuevas</div>
                   </div>
                   <div class="stat-card">
                     <div class="stat-value"
-                         x-text="diff.urls.desaparecidas === null ? '—' : fmt.num(diff.urls.desaparecidas)"></div>
-                    <div class="stat-label" x-text="diff.urls.desaparecidas === null ? 'desaparecidas (no afirmable)' : 'desaparecidas'"></div>
+                         x-text="d.urls.desaparecidas === null ? '—' : fmt.num(d.urls.desaparecidas)"></div>
+                    <div class="stat-label" x-text="d.urls.desaparecidas === null ? 'desaparecidas (no afirmable)' : 'desaparecidas'"></div>
                   </div>
                 </div>
 
                 <!-- Extraccion a medida (decision 127): regla a regla, lo
                      comparado y lo que no se pudo comparar. Sin fila en uno
                      de los dos censos no es un cambio (decision 104). -->
-                <template x-if="diff.extraido && ((diff.extraido.reglas || []).length || (diff.extraido.no_comparadas || []).length)">
+                <template x-if="d.extraido && ((d.extraido.reglas || []).length || (d.extraido.no_comparadas || []).length)">
                   <div class="card mb-2">
                     <div class="text-sm"><strong>Extracción a medida</strong></div>
-                    <template x-for="rg in diff.extraido.reglas" :key="rg.nombre">
+                    <template x-for="rg in d.extraido.reglas" :key="rg.nombre">
                       <div class="text-sm" style="margin-top:.35rem">
                         <strong x-text="'«' + rg.nombre + '»'"></strong>
                         <span x-text="' ' + fmt.num(rg.comparadas) + ' páginas comparadas · '
@@ -2841,7 +3078,7 @@
                                 + (rg.render_distinto ? ' · uno con render y otro sin: ' + fmt.num(rg.render_distinto) : '')"></span>
                       </div>
                     </template>
-                    <template x-for="nc in (diff.extraido.no_comparadas || [])" :key="'nc' + nc.nombre">
+                    <template x-for="nc in (d.extraido.no_comparadas || [])" :key="'nc' + nc.nombre">
                       <div class="text-dim" style="font-size:.78rem;margin-top:.25rem"
                            x-text="'«' + nc.nombre + '» no se compara: ' + nc.motivo"></div>
                     </template>
@@ -2859,64 +3096,70 @@
                 <!-- Si el censo anterior se volvio a analizar para poder
                      comparar, se dice: sus cifras guardadas han cambiado y
                      quien viera un informe suyo tiene derecho a saberlo. -->
-                <template x-if="diff.anterior_reanalizado">
+                <template x-if="d.anterior_reanalizado">
                   <div class="card mb-2" style="border-left:3px solid var(--blue,#2979b5)">
                     <div class="text-sm">
                       El rastreo anterior se ha <strong>vuelto a analizar</strong> con
-                      el codigo de hoy para poder comparar las incidencias. Sus
+                      el código de hoy para poder comparar las incidencias. Sus
                       cifras han cambiado respecto a lo que se viera antes.
                     </div>
                   </div>
                 </template>
 
-                <template x-if="diff.incidencias && diff.incidencias.comparable === false">
+                <template x-if="d._incidenciasViejas">
+                  <div class="card mb-2 text-sm text-dim">
+                    Este censo se volvió a analizar después de compararse: las incidencias guardadas ya no son las de hoy y se están volviendo a calcular.
+                  </div>
+                </template>
+
+                <template x-if="d.incidencias && d.incidencias.comparable === false">
                   <div class="card mb-2" style="border-left:3px solid var(--muted,#6b7280)">
                     <div class="text-sm">
                       <strong>No se pueden comparar las incidencias.</strong>
-                      <span x-text="diff.incidencias.motivo"></span>
+                      <span x-text="d.incidencias.motivo"></span>
                     </div>
                   </div>
                 </template>
 
-                <template x-if="diff.incidencias && diff.incidencias.comparable !== false">
+                <template x-if="d.incidencias && d.incidencias.comparable !== false">
                   <div class="stats-grid" style="margin-bottom:1rem">
                     <div class="stat-card" style="border-top:2px solid var(--green,#2e8b57)">
                       <div class="stat-value"
-                           x-text="diff.incidencias.resueltas ? fmt.num(diff.incidencias.resueltas.total) : '—'"></div>
+                           x-text="d.incidencias.resueltas ? fmt.num(d.incidencias.resueltas.total) : '—'"></div>
                       <div class="stat-label"
-                           x-text="diff.incidencias.resueltas ? 'resueltas' : 'resueltas (no afirmable)'"></div>
+                           x-text="d.incidencias.resueltas ? 'resueltas' : 'resueltas (no afirmable)'"></div>
                     </div>
                     <div class="stat-card" style="border-top:2px solid var(--red,#d32f2f)">
-                      <div class="stat-value" x-text="fmt.num(diff.incidencias.nuevas.total)"></div>
+                      <div class="stat-value" x-text="fmt.num(d.incidencias.nuevas.total)"></div>
                       <div class="stat-label">nuevas</div>
                       <!-- Decision 131: en una URL que ya estaba es algo que se
                            ha roto; en una URL nueva, algo publicado mal. -->
                       <div class="text-dim" style="font-size:.75rem;margin-top:.2rem" id="diff-nuevas-reparto"
-                           x-show="diff.incidencias.nuevas.en_url_existente"
-                           x-text="diff.incidencias.nuevas.en_url_existente ? fmt.num(diff.incidencias.nuevas.en_url_existente.total) + ' en URLs que ya existían · '
-                             + fmt.num(diff.incidencias.nuevas.en_url_nueva.total)
-                             + (diff.incidencias.nuevas.url_nueva_afirmable ? ' en URLs nuevas' : ' en URLs que el anterior no vio (estaba truncado)') : ''"></div>
+                           x-show="d.incidencias.nuevas.en_url_existente"
+                           x-text="d.incidencias.nuevas.en_url_existente ? fmt.num(d.incidencias.nuevas.en_url_existente.total) + ' en URLs que ya existían · '
+                             + fmt.num(d.incidencias.nuevas.en_url_nueva.total)
+                             + (d.incidencias.nuevas.url_nueva_afirmable ? ' en URLs nuevas' : ' en URLs que el anterior no vio (estaba truncado)') : ''"></div>
                     </div>
                     <div class="stat-card">
-                      <div class="stat-value" x-text="fmt.num(diff.incidencias.siguen.total)"></div>
+                      <div class="stat-value" x-text="fmt.num(d.incidencias.siguen.total)"></div>
                       <div class="stat-label">siguen</div>
                     </div>
                   </div>
                 </template>
 
-                <template x-if="diff.incidencias && diff.incidencias.comparable !== false">
+                <template x-if="d.incidencias && d.incidencias.comparable !== false">
                   <div class="card" style="margin-bottom:1rem">
-                    <table style="width:100%;font-size:.85rem">
+                    <div class="table-wrap"><table style="width:100%;font-size:.85rem">
                       <thead><tr>
-                        <th style="text-align:left">incidencias por tipo</th>
+                        <th style="text-align:left">Incidencias por tipo</th>
                         <th style="text-align:right;width:6rem">resueltas</th>
                         <th style="text-align:right;width:6rem">nuevas</th>
-                        <th style="text-align:right;width:9rem" x-show="diff.incidencias.nuevas.en_url_existente"
+                        <th style="text-align:right;width:9rem" x-show="d.incidencias.nuevas.en_url_existente"
                             title="De las nuevas, cuántas en URLs que ya estaban en el censo anterior (regresiones) y cuántas en URLs nuevas">en URL existente / nueva</th>
                         <th style="text-align:right;width:6rem">siguen</th>
                       </tr></thead>
                       <tbody>
-                        <template x-for="t in tiposDeIncidencia()" :key="t.tipo">
+                        <template x-for="t in tiposDeIncidencia(d)" :key="t.tipo">
                           <tr>
                             <td>
                               <span x-text="fmt.issue(t.tipo)"></span>
@@ -2927,41 +3170,50 @@
                                 x-text="t.resueltas || ''"></td>
                             <td style="text-align:right;color:var(--red,#d32f2f)"
                                 x-text="t.nuevas || ''"></td>
-                            <td style="text-align:right" class="text-dim" x-show="diff.incidencias.nuevas.en_url_existente"
-                                x-text="t.nuevas && nuevasPorUrl(t.tipo) ? nuevasPorUrl(t.tipo).existente + ' / ' + nuevasPorUrl(t.tipo).nueva : ''"></td>
+                            <td style="text-align:right" class="text-dim" x-show="d.incidencias.nuevas.en_url_existente"
+                                x-text="t.nuevas && nuevasPorUrl(t.tipo, d) ? nuevasPorUrl(t.tipo, d).existente + ' / ' + nuevasPorUrl(t.tipo, d).nueva : ''"></td>
                             <td style="text-align:right" class="text-dim"
                                 x-text="t.siguen || ''"></td>
                           </tr>
                         </template>
                       </tbody>
-                    </table>
+                    </table></div>
                     <div class="text-dim" style="font-size:.78rem;margin-top:.5rem"
-                         x-show="diff.incidencias.sin_pagina_en_el_nuevo">
-                      <span x-text="fmt.num(diff.incidencias.sin_pagina_en_el_nuevo)"></span>
-                      incidencias mas estaban en páginas que este rastreo no ha
+                         x-show="d.incidencias.sin_pagina_en_el_nuevo">
+                      <span x-text="fmt.num(d.incidencias.sin_pagina_en_el_nuevo)"></span>
+                      incidencias más estaban en páginas que este rastreo no ha
                       visitado: no se sabe si se arreglaron.
                     </div>
                     <div class="text-dim" style="font-size:.78rem;margin-top:.5rem"
-                         x-show="diff.incidencias.resueltas_no_afirmables">
-                      <span x-text="fmt.num(diff.incidencias.resueltas_no_afirmables)"></span>
-                      incidencias no aparecen ahora, pero el censo anterior esta
+                         x-show="d.incidencias.resueltas_no_afirmables">
+                      <span x-text="fmt.num(d.incidencias.resueltas_no_afirmables)"></span>
+                      incidencias no aparecen ahora, pero el censo anterior está
                       truncado: pueden no haberse resuelto, sino no haberse visto.
                     </div>
                     <div class="text-dim" style="font-size:.78rem;margin-top:.5rem"
-                         x-show="diff.incidencias.no_afirmables_por_muestra?.total">
-                      <span x-text="fmt.num(diff.incidencias.no_afirmables_por_muestra?.total)"></span>
+                         x-show="d.incidencias.no_afirmables_por_muestra?.total">
+                      <span x-text="fmt.num(d.incidencias.no_afirmables_por_muestra?.total)"></span>
                       avisos de accesibilidad aparecen o faltan en una plantilla
-                      que uno de los dos censos no paso por axe: no se cuentan
+                      que uno de los dos censos no pasó por axe: no se cuentan
                       como nuevos ni como resueltos.
                     </div>
                   </div>
                 </template>
 
+                <!-- Lo que no guarda la comparacion automatica: llega con el
+                     diff, y mientras tanto se dice que se esta calculando (V21). -->
+                <template x-if="!d.cambios && d._guardada">
+                  <div class="card diff-cargando" data-testid="diff-cargando-detalle">
+                    <span class="spinner" x-show="diffCargando" style="width:14px;height:14px"></span>
+                    <span x-text="diffCargando ? 'Calculando qué cambió página a página (títulos, canonical, enlazado…)' : 'El detalle página a página no ha llegado.'"></span>
+                  </div>
+                </template>
+                <template x-if="d.cambios">
                 <div class="card">
-                  <table style="width:100%;font-size:.85rem">
-                    <thead><tr><th style="text-align:left">que cambio</th><th style="text-align:right;width:7rem">páginas</th></tr></thead>
+                  <div class="table-wrap"><table style="width:100%;font-size:.85rem">
+                    <thead><tr><th style="text-align:left">Qué cambió</th><th style="text-align:right;width:7rem">páginas</th></tr></thead>
                     <tbody>
-                      <template x-for="[campo, v] in Object.entries(diff.cambios)" :key="campo">
+                      <template x-for="[campo, v] in Object.entries(d.cambios)" :key="campo">
                         <tr :style="v.total ? '' : 'opacity:.45'">
                           <td>
                             <div x-text="fmt.campoDiff(campo)"></div>
@@ -2981,8 +3233,9 @@
                         </tr>
                       </template>
                     </tbody>
-                  </table>
+                  </table></div>
                 </div>
+                </template>
               </div>
             </template>
           </div>
