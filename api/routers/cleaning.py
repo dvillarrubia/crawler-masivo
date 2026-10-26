@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from api.cleaning_engine import (
     clean_with_safety,
+    lineas_repetidas,
     make_excerpt,
     url_group_key,
     validate_rules,
@@ -37,6 +38,11 @@ from shared.models import CleaningRuleset, Job, PageContent, Url
 router = APIRouter(prefix="/api/jobs/{job_id}/cleaning", tags=["cleaning"])
 
 APPLY_BATCH_SIZE = 500
+# Texto repetido por grupo (decision 198): paginas de la muestra, minimo de
+# paginas para medirlo y cuantos grupos (los mas grandes) se miden.
+REPETIDO_MUESTRA = 20
+REPETIDO_MIN_PAGINAS = 3
+REPETIDO_MAX_GRUPOS = 80
 
 
 def _get_job(db: Session, job_id: uuid.UUID) -> Job:
@@ -78,21 +84,31 @@ def _group_url_ids(
 # ---------------------------------------------------------------------------
 @router.get("/groups", response_model=list[CleaningGroupInfo])
 def list_groups(job_id: uuid.UUID, db: Session = Depends(get_session)):
+    """Los grupos por forma de URL, los de mas texto repetido primero.
+
+    El texto repetido (decision 198) se mide en una muestra de cada grupo: las
+    lineas que salen en al menos la mitad de sus paginas. Es lo que la
+    limpieza quita, y ordenar por el pone arriba lo que merece la pena limpiar;
+    por paginas salian primero las carpetas mas grandes aunque no tuvieran
+    nada repetido. Solo en los REPETIDO_MAX_GRUPOS grupos mas grandes y de al
+    menos REPETIDO_MIN_PAGINAS: el resto va detras, por paginas, sin cifra.
+    """
     _get_job(db, job_id)
 
     rows = (
-        db.query(Url.path, Url.url, PageContent.content_length, PageContent.cleaned_at)
+        db.query(Url.id, Url.path, Url.url, PageContent.content_length, PageContent.cleaned_at)
         .join(PageContent, PageContent.url_id == Url.id)
         .filter(Url.job_id == job_id, Url.is_html.is_(True))
+        .order_by(Url.id)
         .yield_per(2000)
     )
 
     groups: dict[str, dict] = {}
-    for path, url, content_length, cleaned_at in rows:
+    for url_id, path, url, content_length, cleaned_at in rows:
         key = url_group_key(path)
         g = groups.setdefault(
             key,
-            {"pages": 0, "cleaned": 0, "total_len": 0, "samples": []},
+            {"pages": 0, "cleaned": 0, "total_len": 0, "samples": [], "ids": []},
         )
         g["pages"] += 1
         g["total_len"] += content_length or 0
@@ -100,17 +116,58 @@ def list_groups(job_id: uuid.UUID, db: Session = Depends(get_session)):
             g["cleaned"] += 1
         if len(g["samples"]) < 3:
             g["samples"].append(url)
+        # La muestra, las primeras por id: la misma en cada llamada.
+        if len(g["ids"]) < REPETIDO_MUESTRA:
+            g["ids"].append(url_id)
 
-    return [
-        CleaningGroupInfo(
+    medidos = sorted(
+        (k for k, g in groups.items() if g["pages"] >= REPETIDO_MIN_PAGINAS),
+        key=lambda k: -groups[k]["pages"],
+    )[:REPETIDO_MAX_GRUPOS]
+    for key in medidos:
+        groups[key]["repetido"] = _repetido(db, groups[key]["ids"])
+
+    def orden(kv):
+        g = kv[1]
+        rep = g.get("repetido")
+        # Caracteres repetidos en todo el grupo: lo que quitaria limpiarlo.
+        total = rep["chars_medio"] * g["pages"] if rep else -1
+        return (-total, -g["pages"], kv[0])
+
+    salida = []
+    for key, g in sorted(groups.items(), key=orden):
+        rep = g.get("repetido")
+        salida.append(CleaningGroupInfo(
             group_key=key,
             pages=g["pages"],
             cleaned_pages=g["cleaned"],
             avg_content_length=round(g["total_len"] / g["pages"]) if g["pages"] else 0,
             sample_urls=g["samples"],
+            repetido_parte=rep["parte"] if rep else None,
+            repetido_chars_medio=rep["chars_medio"] if rep else None,
+            repetido_muestra=rep["muestra"] if rep else None,
+            lineas_repetidas=rep["lineas"] if rep else [],
+        ))
+    return salida
+
+
+def _repetido(db: Session, url_ids: list[int]) -> dict | None:
+    """El texto repetido de una muestra: por el markdown, que conserva las
+    lineas (el texto plano suele ser una sola linea larga), y si no hay, el
+    texto. Best-effort: si falla, el grupo va sin cifra."""
+    try:
+        filas = (
+            db.query(PageContent.content_markdown, PageContent.content_text)
+            .filter(PageContent.url_id.in_(url_ids))
+            .all()
         )
-        for key, g in sorted(groups.items(), key=lambda kv: -kv[1]["pages"])
-    ]
+        return lineas_repetidas([md or tx for md, tx in filas])
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return None
 
 
 # ---------------------------------------------------------------------------

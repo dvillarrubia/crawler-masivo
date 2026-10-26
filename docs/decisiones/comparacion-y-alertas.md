@@ -1098,3 +1098,50 @@
    `tests/test_comparar_frontend.py` (sin mapeo, lo guardado al instante, la
    vigencia de sus incidencias, la carrera de respuestas y el desplegable por
    tipo).
+
+<a id="d197"></a>
+197. **La misma página en dos grupos del tráfico entre censos se escribe una
+   vez, y las frases se redactan al servir la ficha del rastreo** (revisión de
+   UX del 25-oct, 3.3, V46).
+
+   **Problema.** Una página con dos cambios está en los dos grupos (158), y
+   `textos` escribía una frase por grupo: en Lopesan (21-oct) salía «1 página
+   ganó 109 clics; coincide con que en ella cambia la indexabilidad» y debajo
+   «1 página ganó 109 clics; coincide con que en ella cambia el canonical». Era
+   la misma `/es`, y se leía como dos páginas y 218 clics. Además, la ficha del
+   rastreo enseñaba las frases guardadas en `comparacion.trafico.textos` el día
+   del análisis, mientras la del cliente (`/clients/{id}/trafico`) las
+   redactaba al servirlas: un cambio del redactor no llegaba a los censos ya
+   hechos.
+
+   **Decisión.**
+   - `textos` junta los grupos que tienen **exactamente las mismas páginas**:
+     «1 página ganó 109 clics; coincide con que en ella cambia la
+     indexabilidad y cambia el canonical». Solo si se sabe que son las mismas:
+     todas las páginas del grupo están en `ejemplos` (como mucho
+     `MAX_EJEMPLOS`) y el conjunto coincide. Dos grupos de 40 páginas con los
+     mismos 5 ejemplos no se juntan. Tampoco los que no nombran un cambio de
+     la página (trasvase, recibe trasvase, sin cambio, sin dato anterior).
+   - `GET /api/jobs/{id}` vuelve a redactar `comparacion.trafico.textos` con
+     `textos` al servirlo, como la ficha del cliente. Best-effort: si falla,
+     salen las guardadas. Slack ya usaba `textos` al enviar.
+   - El frontend junta el bloque de Search Console (142) y el de tráfico entre
+     censos (158) en un solo bloque «Google» (Resumen y Estado del cliente):
+     clics, impresiones y CTR medio con la ventana de los **datos** al lado
+     (el 26-oct la ventana llegaba al 26 y los datos al 23), una frase que dice
+     si los clics suben, bajan o se mantienen con la fecha de cada cifra, y si
+     la comparación espera a Search Console lo dice sin concluir nada. Las
+     páginas que más cambian salen una vez cada una, con todo lo que cambió en
+     ella y enlace a su ficha (se busca por la dirección en el censo; si no
+     está, se dice).
+
+   **Por qué el doble «2026-10-21 · 2026-10-21».** El nombre del rastreo ya
+   lleva la fecha (`lopesan.com (semanal) · 2026-10-21`) y la ficha del
+   cliente le añadía `fecha` detrás. Se cerró en la fase 2 (la fecha solo si
+   el nombre no la lleva); aquí se hace lo mismo con «Comparado con …
+   (2026-10-14)» del Resumen.
+
+   Tests: `tests/test_trafico_entre_censos.py` (la misma página una vez, no se
+   juntan sin saber que son las mismas, y la ficha del rastreo con las frases
+   redactadas al servirla) y `tests/test_google_limpieza_frontend.py` (cifras,
+   ventanas, frases y páginas en Chromium).

@@ -502,3 +502,41 @@
    vacío no tapa al siguiente, el tope corta en un espacio, h1 fuera de
    `<main>`, sin h1, y el SeoSpider real: lo guarda en la ficha con oferta en JSON-LD y no
    en la misma página sin marcado).
+
+<a id="d198"></a>
+198. **Los grupos de la Limpieza van por texto repetido, no por páginas**
+   (revisión de UX del 25-oct, 3.6, V45).
+
+   **Problema.** La pestaña Limpieza listaba los grupos por forma de URL de
+   más a menos páginas: en Lopesan, 39 filas donde arriba salían las carpetas
+   más grandes aunque no tuvieran nada de plantilla, sin decir para qué servía
+   y con «Limpiadas 0» en todas. Lo que la limpieza quita es lo que se repite
+   en las páginas de un grupo (menú, pie, avisos), y eso no se veía.
+
+   **Decisión.** `GET /cleaning/groups` mide en una muestra de cada grupo (las
+   20 primeras páginas por id, en los 80 grupos más grandes de al menos 3
+   páginas) las líneas que salen en al menos la mitad de ellas
+   (`cleaning_engine.lineas_repetidas`, sobre el markdown, que conserva las
+   líneas; el texto plano suele ser una línea larga). Devuelve la parte del
+   texto que son esas líneas, los caracteres por página y las 8 líneas de más
+   peso, y ordena por los caracteres repetidos de todo el grupo (por página ×
+   páginas). Un grupo sin medir va detrás, por páginas, y sin cifra: «sin
+   medir», no «0 %». En Lopesan, arriba quedan los tres del blog (36-46 % del
+   texto es el logo y las 20 categorías del menú) y abajo `/blog/{s}`, 565
+   páginas sin nada repetido en la muestra.
+
+   En la pestaña: una frase dice para qué sirve y que después hay que volver
+   a analizar el censo (hoy no hay botón: lo hace el equipo técnico) y
+   relanzar el semántico; el editor de reglas se abre bajo la fila elegida con
+   lo que más se repite y «Quitar esta línea» (una regla de línea exacta);
+   cambiar de grupo empieza las reglas de cero; «Limpiadas» solo sale si hay
+   alguna, y «Revertir grupo» solo en un grupo limpiado. Una API anterior sin
+   la cifra se lee igual, por páginas, y lo dice.
+
+   Queda fuera: agrupar por plantilla en vez de por forma de URL y guardar las
+   reglas en el cliente para no repetirlas cada semana (`docs/referencia/pendiente.md`).
+
+   Tests: `tests/test_limpieza_repetido.py` (las líneas repetidas, el umbral y
+   el orden del endpoint con TestClient) y
+   `tests/test_google_limpieza_frontend.py` (la celda, el orden y el editor en
+   Chromium).
