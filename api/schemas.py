@@ -1124,6 +1124,10 @@ class UrlResponse(BaseModel):
 class UrlDetailResponse(UrlResponse):
     """Full URL detail with all related data for the detail view."""
 
+    # El de `links.to_url_hash`: «quien la enlaza» en la pestaña Enlaces
+    # (decision 195), por el indice y sin depender de como se escribio la URL.
+    url_hash: str | None = None
+
     headings: list[HeadingResponse] = []
     resources: list[ResourceResponse] = []
     hreflangs: list[HreflangResponse] = []
@@ -1199,6 +1203,59 @@ class LinkResponse(BaseModel):
     # 123): veredicto de `shared/sondas.py` y codigo. NULL = no se sondeo.
     estado_externo: str | None = None
     status_externo: int | None = None
+    # Estado del destino, interno o externo (decision 195): roto,
+    # redireccion, no_concluyente, sin_dato u ok; y su codigo (el del censo o
+    # el de la sonda). NULL en las respuestas que no lo calculan.
+    estado_destino: str | None = None
+    status_destino: int | None = None
+
+
+class EnlacesResponse(BaseModel):
+    """`GET /links` con filtros (decision 195). `por_estado`: filas de cada
+    estado del destino con los demas filtros, solo con `orden=estado`;
+    `filtros`: los que se han aplicado, para que quien llama sepa que el
+    servidor filtra (una API anterior devolvia la lista entera)."""
+    items: list[LinkResponse]
+    total: int
+    page: int
+    page_size: int
+    pages: int
+    orden: str
+    por_estado: dict[str, int] | None = None
+    filtros: dict[str, Any] = {}
+    archivado: bool = False
+
+
+class AnclaContada(BaseModel):
+    texto: str
+    veces: int
+
+
+class DestinoEnlazadoResponse(BaseModel):
+    to_url: str | None = None
+    to_url_hash: str
+    is_internal: bool
+    paginas: int          # paginas distintas que lo enlazan
+    enlaces: int          # filas: enlaces distintos (decision 94)
+    apariciones: int      # SUM(repeticiones)
+    nofollow: int         # enlaces nofollow
+    anclas: list[AnclaContada] = []
+    estado_destino: str
+    status_destino: int | None = None
+    veredicto_sonda: str | None = None
+    url_id: int | None = None
+
+
+class DestinosResponse(BaseModel):
+    items: list[DestinoEnlazadoResponse]
+    total: int
+    page: int
+    page_size: int
+    pages: int
+    orden: str
+    por_estado: dict[str, int]
+    filtros: dict[str, Any] = {}
+    archivado: bool = False
 
 
 # ---------------------------------------------------------------------------

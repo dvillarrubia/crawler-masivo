@@ -1050,6 +1050,16 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   `soft_404_plantilla`, una fila por host con las plantillas que responden 200
   a una URL que no existe. El Resumen deja de decir «0 páginas» en verde junto a
   esas plantillas. Los censos ya analizados lo tendrán al re-analizarse.
+- **Enlaces con filtros en el servidor** (revisión de UX del 25-oct, 2.8,
+  decisión 195; V24 y V25; en local, sin desplegar): destino, página que
+  enlaza, texto, interno/externo, follow, posición y estado y código del
+  destino, filtrados sobre `links.job_id` o sobre el Parquet del censo
+  archivado con el mismo resultado; vista por destino (páginas que lo enlazan,
+  anclas y estado) con «Quién la enlaza»; los destinos rotos primero; el
+  estado de la sonda externa por fin en pantalla, y «Externas» del Explorador
+  con los destinos externos enlazados en vez de «0». Endpoints
+  `GET /links` (con filtros), `/links/destinos` y `/links/resumen`. Pendiente:
+  el CSV con los filtros de la vista.
 - **Pestaña IA** (revisión de UX del 25-oct, 2.9; hecho en local): el análisis
   enriquecido deja la cabecera del censo y «Avanzado › Enriquecido» y pasa a
   una pestaña propia, «IA», con lo ya preguntado, la respuesta de cada vez y

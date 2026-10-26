@@ -450,3 +450,10 @@ agrupada; ninguna lectura mas de `links`; y que la regla del `rel` en SQL de
 con `PAGERANK_TEST_DATABASE_URL`, y que el extractor la usa) y, en
 `test_analyzer_paginacion_db.py`, que la paginacion va antes que
 `solo_enlazada_con_nofollow`.
+
+Enlaces con filtros (decision 195): `tests/test_enlaces_filtros.py` ejecuta
+`GET /links`, `/links/destinos` y `/links/resumen` con SQLite y, con
+`PAGERANK_TEST_DATABASE_URL`, con Postgres; cada filtro, el estado del
+destino y el orden, y que el censo vivo y archivado en Parquet devuelvan lo
+mismo con lotes y grupos de filas pequenos. Necesita `pyarrow` (la imagen de la
+API de desarrollo puede no traerlo: `pip install pyarrow`).

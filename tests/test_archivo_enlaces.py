@@ -115,8 +115,11 @@ def _todo(api, jid, ids):
     for ruta, uid in ids.items():
         d = api.get(f"/api/jobs/{jid}/urls/{uid}").json()
         salida[f"ficha{ruta}"] = (d["outlinks"], d["inlinks"])
-    salida["links"] = [api.get(f"/api/jobs/{jid}/links?page={p}&page_size=7").json()
-                       for p in (1, 2, 3, 4)]
+    # `archivado` dice de donde sale la lista (decision 195): es lo unico que
+    # puede cambiar.
+    salida["links"] = [{k: v for k, v in api.get(
+        f"/api/jobs/{jid}/links?page={p}&page_size=7").json().items() if k != "archivado"}
+        for p in (1, 2, 3, 4)]
     # Mismas filas; el orden NO: el CSV de `links` va por id y el del archivo
     # por destino, que es el orden del fichero (decision 95).
     cabecera, *filas = api.get(f"/api/jobs/{jid}/links/export").text.splitlines()

@@ -36,6 +36,8 @@ from api.schemas import (
     IssueResponse,
     IssueTypeCount,
     JobStats,
+    DestinosResponse,
+    EnlacesResponse,
     LinkResponse,
     PaginatedResponse,
     Recommendation,
@@ -2186,64 +2188,101 @@ def list_issue_urls(
 # ---------------------------------------------------------------------------
 # GET /api/jobs/{job_id}/links
 # ---------------------------------------------------------------------------
-@router.get("/links", response_model=PaginatedResponse[LinkResponse])
+def _filtros_enlaces(
+    destino: str | None = Query(None, description="La URL de destino contiene esto"),
+    exacto: bool = Query(False, description="`destino` es la URL exacta, no un trozo"),
+    destino_hash: str | None = Query(None, max_length=64,
+                                     description="El destino por su hash: quien enlaza a esa URL"),
+    origen: str | None = Query(None, description="La URL de la pagina que enlaza contiene esto"),
+    ancla: str | None = Query(None, description="El texto del enlace (o el alt de su imagen) contiene esto"),
+    tipo: Literal["interno", "externo"] | None = None,
+    follow: Literal["si", "no"] | None = None,
+    posicion: Literal["nav", "header", "content", "sidebar", "footer", "sin"] | None = None,
+    estado: Literal["roto", "redireccion", "no_concluyente", "sin_dato", "ok"] | None = Query(
+        None, description="Estado del destino (el del censo o el de la sonda de externos)"),
+    codigo: int | None = Query(None, ge=0, le=999, description="Codigo HTTP del destino"),
+):
+    from api.enlaces import FiltrosEnlaces
+
+    return FiltrosEnlaces(
+        destino=(destino or "").strip(), destino_exacto=bool(exacto and destino),
+        destino_hash=(destino_hash or "").strip(), origen=(origen or "").strip(),
+        ancla=(ancla or "").strip(), tipo=tipo or "", follow=follow or "",
+        posicion=posicion or "", estado=estado or "", codigo=codigo,
+    )
+
+
+@router.get("/links", response_model=EnlacesResponse)
 def list_links(
     job_id: uuid.UUID,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
+    orden: Literal["estado", "destino"] = Query(
+        "estado", description="estado: destinos rotos primero; destino: solo agrupados por destino"),
+    filtros=Depends(_filtros_enlaces),
     db: Session = Depends(get_session),
 ):
+    """Enlaces del censo, filtrados en el servidor (decision 195): destino,
+    origen, ancla, interno/externo, follow, posicion y estado del destino.
+    Siempre sobre `links.job_id`, o sobre el Parquet si el censo esta
+    archivado (decisiones 37, 95 y 150)."""
+    from api import enlaces as E
+
     job = _get_job_or_404(job_id, db)
-
-    if archivo_enlaces.esta_archivado(job):
-        items = []
-        filas = _como_links(db, job_id, archivo_enlaces.pagina(
-            job_id, (page - 1) * page_size, page_size))
-        sondas = _sondas_de(db, job_id, (getattr(r, "to_url_hash", None) for r in filas
-                                         if not getattr(r, "is_internal", True)))
-        for r in filas:
-            resp = LinkResponse.model_validate(r)
-            resp.from_url = r.from_url_rel.url
-            resp.estado_externo, resp.status_externo = sondas.get(
-                getattr(r, "to_url_hash", None), (None, None))
-            items.append(resp)
-        return _paginate(items=items, total=archivo_enlaces.contar(job_id),
-                         page=page, page_size=page_size)
-
-    q = db.query(Link).filter(Link.job_id == job_id)
-
-    total = q.count()
-
-    # Ordenado por destino y no por `id`: con `ORDER BY id` Postgres recorre
-    # la clave primaria de la tabla ENTERA (todos los rastreos, 187 M filas en
-    # local) filtrando por job, y la primera pagina de Lopesan tardaba 2 min
-    # 02 s — la pestana se quedaba en «0 enlaces · Cargando...». Con
-    # `(to_url_hash, id)` sirve el indice `ix_links_to_hash (job_id,
-    # to_url_hash)`: 0,3 ms. De paso, los enlaces a un mismo destino salen
-    # juntos, que es como se leen.
-    rows = (
-        q.options(joinedload(Link.from_url_rel))
-        .order_by(Link.to_url_hash, Link.id)
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
-    )
-
-    sondas = _sondas_de(db, job_id, (r.to_url_hash for r in rows if not r.is_internal))
+    r = E.listar_enlaces(db, job, filtros, orden, page, page_size)
+    filas = r["filas"]
+    if r["archivado"]:
+        filas = _como_links(db, job_id, filas)
+    destinos = E.destinos_de(db, job_id, (getattr(x, "to_url_hash", None) for x in filas))
     items = []
-    for r in rows:
-        resp = LinkResponse.model_validate(r)
-        if r.from_url_rel:
-            resp.from_url = r.from_url_rel.url
-        resp.estado_externo, resp.status_externo = sondas.get(r.to_url_hash, (None, None))
+    for x in filas:
+        resp = LinkResponse.model_validate(x)
+        if x.from_url_rel is not None:
+            resp.from_url = x.from_url_rel.url
+        d = destinos.get(x.to_url_hash) or E.Destino("sin_dato")
+        resp.estado_destino, resp.status_destino = d.grupo, d.status
+        # Los dos campos de la sonda (decision 123), como antes: solo externos.
+        if not x.is_internal and d.veredicto is not None:
+            resp.estado_externo, resp.status_externo = d.veredicto, d.status
         items.append(resp)
+    out = _paginate(items=items, total=r["total"], page=page, page_size=page_size)
+    out.update(orden=orden, por_estado=r["por_estado"], filtros=filtros.activos(),
+               archivado=r["archivado"])
+    return out
 
-    return _paginate(
-        items=items,
-        total=total,
-        page=page,
-        page_size=page_size,
-    )
+
+@router.get("/links/destinos", response_model=DestinosResponse)
+def list_link_destinations(
+    job_id: uuid.UUID,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    orden: Literal["estado", "paginas", "url"] = Query(
+        "estado", description="estado: rotos primero y luego los mas enlazados; paginas; url"),
+    filtros=Depends(_filtros_enlaces),
+    db: Session = Depends(get_session),
+):
+    """Enlaces agrupados por URL de destino (decision 195): cuantas paginas la
+    enlazan, cuantos enlaces y apariciones, sus anclas mas usadas y su estado.
+    Los filtros de enlace (origen, ancla, posicion...) se aplican antes de
+    agrupar; los de estado y codigo, al destino."""
+    from api import enlaces as E
+
+    job = _get_job_or_404(job_id, db)
+    r = E.listar_destinos(db, job, filtros, orden, page, page_size)
+    out = _paginate(items=r["items"], total=r["total"], page=page, page_size=page_size)
+    out.update(orden=orden, por_estado=r["por_estado"], filtros=filtros.activos(),
+               archivado=r["archivado"])
+    return out
+
+
+@router.get("/links/resumen")
+def links_summary(job_id: uuid.UUID, db: Session = Depends(get_session)):
+    """Enlaces y destinos internos y externos del censo, y los destinos por
+    estado (decision 195). Lo que la barra del Explorador pone en «Externas»."""
+    from api import enlaces as E
+
+    job = _get_job_or_404(job_id, db)
+    return E.resumen(db, job)
 
 
 # ---------------------------------------------------------------------------
