@@ -884,7 +884,7 @@ def _config_resuelta(db: Session, cliente: Client | None, perfil: CrawlProfile |
 
     Sin cliente, como `create_job`: lo de serie con el borrador encima."""
     from api.avisos_config import avisos_de_config, historial_de_bloqueos
-    from shared.clientes import origen_de_config
+    from shared.clientes import origen_de_config, origen_por_clave
 
     capas = {
         "cliente": (cliente.config_defecto if cliente else None) or {},
@@ -902,7 +902,7 @@ def _config_resuelta(db: Session, cliente: Client | None, perfil: CrawlProfile |
         fingido_c = Client(config_defecto=capas["cliente"]) if nivel == "cliente" else cliente
         fingido_p = (CrawlProfile(config=capas["perfil"]) if nivel == "perfil" else perfil)
         config = resolver_config(fingido_c, fingido_p, capas["rastreo"])
-    historial = historial_de_bloqueos(db, cliente.id) if cliente else None
+    historial = historial_de_bloqueos(db, cliente, perfil) if cliente else None
     try:
         avisos = avisos_de_config(config, historial)
     except Exception:  # noqa: BLE001 - un aviso que falla no tapa la config
@@ -922,6 +922,7 @@ def _config_resuelta(db: Session, cliente: Client | None, perfil: CrawlProfile |
         config=config,
         config_heredada=fusionar_config(capas["cliente"], capas["perfil"]),
         origen=origen_de_config(*((k, v) for k, v in capas.items())),
+        origen_por_clave=origen_por_clave(*((k, v) for k, v in capas.items())),
         serie=JobConfig().model_dump(),
         avisos=avisos,
         programaciones=propias,

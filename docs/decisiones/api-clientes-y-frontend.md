@@ -610,8 +610,9 @@
      resuelve un **borrador** de un nivel sin guardarlo y lo valida como al
      guardar: es el bloque «Así rastreará» mientras se edita.
    - **Avisos solo con lo que se sabe** (`api/avisos_config.py`): el del WAF
-     sale si un rastreo anterior del cliente se paró por un bloqueo
-     (`finish_reason`) o tuvo respuestas de muro (`health.no_validas`), con sus
+     sale si un rastreo anterior **del mismo sitio** se paró por un bloqueo
+     (`finish_reason`) o tuvo respuestas de muro (`health.por_clase`: WAF,
+     captcha o 429; no las binarias), con sus
      cifras y la concurrencia de entonces frente a la de ahora; parado y con la
      misma o más concurrencia es «peligro», muros sueltos un aviso. Sin ese
      rastro no se dice nada del WAF. El resto sale de la propia configuración
@@ -633,5 +634,28 @@
    claves de Gemini del análisis semántico siguen donde estaban (en la base de
    datos, como antes de esta decisión); Ajustes solo dice cuántas hay.
 
-   Tests: `tests/test_config_niveles.py` (API: origen, borrador, avisos,
-   ajustes sin secretos) y `tests/test_config_niveles_frontend.py`.
+   **Revisión del 26-oct** (revisor independiente, antes de subir):
+
+   - «Del mismo sitio» = alguna semilla del rastreo anterior en los hosts del
+     próximo (las semillas del perfil o, sin perfil, los dominios del cliente y
+     las semillas de sus perfiles propios; `www.` no cuenta). Antes miraba todo
+     el cliente, y el bloqueo del sitio de un competidor salía como «peligro»
+     en el sitio principal (reglas 67 y 70). Los rastreos limpios del mismo
+     sitio que vinieron después se dicen y rebajan el aviso (a «info» si uno
+     salió con la misma o más concurrencia que la de ahora), y «bajar la
+     concurrencia» ya no se propone si ahora sale más despacio que entonces.
+   - `config-resuelta` trae `origen_por_clave`: cabeceras, cookies, topes y
+     reglas con nombre se fusionan clave a clave, y atribuirlas enteras a la
+     última capa mandaba a quitar al perfil una cabecera que era del cliente.
+   - El JSON de «Avanzado» se aplica al dejar de escribir y antes de guardar o
+     lanzar; con un botón aparte, lo escrito sin pulsarlo se perdía en silencio
+     y la interfaz daba el guardado por bueno. Un JSON a medias bloquea el
+     guardado con su error.
+   - En los enteros el punto solo es de miles si lo parece (`5.000`): «1.5» en
+     el máximo de URLs era 15 sin aviso.
+   - El «Nuevo rastreo» visible de la ficha del cliente trae también el perfil
+     principal (solo lo hacía el atajo «n»).
+
+   Tests: `tests/test_config_niveles.py` (API: origen y origen por clave,
+   borrador, avisos del mismo sitio, ajustes sin secretos) y
+   `tests/test_config_niveles_frontend.py`.

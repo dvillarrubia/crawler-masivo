@@ -60,6 +60,29 @@ def test_origen_por_capa_y_lo_de_serie(entorno):
     assert r["serie"]["concurrent_requests"] == r["config"]["concurrent_requests"]
 
 
+def test_cabeceras_y_topes_dicen_el_nivel_de_cada_clave(entorno):
+    # Revision del 26-oct: se fusionan clave a clave, y decir «del perfil» de
+    # todas mandaba a quitar al perfil la cabecera del cliente.
+    from shared.clientes import origen_por_clave
+
+    api, _ = entorno
+    c = _cliente(api, config_defecto={"http": {"custom_headers": {"X-A": "1"}},
+                                      "topes_por_carpeta": {"blogs.acme.com": 100, "/tienda/": 50}})
+    p = _perfil(api, c, config={"http": {"custom_headers": {"X-B": "2"}},
+                                "topes_por_carpeta": {"blogs.acme.com/*": 300}})
+    r = api.get(f"/api/clients/{c['id']}/config-resuelta", params={"profile_id": p["id"]}).json()
+    assert r["config"]["http"]["custom_headers"] == {"X-A": "1", "X-B": "2"}
+    assert r["origen_por_clave"]["http.custom_headers"] == {"X-A": "cliente", "X-B": "perfil"}
+    # Otra grafia de la misma regla la sustituye (gana la del perfil).
+    assert r["origen_por_clave"]["topes_por_carpeta"] == {"blogs.acme.com/*": "perfil", "/tienda/": "cliente"}
+    # Un null quita la clave, como en la fusion.
+    assert origen_por_clave(("cliente", {"topes_por_carpeta": {"/a/": 1, "/b/": 2}}),
+                            ("rastreo", {"topes_por_carpeta": {"/a/": None}})) == {"topes_por_carpeta": {"/b/": "cliente"}}
+    # Un dict quitado entero con null no deja claves de arriba.
+    assert origen_por_clave(("cliente", {"http": {"cookies": {"a": "1"}}}),
+                            ("perfil", {"http": {"cookies": None}})) == {}
+
+
 def test_un_null_cuenta_como_decision_de_esa_capa():
     o = origen_de_config(("cliente", {"max_urls": 500, "http": {"custom_headers": {"X": "1"}}}),
                          ("perfil", {"max_urls": None}))
@@ -179,22 +202,28 @@ def test_un_rastreo_parado_por_el_waf_avisa_con_cifras(entorno):
     api, Sesion = entorno
     c = _cliente(api)
     _job(Sesion, c, name="Censo octubre", status="failed", finish_reason="bloqueado_por_waf",
-         health={"respuestas": 60, "no_validas": 55}, config={"concurrent_requests_per_domain": 8})
+         health={"respuestas": 60, "no_validas": 55, "por_clase": {"challenge_waf": 55, "contenido": 5}},
+         config={"concurrent_requests_per_domain": 8})
     a = [x for x in _avisos(api, c, {"concurrent_requests_per_domain": 8})
          if x["campo"] == "concurrent_requests_per_domain"]
     assert len(a) == 1 and a[0]["nivel"] == "peligro"
     assert "«Censo octubre» del 19 oct se paró" in a[0]["texto"]
     assert "8 peticiones a la vez por dominio; este saldría con 8, las mismas" in a[0]["texto"]
+    assert "Bajar la concurrencia" in a[0]["texto"]
     menos = [x for x in _avisos(api, c, {"concurrent_requests_per_domain": 2})
              if x["campo"] == "concurrent_requests_per_domain"]
     assert menos[0]["nivel"] == "aviso" and "menos que entonces" in menos[0]["texto"]
+    # Ya sale mas despacio que entonces: no se le pide que baje.
+    assert "Bajar la concurrencia" not in menos[0]["texto"]
 
 
 def test_muros_sin_parar_tambien_se_dicen(entorno):
     api, Sesion = entorno
     c = _cliente(api)
     _job(Sesion, c, status="completed", finish_reason="finished",
-         health={"respuestas": 4000, "no_validas": 1234}, config={"concurrent_requests_per_domain": 8})
+         health={"respuestas": 4000, "no_validas": 1234,
+                 "por_clase": {"captcha": 1000, "rate_limited": 234, "contenido": 2766}},
+         config={"concurrent_requests_per_domain": 8})
     a = [x for x in _avisos(api, c, {}) if x["campo"] == "concurrent_requests_per_domain"]
     assert "1.234 de 4.000 respuestas (30,9 %) fueron un muro" in a[0]["texto"]
     # Unos muros que no pararon el rastreo no son un peligro: un aviso.
@@ -202,6 +231,72 @@ def test_muros_sin_parar_tambien_se_dicen(entorno):
     menos = [x for x in _avisos(api, c, {"concurrent_requests_per_domain": 2})
              if x["campo"] == "concurrent_requests_per_domain"]
     assert menos[0]["nivel"] == "info"
+
+
+def _aviso_waf(api, c, config, profile_id=None):
+    cuerpo = {"cliente_id": c["id"], "config": config}
+    if profile_id:
+        cuerpo.update(profile_id=profile_id, nivel="perfil")
+    r = api.post("/api/clients/config-resuelta", json=cuerpo)
+    assert r.status_code == 200, r.text
+    return [x for x in r.json()["avisos"] if x["campo"] == "concurrent_requests_per_domain"]
+
+
+def test_el_bloqueo_de_un_competidor_no_avisa_al_sitio_principal(entorno):
+    # Revision del 26-oct: el historial se mira por el SITIO (semillas), no
+    # por el cliente. Un competidor del mismo cliente es otro WAF.
+    api, Sesion = entorno
+    c = _cliente(api)
+    principal = _perfil(api, c)
+    comp = _perfil(api, c, nombre="Competidor X", rol="competidor", seeds=["https://www.rival.es/"])
+    import uuid as _u
+    from datetime import datetime, timezone
+    with Sesion() as s:
+        s.add(Job(id=_u.uuid4(), name="Competidor X censo", seeds=["https://www.rival.es/"],
+                  cliente_id=_u.UUID(c["id"]), profile_id=_u.UUID(comp["id"]),
+                  created_at=datetime(2026, 10, 20, tzinfo=timezone.utc), status="failed",
+                  finish_reason="bloqueado_por_waf", health={"respuestas": 50, "por_clase": {"challenge_waf": 50}},
+                  config={"concurrent_requests_per_domain": 4}))
+        s.commit()
+    assert _aviso_waf(api, c, {"concurrent_requests_per_domain": 16}, principal["id"]) == []
+    # Ni en la config del cliente, que rastrea sus dominios y sus perfiles propios.
+    assert _aviso_waf(api, c, {"concurrent_requests_per_domain": 16}) == []
+    # En el propio competidor, si.
+    a = _aviso_waf(api, c, {"concurrent_requests_per_domain": 16}, comp["id"])
+    assert len(a) == 1 and a[0]["nivel"] == "peligro"
+
+
+def test_las_respuestas_binarias_no_son_un_muro(entorno):
+    api, Sesion = entorno
+    c = _cliente(api)
+    _job(Sesion, c, status="completed", finish_reason="finished",
+         health={"respuestas": 103, "no_validas": 3, "por_clase": {"respuesta_binaria": 3, "contenido": 100}},
+         config={"concurrent_requests_per_domain": 8})
+    assert _aviso_waf(api, c, {"concurrent_requests_per_domain": 8}) == []
+
+
+def test_rastreos_limpios_despues_del_bloqueo_rebajan_el_aviso(entorno):
+    from datetime import datetime, timezone
+
+    api, Sesion = entorno
+    c = _cliente(api)
+    _job(Sesion, c, name="Censo septiembre", status="failed", finish_reason="bloqueado_por_waf",
+         health={"respuestas": 60, "por_clase": {"challenge_waf": 60}},
+         config={"concurrent_requests_per_domain": 16})
+    _job(Sesion, c, name="Censo octubre", status="completed", finish_reason="finished",
+         health={"respuestas": 9000, "por_clase": {"contenido": 9000}},
+         config={"concurrent_requests_per_domain": 6})
+    # `_job` pone el 19 oct a todos: el limpio, despues.
+    with Sesion() as s:
+        j = s.query(Job).filter(Job.name == "Censo octubre").one()
+        j.created_at = datetime(2026, 10, 24, tzinfo=timezone.utc)
+        s.commit()
+    a = _aviso_waf(api, c, {"concurrent_requests_per_domain": 6})
+    assert a[0]["nivel"] == "info"
+    assert "Después, «Censo octubre» del 24 oct salió con 6 a la vez sin muros." in a[0]["texto"]
+    # Mas rapido que el limpio y que el bloqueado: baja un escalon, no desaparece.
+    a = _aviso_waf(api, c, {"concurrent_requests_per_domain": 20})
+    assert a[0]["nivel"] == "aviso"
 
 
 def test_avisos_de_la_propia_config(entorno):

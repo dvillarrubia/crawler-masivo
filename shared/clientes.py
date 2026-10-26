@@ -232,6 +232,53 @@ def origen_de_config(*capas: tuple[str, dict | None]) -> dict[str, str]:
     return salida
 
 
+def origen_por_clave(*capas: tuple[str, dict | None]) -> dict[str, dict[str, str]]:
+    """De que capa sale cada CLAVE de los dicts que `origen_de_config` cuenta
+    enteros (cabeceras, cookies, topes, reglas con nombre).
+
+    `fusionar_config` los fusiona clave a clave: con `X-A` en el cliente y
+    `X-B` en el perfil salen las dos, y decir «del perfil» de las dos mandaba
+    a quitar `X-A` a un sitio donde no esta (revision del 26-oct de la
+    decision 196). Mismas reglas que la fusion: un `None` quita la clave, y
+    en `topes_por_carpeta` dos grafias de la misma regla son la misma clave
+    (gana la de la capa mas concreta). Solo salen los dicts que no quedan
+    vacios: `{"http.custom_headers": {"X-A": "cliente", "X-B": "perfil"}}`.
+    """
+    salida: dict[str, dict[str, str]] = {}
+    for ruta in DICTS_COMO_VALOR:
+        normal = _normalizador(ruta)
+        quien: dict[str, str] = {}
+        for nombre, capa in capas:
+            sub = capa or {}
+            for parte in ruta.split("."):
+                sub = sub.get(parte) if isinstance(sub, dict) else None
+            if sub is None and capa and _tiene_ruta(capa, ruta):
+                quien = {}  # la capa quita el dict entero
+                continue
+            if not isinstance(sub, dict):
+                continue
+            for clave, valor in sub.items():
+                if normal is not None:
+                    for vieja in [k for k in quien if normal(k) == normal(clave)]:
+                        quien.pop(vieja)
+                if valor is None:
+                    quien.pop(clave, None)
+                else:
+                    quien[clave] = nombre
+        if quien:
+            salida[ruta] = quien
+    return salida
+
+
+def _tiene_ruta(capa: dict, ruta: str) -> bool:
+    sub = capa
+    for parte in ruta.split("."):
+        if not isinstance(sub, dict) or parte not in sub:
+            return False
+        sub = sub[parte]
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Cliente a partir de un texto (compatibilidad con `client_id`)
 # ---------------------------------------------------------------------------

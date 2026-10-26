@@ -5,8 +5,9 @@ Los ensena el bloque «Así rastreará» de la interfaz (revision de UX del 25-o
 rastreo. Dos reglas:
 
 - **Lo que no se sabe no se dice.** El aviso del WAF solo sale si un rastreo
-  anterior del cliente se PARO por un bloqueo (`jobs.finish_reason`) o tuvo
-  respuestas de muro (`jobs.health`, decision 103). Sin ese rastro no se
+  anterior del MISMO SITIO (por las semillas, no por el cliente: un
+  competidor es otro sitio) se PARO por un bloqueo (`jobs.finish_reason`) o
+  tuvo respuestas de muro (`jobs.health.por_clase`, decision 103). Sin ese rastro no se
   avisa de nada: «32 peticiones contra un sitio con WAF» seria una suposicion.
 - **Best-effort.** Si algo falla al leer el historial, no hay avisos de
   historial; el resto se calcula sobre la configuracion, que ya esta validada.
@@ -41,30 +42,94 @@ def _aviso(nivel: str, texto: str, campo: str | None = None) -> dict:
     return {"nivel": nivel, "texto": texto, "campo": campo}
 
 
-def historial_de_bloqueos(db, cliente_id) -> dict | None:
-    """El rastreo mas reciente del cliente que se paro por un bloqueo o que
-    tuvo respuestas de muro. None si no hay ninguno (o si no se pudo leer)."""
+# Las clases de `jobs.health.por_clase` que son un muro. `no_validas` no
+# vale: cuenta tambien `respuesta_binaria`, que es un fichero servido como
+# HTML, no un bloqueo (revision del 26-oct de la decision 196).
+CLASES_MURO = ("challenge_waf", "captcha", "rate_limited")
+
+
+def _host(texto) -> str:
+    """El host de una semilla o de un dominio, sin `www.`: `www.acme.com` y
+    `acme.com` son el mismo sitio a efectos de un WAF; `blog.acme.com`, no."""
+    from urllib.parse import urlsplit
+
+    t = str(texto or "").strip().lower()
+    if not t:
+        return ""
+    host = urlsplit(t if "//" in t else "//" + t).hostname or ""
+    return host[4:] if host.startswith("www.") else host
+
+
+def hosts_del_objetivo(db, cliente, perfil=None) -> set[str]:
+    """Los hosts que rastrearia el proximo rastreo: los de las semillas del
+    perfil o, sin perfil, los dominios del cliente y las semillas de sus
+    perfiles propios (un competidor es otro sitio)."""
+    if perfil is not None and perfil.seeds:
+        return {h for h in map(_host, perfil.seeds) if h}
+    hosts = {h for h in map(_host, cliente.dominios or []) if h}
+    if perfil is None:
+        from shared.models import CrawlProfile
+
+        for seeds, rol in (db.query(CrawlProfile.seeds, CrawlProfile.rol)
+                           .filter(CrawlProfile.cliente_id == cliente.id).all()):
+            if rol != "competidor":
+                hosts |= {h for h in map(_host, seeds or []) if h}
+    return hosts
+
+
+def _muros(salud: dict) -> int:
+    por_clase = salud.get("por_clase")
+    if not isinstance(por_clase, dict):
+        return 0
+    return sum(int(por_clase.get(c) or 0) for c in CLASES_MURO)
+
+
+def historial_de_bloqueos(db, cliente, perfil=None) -> dict | None:
+    """El rastreo mas reciente DEL MISMO SITIO que se paro por un bloqueo o
+    que tuvo respuestas de muro, y los rastreos limpios que vinieron despues.
+    None si no hay ninguno, si no se sabe que sitio se rastreara o si no se
+    pudo leer.
+
+    «Del mismo sitio» = alguna semilla del rastreo en los hosts del objetivo
+    (`hosts_del_objetivo`): un bloqueo en el sitio de un competidor del mismo
+    cliente no dice nada del WAF del cliente (reglas 67 y 70: lo que no se
+    sabe no se afirma)."""
     try:
         from shared.models import Job
         from shared.respuestas import MOTIVOS_BLOQUEO, RATE_LIMITED
 
+        objetivo = hosts_del_objetivo(db, cliente, perfil)
+        if not objetivo:
+            return None
         filas = (db.query(Job.id, Job.name, Job.created_at, Job.finish_reason,
-                          Job.health, Job.config)
-                 .filter(Job.cliente_id == cliente_id)
+                          Job.health, Job.config, Job.seeds)
+                 .filter(Job.cliente_id == cliente.id)
                  .order_by(Job.created_at.desc()).limit(HISTORIAL).all())
-        for jid, nombre, creado, motivo, salud, config in filas:
-            salud = salud if isinstance(salud, dict) else {}
-            no_validas = int(salud.get("no_validas") or 0)
-            parado = motivo in MOTIVOS_BLOQUEO
-            if not parado and not no_validas:
+        limpio = None  # el limpio mas reciente posterior al bloqueo
+        limpios = 0
+        for jid, nombre, creado, motivo, salud, config, seeds in filas:
+            if not ({_host(s) for s in (seeds or [])} & objetivo):
                 continue
+            salud = salud if isinstance(salud, dict) else {}
             config = config if isinstance(config, dict) else {}
+            muros = _muros(salud)
+            parado = motivo in MOTIVOS_BLOQUEO
+            if not parado and not muros:
+                # Limpio solo si se sabe: un rastreo sin `health` (en marcha o
+                # de antes de la decision 103) no dice nada.
+                if int(salud.get("respuestas") or 0) > 0:
+                    limpios += 1
+                    if limpio is None:
+                        limpio = {"nombre": nombre, "fecha": creado,
+                                  "por_dominio": config.get("concurrent_requests_per_domain")}
+                continue
             return {
                 "job_id": str(jid), "nombre": nombre, "fecha": creado,
                 "parado": parado, "rate_limited": motivo == RATE_LIMITED,
-                "no_validas": no_validas, "respuestas": int(salud.get("respuestas") or 0),
+                "no_validas": muros, "respuestas": int(salud.get("respuestas") or 0),
                 "por_dominio": config.get("concurrent_requests_per_domain"),
                 "retraso": (config.get("crawl_behavior") or {}).get("request_delay"),
+                "limpios_despues": limpios, "limpio": limpio,
             }
     except Exception:  # noqa: BLE001 - best-effort: sin historial no hay aviso
         log.warning("No se pudo leer el historial de bloqueos", exc_info=True)
@@ -103,11 +168,27 @@ def avisos_de_config(config: dict[str, Any], historial: dict | None = None) -> l
             igual_o_mas = True
         # Pararse por un bloqueo y salir igual o mas rapido es lo que hay que
         # mirar antes de lanzar; unos muros sueltos que no lo pararon, no.
+        niveles = ("info", "aviso", "peligro")
         if historial["parado"]:
             nivel = "peligro" if igual_o_mas else "aviso"
         else:
             nivel = "aviso" if igual_o_mas else "info"
-        if historial["parado"] and not float(cb.get("request_delay") or 0):
+        # Rastreos limpios del mismo sitio despues: si uno salio con al menos
+        # esta concurrencia, el bloqueo de entonces ya no dice mucho de hoy.
+        limpio = historial.get("limpio")
+        if limpio:
+            n = historial.get("limpios_despues") or 1
+            otros = f" (y {_num(n - 1)} más)" if n > 1 else ""
+            lpd = limpio.get("por_dominio")
+            texto += (f" Después, «{limpio['nombre']}» del {_fecha(limpio.get('fecha'))}{otros} salió"
+                      + (f" con {_num(lpd)} a la vez" if isinstance(lpd, int) else "")
+                      + " sin muros.")
+            if isinstance(lpd, int) and lpd >= por_dominio:
+                nivel = "info"
+            else:
+                nivel = niveles[max(0, niveles.index(nivel) - 1)]
+        # Solo se propone bajar si este no sale ya mas despacio que aquel.
+        if historial["parado"] and igual_o_mas and not float(cb.get("request_delay") or 0):
             texto += " Bajar la concurrencia o poner una pausa entre peticiones suele bastar."
         avisos.append(_aviso(nivel, texto, "concurrent_requests_per_domain"))
 

@@ -1769,6 +1769,9 @@ class ConfigResueltaResponse(BaseModel):
     # sale es el valor de serie, que va entero en `serie`. Con `avisos`, el
     # bloque «Así rastreará» de la interfaz.
     origen: dict[str, str] = Field(default_factory=dict)
+    # Cabeceras, cookies, topes y reglas con nombre se fusionan clave a clave:
+    # aqui la capa de cada clave (`{"http.custom_headers": {"X-A": "cliente"}}`).
+    origen_por_clave: dict[str, dict[str, str]] = Field(default_factory=dict)
     serie: dict[str, Any] = Field(default_factory=dict)
     avisos: list[AvisoDeConfig] = Field(default_factory=list)
     # Las programaciones del perfil que cambian algo por su cuenta
