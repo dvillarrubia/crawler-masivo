@@ -760,9 +760,10 @@
           </div>
           <!-- El unico «Nuevo rastreo» de la ficha (revision de UX del 25-oct,
                2.1 y V47): el de la barra de arriba se esconde aqui. Viene con
-               el cliente ya puesto. -->
+               el cliente y su perfil principal (revision del 26-oct: antes solo el
+               cliente, y el rastreo salia sin perfil ni semillas). -->
           <template x-if="cliente">
-            <button class="btn btn-primary btn-sm" @click="openCreate({ cliente_id: cliente.id })" data-testid="cliente-nuevo-rastreo"
+            <button class="btn btn-primary btn-sm" @click="openCreate(_presetDelContexto())" data-testid="cliente-nuevo-rastreo"
                     style="display:flex;align-items:center;gap:.35rem">
               <i data-lucide="plus-circle" style="width:14px;height:14px"></i> Nuevo rastreo
             </button>
@@ -8046,9 +8047,13 @@
         <p class="text-sm text-dim">Solo lo que fija este nivel; lo demás se hereda. Aquí va también lo que el formulario no tiene
           (plantillas, segmentos, marcas, extracción a medida…). Las mismas claves que <code>projects/&lt;cliente&gt;/config.json</code>;
           <code>null</code> quita lo heredado.</p>
-        <textarea rows="7" class="mono" x-model="i.json" aria-label="Configuración de este nivel en JSON"></textarea>
+        <textarea rows="7" class="mono" x-model="i.json" @input="cfgEscribirJson(i)" @blur="i.jsonSucio && cfgAplicar(i)"
+                  aria-label="Configuración de este nivel en JSON"></textarea>
         <div class="cfg-error" x-show="i.jsonError" x-text="i.jsonError" role="alert"></div>
-        <button type="button" class="btn btn-sm" @click="cfgAplicar(i)">Aplicar el JSON</button>
+        <!-- Se aplica solo al dejar de escribir y antes de guardar o lanzar
+             (revision del 26-oct de la decision 196): con un boton aparte, lo
+             escrito sin pulsarlo se perdia en silencio. -->
+        <p class="form-hint">Se aplica al dejar de escribir; los campos de arriba se ponen al día.</p>
       </div>
     </details>
   </div>

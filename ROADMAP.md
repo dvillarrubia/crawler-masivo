@@ -1075,10 +1075,13 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   «volver al heredado»; se valida con los límites de `JobConfig`. «Así
   rastreará» enseña la config con la que saldría el próximo rastreo y de dónde
   viene cada valor (`config-resuelta` con borrador), con avisos que solo
-  afirman lo que se sabe: el del WAF, si un rastreo anterior del cliente se
-  paró por un bloqueo o tuvo muros. Nuevo rastreo trae el cliente y su perfil
-  y lo avanzado plegado; sin cliente lo avisa. Configuración del cliente en
-  secciones plegables con índice.
+  afirman lo que se sabe: el del WAF, si un rastreo anterior del mismo sitio
+  (no de un competidor) se paró por un bloqueo o tuvo muros, rebajado si
+  después hubo rastreos limpios. Nuevo rastreo (también el botón de la ficha)
+  trae el cliente y su perfil y lo avanzado plegado; sin cliente lo avisa.
+  Configuración del cliente en secciones plegables con índice. El JSON de
+  «Avanzado» se aplica solo, y cabeceras y cookies dicen el nivel de cada
+  clave (revisión del 26-oct).
 - **Ajustes de la agencia** (2.5; decisión 196; en local): bot de Slack,
   llaves de Search Console, si están las claves de los modelos y su tope,
   importar backup y tema, fuera de la ficha de cada cliente. **Pendiente:** las

@@ -119,7 +119,10 @@ def test_la_validacion_del_navegador():
                 cfgParsear(c['crawl_behavior.request_delay'], '0,5'),
                 cfgParsear(c.exclude_patterns, ' /a/ \\n\\n/b/ '),
                 cfgParsear(c['http.custom_headers'], 'X-Uno: 1\\nmal'),
-                cfgParsear(c.topes_por_carpeta, '/blog/ = 500')];
+                cfgParsear(c.topes_por_carpeta, '/blog/ = 500'),
+                cfgParsear(c.max_urls, '1.5'),
+                cfgParsear(c.max_urls, '1.200.000'),
+                cfgParsear(c.max_depth, '10.00')];
     }""")
     assert r[0] == {"error": "Entre 1 y 64"}
     assert r[1] == {"error": "Tiene que ser un número entero"}
@@ -130,6 +133,10 @@ def test_la_validacion_del_navegador():
     assert r[6] == {"valor": ["/a/", "/b/"]}
     assert r[7] == {"error": "Falta «:» en «mal»"}
     assert r[8] == {"valor": {"/blog/": 500}}
+    # Revision del 26-oct: «1.5» no es 15; el punto solo es de miles si lo parece.
+    assert "entero" in r[9]["error"]
+    assert r[10] == {"valor": 1200000}
+    assert "entero" in r[11]["error"]
 
 
 # --- heredado, cambiado y volver al heredado --------------------------------
@@ -196,6 +203,68 @@ def test_el_json_de_avanzado_sustituye_el_nivel_y_avisa_si_no_vale():
     (ok, propia, fuera), mal, error = r
     assert ok is True and propia == {"marcas": ["acme"]} and fuera == ["marcas"]
     assert mal is False and "objeto" in error
+
+
+def test_el_json_sin_aplicar_no_se_pierde_al_guardar_ni_al_tocar_un_campo():
+    # Revision del 26-oct: lo escrito en «Avanzado» sin pulsar «Aplicar» se
+    # mandaba sin ello y la interfaz daba el guardado por bueno.
+    r = _inst("""
+        i.json = '{"marcas": ["uoc"]}'; cfgJsonEscrito(i);
+        const guardar = cfgListoParaGuardar(i);
+        const tras_guardar = JSON.parse(JSON.stringify(i.propia));
+        i.json = '{"plantillas": {"ficha": "/p/"}}'; cfgJsonEscrito(i);
+        cfgCambiar(i, 'max_urls', '500');
+        const tras_campo = JSON.parse(JSON.stringify(i.propia));
+        i.json = '{"marcas": '; cfgJsonEscrito(i);
+        const mal = cfgListoParaGuardar(i);
+        return [guardar, tras_guardar, tras_campo, mal, i.json];""")
+    guardar, tras_guardar, tras_campo, mal, texto = r
+    assert guardar == "" and tras_guardar == {"marcas": ["uoc"]}
+    assert tras_campo == {"plantillas": {"ficha": "/p/"}, "max_urls": 500}
+    assert "Avanzado" in mal and "no es válido" in mal
+    assert texto == '{"marcas": ', "un JSON a medias no se borra"
+
+
+def test_cabeceras_de_dos_niveles_cada_una_con_el_suyo():
+    # Revision del 26-oct: X-A del cliente y X-B del perfil; antes las dos
+    # salian «del perfil» y quitar X-A mandaba al perfil, donde no esta.
+    r = _evaluar("""() => {
+        const i = cfgNuevo('rastreo', {base: {http: {custom_headers: {'X-A': '1', 'X-B': '2'}}},
+                                       origen: {'http.custom_headers': 'perfil'},
+                                       origenClave: {'http.custom_headers': {'X-A': 'cliente', 'X-B': 'perfil'}}});
+        const etiqueta = cfgEtiquetaOrigen(i, 'http.custom_headers');
+        const error = cfgCambiar(i, 'http.custom_headers', 'X-C: 3');
+        const asi = cfgAsiLineas({nivel: 'rastreo', resuelta: {config: {http: {custom_headers: {'X-A': '1', 'X-B': '2'}}},
+            origen: {'http.custom_headers': 'perfil'},
+            origen_por_clave: {'http.custom_headers': {'X-A': 'cliente', 'X-B': 'perfil'}}}})
+            .filter(l => l.ruta === 'http.custom_headers').map(l => cfgOrigenAsi(l.origen, 'rastreo'));
+        return [etiqueta, error, asi];
+    }""")
+    etiqueta, error, asi = r
+    assert etiqueta == "del cliente y del perfil"
+    assert "«X-A» viene del cliente" in error and "«X-B» viene del perfil" in error and "quítalas allí" in error
+    assert asi == ["del cliente y del perfil"]
+
+
+def test_el_boton_de_la_ficha_trae_el_perfil_principal():
+    # Revision del 26-oct: el «Nuevo rastreo» visible de la ficha llamaba a
+    # openCreate solo con el cliente. Se EJECUTA su @click de index.html.
+    import re
+
+    html = (RAIZ / "frontend" / "index.html").read_text(encoding="utf-8")
+    boton = re.search(r'<button[^>]*data-testid="cliente-nuevo-rastreo"[^>]*>', html).group(0)
+    clic = re.search(r'@click="([^"]+)"', boton).group(1)
+    r = _evaluar("""() => {
+        const a = app();
+        let pedido = null;
+        a.openCreate = p => { pedido = p; };
+        a.view = 'client'; a.cliente = {id: 'c1'};
+        a.clientePerfiles = [{id: 'p0', nombre: 'Competidor', rol: 'competidor', activo: true},
+                             {id: 'p1', nombre: 'Sitio principal', rol: 'propio', activo: true}];
+        with (a) { eval(""" + repr(clic) + """); }
+        return pedido;
+    }""")
+    assert r == {"cliente_id": "c1", "profile_id": "p1"}
 
 
 def test_la_contrasena_del_basic_solo_en_un_rastreo():

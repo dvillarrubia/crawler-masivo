@@ -1633,8 +1633,9 @@ function app() {
     async submitCreate(extra = null) {
       this.createError = null;
       const i = this.cfgRastreo;
-      if (i && cfgHayErrores(i)) {
-        this.createError = 'Hay campos de la configuración con error: corrígelos o vuelve al heredado.';
+      const mal = cfgListoParaGuardar(i);
+      if (mal) {
+        this.createError = mal;
         return;
       }
       this.creating = true;
@@ -1699,6 +1700,7 @@ function app() {
       const inst = cfgNuevo(nivel, {
         base: nivel === 'cliente' ? serie : r.config,
         origen: nivel === 'cliente' ? {} : (r.origen || {}),
+        origenClave: nivel === 'cliente' ? {} : (r.origen_por_clave || {}),
         serie, propia, ctx,
       });
       return { inst, r };
@@ -1750,7 +1752,14 @@ function app() {
     },
 
     cfgAplicar(i) {
+      clearTimeout(i._temporizadorJson);
       if (cfgAplicarJson(i)) this.cfgProgramar(i);
+    },
+
+    cfgEscribirJson(i) {
+      cfgJsonEscrito(i);
+      clearTimeout(i._temporizadorJson);
+      i._temporizadorJson = setTimeout(() => { if (i.jsonSucio) this.cfgAplicar(i); }, 800);
     },
 
     cfgOpcionesHuella(i) {
@@ -2434,8 +2443,9 @@ function app() {
         if (f.slug) cuerpo.slug = f.slug;
       }
       if (quiere('config') && this.cfgCliente) {
-        if (cfgHayErrores(this.cfgCliente)) {
-          this.clienteError = 'Hay campos de la configuración con error: corrígelos o vuelve al heredado.';
+        const mal = cfgListoParaGuardar(this.cfgCliente);
+        if (mal) {
+          this.clienteError = mal;
           return;
         }
         cuerpo.config_defecto = this.cfgCliente.propia;
@@ -2603,8 +2613,9 @@ function app() {
       this.perfilError = '';
       const f = this.perfilForm;
       const i = this.cfgPerfil;
-      if (i && cfgHayErrores(i)) {
-        this.perfilError = 'Hay campos de la configuración con error: corrígelos o vuelve al heredado.';
+      const mal = cfgListoParaGuardar(i);
+      if (mal) {
+        this.perfilError = mal;
         return;
       }
       const cuerpo = {
@@ -6909,9 +6920,10 @@ function cfgNuevo(nivel, d) {
   d = d || {};
   const propia = JSON.parse(JSON.stringify(d.propia || {}));
   return {
-    nivel, base: d.base || {}, origenBase: d.origen || {}, serie: d.serie || d.base || {},
+    nivel, base: d.base || {}, origenBase: d.origen || {}, origenClave: d.origenClave || {},
+    serie: d.serie || d.base || {},
     propia, textos: {}, errores: {}, abiertos: {},
-    json: JSON.stringify(propia, null, 2), jsonError: '',
+    json: JSON.stringify(propia, null, 2), jsonError: '', jsonSucio: false,
     ctx: d.ctx || {}, resuelta: null, resueltaError: '', resolviendo: false, cargada: !!d.base,
   };
 }
@@ -7008,7 +7020,15 @@ function cfgParsear(c, texto) {
     }
     return { valor: salida };
   }
-  const t = String(texto ?? '').trim().replace(/\./g, c.tipo === 'entero' ? '' : '.').replace(',', '.');
+  let t = String(texto ?? '').trim();
+  if (c.tipo === 'entero' && t.includes('.')) {
+    // El punto solo es de miles si lo parece (5.000, 1.200.000): «1.5» como
+    // 15 sin decir nada era facil de colar en el maximo de URLs (revision
+    // del 26-oct de la decision 196).
+    if (!/^\d{1,3}(\.\d{3})+$/.test(t)) return { error: 'Tiene que ser un número entero (los miles, como 5.000)' };
+    t = t.replace(/\./g, '');
+  }
+  t = t.replace(',', '.');
   if (t === '') return c.nulo ? { valor: null } : { error: 'Hace falta un número' };
   const n = Number(t);
   if (!Number.isFinite(n)) return { error: 'Tiene que ser un número' };
@@ -7035,6 +7055,9 @@ function _cfgIgual(a, b) {
 
 // Cambia un campo en este nivel. Devuelve el error, o ''.
 function cfgCambiar(inst, ruta, texto) {
+  // Lo escrito en «Avanzado» y aun sin aplicar entra antes: si no, reescribir
+  // `json` con `propia` lo borraria (revision del 26-oct de la decision 196).
+  if (inst.jsonSucio) cfgAplicarJson(inst);
   const c = CAMPO_CONFIG[ruta];
   const r = c.tipo === 'ua'
     ? { valor: texto }
@@ -7054,7 +7077,15 @@ function cfgCambiar(inst, ruta, texto) {
     const her = heredado || {};
     const faltan = Object.keys(her).filter(k => !(k in r.valor));
     if (faltan.length) {
-      inst.errores[ruta] = `«${faltan.join('», «')}» viene ${ORIGEN_TEXTO[inst.origenBase[ruta]] || 'de arriba'}: quítala allí`;
+      // Cada clave con su nivel: cabeceras y cookies se fusionan por clave, y
+      // la del cliente no esta en el perfil aunque el perfil ponga otra
+      // (revision del 26-oct de la decision 196).
+      const pc = inst.origenClave[ruta] || {};
+      const grupos = {};
+      for (const k of faltan) (grupos[pc[k] || inst.origenBase[ruta] || ''] ||= []).push(k);
+      inst.errores[ruta] = Object.entries(grupos)
+        .map(([o, ks]) => `«${ks.join('», «')}» ${ks.length > 1 ? 'vienen' : 'viene'} ${ORIGEN_TEXTO[o] || 'de arriba'}`)
+        .join('; ') + (faltan.length > 1 ? ': quítalas allí' : ': quítala allí');
       inst.textos[ruta] = texto;
       return inst.errores[ruta];
     }
@@ -7068,8 +7099,10 @@ function cfgCambiar(inst, ruta, texto) {
   } else {
     cfgPoner(inst.propia, ruta, r.valor);
   }
-  inst.json = JSON.stringify(inst.propia, null, 2);
-  inst.jsonError = '';
+  if (!inst.jsonSucio) {
+    inst.json = JSON.stringify(inst.propia, null, 2);
+    inst.jsonError = '';
+  }
   return '';
 }
 
@@ -7081,10 +7114,11 @@ function cfgEfectivoSinPropia(inst, ruta) {
 
 // «volver al heredado»
 function cfgHeredar(inst, ruta) {
+  if (inst.jsonSucio) cfgAplicarJson(inst);
   cfgQuitar(inst.propia, ruta);
   delete inst.errores[ruta];
   delete inst.textos[ruta];
-  inst.json = JSON.stringify(inst.propia, null, 2);
+  if (!inst.jsonSucio) inst.json = JSON.stringify(inst.propia, null, 2);
 }
 
 // «Avanzado»: el JSON de este nivel, para lo que el formulario no tiene
@@ -7105,7 +7139,22 @@ function cfgAplicarJson(inst) {
   inst.errores = {};
   inst.textos = {};
   inst.jsonError = '';
+  inst.jsonSucio = false;
   return true;
+}
+
+// Antes de guardar o lanzar: lo escrito en «Avanzado» sin aplicar se aplica
+// (antes se mandaba `propia` sin ello y salia «Configuración guardada» con el
+// cambio perdido en silencio; revision del 26-oct de la decision 196). El
+// texto del error, o '' si se puede seguir.
+function cfgListoParaGuardar(inst) {
+  if (!inst) return '';
+  if (inst.jsonSucio && !cfgAplicarJson(inst)) {
+    return 'El JSON de «Avanzado» no es válido: corrígelo o vacíalo. ' + inst.jsonError;
+  }
+  if (inst.jsonError) return 'El JSON de «Avanzado» no es válido: corrígelo o vacíalo. ' + inst.jsonError;
+  if (cfgHayErrores(inst)) return 'Hay campos de la configuración con error: corrígelos o vuelve al heredado.';
+  return '';
 }
 
 // Lo que este nivel fija y el formulario no tiene (plantillas, marcas…): se
@@ -7128,6 +7177,12 @@ function cfgHayErrores(inst) {
   return !!inst && (Object.keys(inst.errores).length > 0 || !!inst.jsonError);
 }
 
+// Lo que se esta escribiendo en «Avanzado»: queda pendiente y se aplica solo
+// al dejar de escribir (o antes de guardar, con `cfgListoParaGuardar`).
+function cfgJsonEscrito(inst) {
+  inst.jsonSucio = true;
+}
+
 function cfgCamposDe(inst, grupo) {
   return CAMPOS_CONFIG.filter(c => c.grupo === grupo && (!c.niveles || c.niveles.includes(inst.nivel)));
 }
@@ -7142,12 +7197,25 @@ function cfgResumenGrupo(inst, grupo) {
 }
 
 // La procedencia de un campo, en llano.
+// Los niveles de los que sale lo heredado de un campo: uno, o varios en los
+// dicts que se fusionan por clave (cabeceras, cookies, topes).
+function cfgCapasHeredadas(inst, ruta) {
+  const pc = inst.origenClave[ruta];
+  const capas = pc ? Object.values(pc) : [inst.origenBase[ruta] || 'serie'];
+  return ['cliente', 'perfil', 'rastreo', 'serie'].filter(o => capas.includes(o));
+}
+
+function cfgTextoCapas(capas, nivel) {
+  return capas.map(o => (o === nivel ? (nivel === 'rastreo' ? 'de este rastreo' : 'de aquí') : (ORIGEN_TEXTO[o] || o)))
+    .join(' y ');
+}
+
 function cfgEtiquetaOrigen(inst, ruta) {
   const o = cfgOrigen(inst, ruta);
   if (o === 'aqui') {
-    const de = inst.origenBase[ruta] || 'serie';
-    return 'cambiado aquí · ' + ORIGEN_TEXTO[de] + ': ' + cfgLlano(ruta, cfgHeredado(inst, ruta));
+    return 'cambiado aquí · ' + cfgTextoCapas(cfgCapasHeredadas(inst, ruta)) + ': ' + cfgLlano(ruta, cfgHeredado(inst, ruta));
   }
+  if (inst.origenClave[ruta]) return cfgTextoCapas(cfgCapasHeredadas(inst, ruta));
   if (ruta === 'impersonate' && !inst.origenBase.impersonate) return 'automática';
   if (ruta === 'use_sitemap' && !inst.origenBase.use_sitemap && Number(cfgEfectivo(inst, 'max_depth')) === 0) {
     return 'en modo lista no se lee';
@@ -7162,14 +7230,22 @@ function cfgAsiLineas(inst) {
   const r = inst.resuelta;
   if (!r) return [];
   const origen = r.origen || {};
+  const porClave = r.origen_por_clave || {};
+  // Un dict fusionado por clave puede venir de varios niveles a la vez:
+  // «cliente+perfil» (revision del 26-oct de la decision 196).
+  const de = ruta => {
+    const capas = porClave[ruta] ? ['cliente', 'perfil', 'rastreo'].filter(o => Object.values(porClave[ruta]).includes(o)) : [];
+    return capas.length > 1 ? capas.join('+') : (origen[ruta] || 'serie');
+  };
   return CAMPOS_CONFIG
     .filter(c => (!c.niveles || c.niveles.includes(inst.nivel))
       && (c.grupo === 'principal' || origen[c.ruta]) && c.tipo !== 'clave')
     .map(c => ({ ruta: c.ruta, etiqueta: c.etiqueta, valor: cfgLlano(c.ruta, cfgLeer(r.config, c.ruta)),
-                 origen: origen[c.ruta] || 'serie' }));
+                 origen: de(c.ruta) }));
 }
 
 function cfgOrigenAsi(origen, nivel) {
+  if (origen.includes('+')) return cfgTextoCapas(origen.split('+'), nivel);
   if (origen === nivel) return nivel === 'rastreo' ? 'de este rastreo' : 'cambiado aquí';
   return ORIGEN_TEXTO[origen] || origen;
 }
