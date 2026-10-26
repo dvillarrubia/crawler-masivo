@@ -370,6 +370,8 @@ const fmt = {
     }
     if (m.startsWith('disparo perdido')) return 'no se lanzó: el worker llegó tarde a la hora y se espera al siguiente';
     if (m.startsWith('el rastreo anterior')) return 'no se lanzó: el rastreo anterior de esta programación seguía sin terminar';
+    // revision de UX del 25-oct, 2.2: el vivo puede ser otro rastreo del perfil
+    if (m.startsWith('su perfil ya tiene un rastreo')) return 'no se lanzó: su perfil ya tenía otro rastreo sin terminar (lanzado a mano o por otra programación)';
     if (m === 'todavia no toca') return 'todavía no le toca';
     if (m === 'sin proxima ejecucion calculada') return 'no se lanzó: no tenía calculada la próxima ejecución';
     // Colgadas de un perfil (decision 193)
@@ -2713,7 +2715,7 @@ function app() {
         id: null, hereda: true, cliente_id: preset.cliente_id || '', profile_id: preset.profile_id || '',
         nombre: '', ..._cuandoDesdeCron(preset.cron || '0 3 * * 1'), zona: 'Europe/Madrid',
         perfiles: [], existentes: [], error: '', guardando: false, creandoPerfil: false,
-        desdeJob: preset.desdeJob || null,
+        desdeJob: preset.desdeJob || null, avisosPerfil: [],
       };
       this.$nextTick(() => window.lucide && lucide.createIcons());
       try { if (!this.clientes.length) this.clientes = await api('/clients'); } catch (_) { /* sin lista */ }
@@ -2725,7 +2727,10 @@ function app() {
         id: p.id, hereda: !!p.hereda_perfil, cliente_id: p.cliente_id || '', profile_id: p.profile_id || '',
         nombre: p.nombre, ..._cuandoDesdeCron(p.cron), zona: p.zona_horaria || 'Europe/Madrid',
         perfiles: [], existentes: [], error: '', guardando: false, creandoPerfil: false, desdeJob: null,
-        perfilNombre: p.perfil_nombre, clienteNombre: p.cliente_nombre, n_semillas: p.n_semillas,
+        // Con una API anterior (sin n_semillas ni cliente_nombre) se cuentan
+        // las semillas y se usa el slug: no decir «0 semillas» ni «Sin cliente».
+        perfilNombre: p.perfil_nombre, clienteNombre: p.cliente_nombre || p.client_id,
+        n_semillas: p.n_semillas ?? (p.seeds || []).length,
       };
       this.$nextTick(() => window.lucide && lucide.createIcons());
     },
@@ -2778,7 +2783,9 @@ function app() {
     },
 
     // Desde un rastreo cuyo cliente no tiene un perfil con sus semillas: se
-    // crea uno con ellas (y la configuracion del cliente) y se programa ese.
+    // crea uno con ellas y con lo que la config del rastreo tiene de distinto
+    // respecto al cliente (`desde_job_id`; revision de UX del 25-oct, 2.2: sin
+    // eso, un censo con exclusiones propias se programaba sin ellas).
     async progCrearPerfilDesdeJob() {
       const f = this.progForm;
       if (!f || !f.desdeJob) return;
@@ -2788,8 +2795,10 @@ function app() {
       while (usados.has(nombre)) nombre = 'Sitio completo ' + (n++);
       try {
         const p = await api(`/clients/${f.cliente_id}/profiles`, { method: 'POST',
-          body: JSON.stringify({ nombre, seeds: f.desdeJob.seeds }) });
+          body: JSON.stringify({ nombre, seeds: f.desdeJob.seeds, desde_job_id: f.desdeJob.id }) });
         await this.progCambiarCliente(p.id);
+        if (this.progForm === f) f.avisosPerfil = p.avisos || [];
+        this.showToast('Perfil «' + p.nombre + '» creado con la configuración de este rastreo');
       } catch (e) { f.error = e.message; }
       f.creandoPerfil = false;
     },

@@ -204,10 +204,11 @@
               <div class="card mb-1 prog-nota">
                 <p class="text-sm" style="margin:0 0 .4rem">Ningún perfil de este cliente empieza por las mismas
                   <span x-text="fmt.num((progForm.desdeJob.seeds || []).length)"></span> semillas que
-                  «<span x-text="progForm.desdeJob.name"></span>».</p>
+                  «<span x-text="progForm.desdeJob.name"></span>». Puedes crear uno con sus semillas y con lo que su
+                  configuración cambia respecto al cliente.</p>
                 <div class="flex gap-1" style="flex-wrap:wrap">
                   <button class="btn btn-sm" @click="progCrearPerfilDesdeJob()" :disabled="progForm.creandoPerfil"
-                          data-tip="El perfil nuevo hereda la configuración del cliente; lo que este rastreo cambiara a mano se ajusta después en el perfil">Crear un perfil con esas semillas</button>
+                          data-tip="El perfil nuevo guarda las semillas de este rastreo y lo que su configuración tiene de distinto respecto al cliente (exclusiones, profundidad…); lo demás lo sigue heredando del cliente">Crear un perfil con este rastreo</button>
                   <button class="btn btn-sm btn-link" @click="abrirCopiaFija()">o repetir este rastreo tal cual (copia fija)</button>
                 </div>
               </div>
@@ -220,6 +221,11 @@
                 perfil: si cambias el perfil, el próximo censo ya sale con el cambio.
               </p>
             </template>
+            <template x-if="(progForm.avisosPerfil || []).length">
+              <ul class="text-sm prog-aviso-fija" style="margin:.2rem 0 .6rem;padding-left:1.1rem">
+                <template x-for="a in progForm.avisosPerfil" :key="a"><li x-text="a"></li></template>
+              </ul>
+            </template>
             <template x-if="progForm.id && progForm.hereda">
               <p class="text-dim text-sm prog-nota-perfil">En cada disparo usa las semillas y la configuración que tengan
                 ese día el cliente y el perfil: lo que cambies en el perfil llega al próximo censo.</p>
@@ -227,8 +233,8 @@
             <template x-if="progForm.id && !progForm.hereda">
               <p class="text-sm prog-aviso-fija">
                 Copia fija de un rastreo: lanza siempre las mismas <span x-text="fmt.num(progForm.n_semillas || 0)"></span>
-                semillas y la configuración de cuando se creó; los cambios del cliente no le llegan. Se pasa a un perfil
-                con la migración de programaciones.
+                semillas y la configuración de cuando se creó; los cambios del cliente no le llegan. Para que los herede,
+                programa un perfil con esas semillas y pausa esta.
               </p>
             </template>
 
@@ -1342,9 +1348,9 @@
                           <i data-lucide="calendar-clock" style="width:14px;height:14px;flex-shrink:0"></i>
                           <span>
                             <span x-text="(fmt.cron(g.cron) !== g.cron ? fmt.cron(g.cron).replace(/^./, c => c.toUpperCase()) : 'Calendario a medida')"></span><span class="text-dim" x-text="g.activa ? '' : ' · en pausa'"></span>
-                            <span class="badge badge-pending" x-show="!g.hereda_perfil" data-tip="Copia fija: no hereda los cambios del perfil ni del cliente">copia fija</span>
+                            <span class="badge badge-pending" x-show="!g.hereda_perfil" data-tip="Copia fija de un rastreo de este perfil: lanza siempre lo que se copió al crearla y no hereda los cambios del perfil ni del cliente">copia fija</span>
                             <span class="text-dim text-sm" x-show="g.activa && g.proxima_ejecucion" x-text="'· próximo ' + fmt.enZona(g.proxima_ejecucion, g.zona_horaria)"></span>
-                            <span class="text-orange text-sm" x-show="(g.repetida_con || []).length" x-text="'· repite a otra activa del mismo perfil: pausa una'"></span>
+                            <span class="text-orange text-sm" x-show="(g.repetida_con || []).length" x-text="'· repite a otra activa ' + (((g.repetida_con || [])[0] || {}).motivo === 'mismo perfil' ? 'del mismo perfil' : 'con las mismas semillas') + ': pausa una'"></span>
                           </span>
                           <button class="btn btn-sm" @click="editarProgramacion(g)">Editar</button>
                           <button class="btn btn-sm" @click="alternarProgramacion(g)" x-text="g.activa ? 'Pausar' : 'Reanudar'"></button>
@@ -1373,15 +1379,16 @@
                   <div class="perfil-sin" data-testid="programaciones-sin-perfil">
                     <p class="text-sm" style="margin:0 0 .35rem"><strong>Programaciones sin perfil</strong>
                       <span class="text-dim">— copias fijas de un rastreo: lanzan siempre las mismas semillas y la configuración
-                        de cuando se crearon, y su evolución va aparte. Pásalas a un perfil con la migración de programaciones.</span></p>
+                        de cuando se crearon, y su evolución va aparte. Para que hereden los cambios, programa el perfil que
+                        corresponda con «Programar cada semana…» y pausa la vieja.</span></p>
                     <template x-for="g in programacionesSinPerfil()" :key="g.id">
                       <div class="perfil-prog" :class="!g.activa && 'fila-en-pausa'">
                         <i data-lucide="calendar-clock" style="width:14px;height:14px;flex-shrink:0"></i>
                         <span>
                           <strong x-text="g.nombre"></strong>
                           <span x-text="' · ' + (fmt.cron(g.cron) !== g.cron ? fmt.cron(g.cron) : 'calendario a medida')"></span><span class="text-dim" x-text="g.activa ? '' : ' · en pausa'"></span>
-                          <span class="text-dim text-sm" x-text="'· ' + fmt.num(g.n_semillas) + ' semillas'"></span>
-                          <span class="text-orange text-sm" x-show="(g.repetida_con || []).length" x-text="'· repite a otra activa'"></span>
+                          <span class="text-dim text-sm" x-text="'· ' + fmt.num(g.n_semillas ?? (g.seeds || []).length) + ' semillas'"></span>
+                          <span class="text-orange text-sm" x-show="(g.repetida_con || []).length" x-text="'· repite a otra activa ' + (((g.repetida_con || [])[0] || {}).motivo === 'mismo perfil' ? 'del mismo perfil' : 'con las mismas semillas')"></span>
                         </span>
                         <button class="btn btn-sm" @click="editarProgramacion(g)">Editar</button>
                         <button class="btn btn-sm" @click="alternarProgramacion(g)" x-text="g.activa ? 'Pausar' : 'Reanudar'"></button>
