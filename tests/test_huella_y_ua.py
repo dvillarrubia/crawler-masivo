@@ -138,10 +138,13 @@ def test_el_preset_chrome_del_formulario_es_el_ua_de_serie():
     app = (RAIZ / "frontend" / "app.js").read_text(encoding="utf-8")
     preset = re.search(r"^\s*chrome_win:\s*'([^']+)'", app, re.M).group(1)
     assert preset == perfiles.UA_POR_DEFECTO
-    for valor in re.findall(r'<option value="([^"]*)"', (RAIZ / "frontend" / "index.html")
-                            .read_text(encoding="utf-8").split('x-model="createForm.impersonate"')[1]
-                            .split("</select>")[0]):
-        assert valor == "" or valor in perfiles.PERFILES_IMPERSONATE, valor
+    # Las huellas que ofrece el formulario de configuracion (decision 196).
+    bloque = app[app.index("const HUELLAS_TLS = ["):]
+    bloque = bloque[:bloque.index("];")]
+    valores = re.findall(r"\['([^']+)',", bloque)
+    assert valores, "el test no ha sabido leer HUELLAS_TLS"
+    for valor in valores:
+        assert valor in perfiles.PERFILES_IMPERSONATE, valor
 
 
 def _presets_del_formulario() -> dict[str, str]:

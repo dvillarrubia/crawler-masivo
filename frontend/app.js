@@ -860,6 +860,16 @@ function app() {
     createForm: _freshForm(),
     creating: false,
     createError: null,
+    createExtraccionAbierta: false,
+    // Configuracion en tres niveles (decision 196): una instancia del mismo
+    // formulario por nivel (`cfgNuevo`).
+    cfgRastreo: null,
+    cfgCliente: null,
+    cfgPerfil: null,
+    cfgClienteGuardando: false,
+    asiPerfiles: {},          // perfil -> { nivel: 'vista', resuelta } de «Así rastreará»
+    // Ajustes de la agencia (revision de UX del 25-oct, 2.5)
+    ajustes: null,
 
     // Detalle del trabajo
     job: null,
@@ -1070,6 +1080,7 @@ function app() {
       }
       if (v === 'programados') return '#/programados';
       if (v === 'produccion') return '#/produccion';
+      if (v === 'ajustes') return '#/ajustes';
       if (!this.job) return '';
       const base = '#/rastreos/' + this.job.id;
       if (v === 'explorer') {
@@ -1136,6 +1147,8 @@ function app() {
           await this.verProgramados();
         } else if (p[0] === 'produccion') {
           await this.verProduccion();
+        } else if (p[0] === 'ajustes') {
+          await this.verAjustes();
         } else if (p[0] === 'rastreos') {
           if (!this.job || this.job.id !== p[1]) await this.openJob(p[1]);
           if (!this.job) return;
@@ -1226,6 +1239,7 @@ function app() {
     // lista de todos los rastreos son apartados de Produccion (revision de UX
     // del 25-oct, 2.12). Un rastreo sin cliente cuelga de Produccion.
     seccion() {
+      if (this.view === 'ajustes') return 'ajustes';
       if (['clients', 'client'].includes(this.view)) return 'clientes';
       if (['detail', 'explorer', 'url-detail', 'informe'].includes(this.view) && this.job && this.job.cliente_id) return 'clientes';
       return 'produccion';
@@ -1235,7 +1249,12 @@ function app() {
     // rastreo» abra ya con el: lanzado «Sin cliente» no hereda nada ni cuenta
     // en la evolucion de nadie.
     _presetDelContexto() {
-      if (this.view === 'client' && this.cliente) return { cliente_id: this.cliente.id };
+      // Con el perfil principal del cliente, si lo hay: el rastreo sale con sus
+      // semillas y su configuracion (revision de UX del 25-oct, 2.4).
+      if (this.view === 'client' && this.cliente) {
+        const p = this.perfilSiguientePaso();
+        return { cliente_id: this.cliente.id, profile_id: p ? p.id : '' };
+      }
       if (['detail', 'explorer', 'url-detail', 'informe'].includes(this.view) && this.job && this.job.cliente_id) {
         return { cliente_id: this.job.cliente_id, profile_id: this.job.profile_id || '' };
       }
@@ -1246,6 +1265,7 @@ function app() {
     migas() {
       const m = [];
       const v = this.view;
+      if (v === 'ajustes') return [{ texto: 'Ajustes de la agencia' }];
       if (v === 'client') {
         m.push({ texto: 'Clientes', href: '#/clientes' });
         if (this.cliente) {
@@ -1318,11 +1338,6 @@ function app() {
 
     // El bot que declara el User-Agent del formulario, para el aviso de WAF y
     // de robots.txt (decision 98).
-    botDelFormulario() {
-      const f = this.createForm || {};
-      return tokenDeBot(f.user_agent_preset === 'custom' ? f.user_agent_custom : UA_PRESETS[f.user_agent_preset]);
-    },
-
     // ------- Toast notifications -------
     showToast(msg, type = 'success') {
       const id = Date.now();
@@ -1515,6 +1530,7 @@ function app() {
       this.createSugerencia = (preset && preset.sugerencia) || '';
       this.extraccionPrueba = { url: '', cargando: false, error: null, resultado: null };
       this.createPerfiles = [];
+      this.cfgRastreo = null;
       this.showCreate = true;
       this.$nextTick(() => lucide.createIcons());
       try {
@@ -1523,13 +1539,15 @@ function app() {
       if (preset && preset.cliente_id) {
         this.createForm.cliente_id = preset.cliente_id;
         await this.cambiarClienteModal(preset.profile_id || '');
+      } else {
+        await this.aplicarHerencia();
       }
     },
 
-    // Al elegir cliente (o perfil) en el modal, se precarga lo que heredaria
-    // el rastreo. Lo que se ve es lo que se lanza: el modal manda lo que
-    // muestra, y lo que el modal no tiene (plantillas, umbrales extra...) se
-    // hereda en el servidor al crear el job.
+    // Al elegir cliente (o perfil) en el modal, el formulario de configuracion
+    // se rehace sobre lo que heredaria el rastreo (decision 196): lo que se ve
+    // con «del cliente» o «del perfil» no se manda, lo hereda el servidor; lo
+    // cambiado aqui si. Lo que ya se habia cambiado en este rastreo se conserva.
     async cambiarClienteModal(profileId = '') {
       const f = this.createForm;
       if (f.cliente_id === '__nuevo__') {
@@ -1543,6 +1561,7 @@ function app() {
         // Sin cliente el servidor no hereda nada: lo que la pestaña enseñaba
         // como heredado pasa a ser propio y se manda (revision de #233).
         _extraccionSinCliente(f);
+        await this.aplicarHerencia();
         return;
       }
       try {
@@ -1553,66 +1572,80 @@ function app() {
 
     async aplicarHerencia() {
       const f = this.createForm;
-      if (!f.cliente_id) return;
+      const propia = this.cfgRastreo ? this.cfgRastreo.propia : {};
       try {
-        const q = f.profile_id ? `?profile_id=${f.profile_id}` : '';
-        const r = await api(`/clients/${f.cliente_id}/config-resuelta${q}`);
-        const nuevo = _freshForm();
-        _formDesdeConfig(nuevo, r.config_heredada || {});
-        // Se conserva lo que no es configuracion: nombre, cliente y perfil.
-        nuevo.name = f.name;
-        nuevo.cliente_id = f.cliente_id;
-        nuevo.profile_id = f.profile_id;
-        nuevo.configTab = f.configTab;
-        nuevo.seeds = (r.seeds && r.seeds.length) ? r.seeds.join('\n') : f.seeds;
-        // Las reglas propias no son herencia: cambiar de cliente o de perfil
-        // no las borra (revision de #233). Con el nombre de una heredada, la
-        // propia la sustituye, como en el servidor.
-        _extraccionConservarPropias(nuevo, f);
-        if (!nuevo.name) {
-          const perfil = this.createPerfiles.find(p => p.id === f.profile_id);
-          const cliente = this.clientes.find(c => c.id === f.cliente_id);
-          const base = perfil ? `${cliente ? cliente.nombre + ' · ' : ''}${perfil.nombre}` : (cliente ? cliente.nombre : '');
-          nuevo.name = base ? `${base} · ${new Date().toISOString().slice(0, 10)}` : '';
+        const { inst, r } = await this.cfgCargar('rastreo', { cliente_id: f.cliente_id, profile_id: f.profile_id }, propia);
+        if (f.cliente_id) {
+          const nuevo = _freshForm();
+          _extraccionDesdeConfig(nuevo, r.config_heredada || {});
+          // Se conserva lo que no es configuracion: nombre, cliente y perfil.
+          nuevo.name = f.name;
+          nuevo.cliente_id = f.cliente_id;
+          nuevo.profile_id = f.profile_id;
+          nuevo.seeds = (r.seeds && r.seeds.length) ? r.seeds.join('\n') : f.seeds;
+          // Las reglas propias no son herencia: cambiar de cliente o de perfil
+          // no las borra (revision de #233). Con el nombre de una heredada, la
+          // propia la sustituye, como en el servidor.
+          _extraccionConservarPropias(nuevo, f);
+          if (!nuevo.name) {
+            const perfil = this.createPerfiles.find(p => p.id === f.profile_id);
+            const cliente = this.clientes.find(c => c.id === f.cliente_id);
+            const base = perfil ? `${cliente ? cliente.nombre + ' · ' : ''}${perfil.nombre}` : (cliente ? cliente.nombre : '');
+            nuevo.name = base ? `${base} · ${new Date().toISOString().slice(0, 10)}` : '';
+          }
+          this.createForm = nuevo;
+          this.extraccionMarcarOrigen();
         }
-        this.createForm = nuevo;
-        this.extraccionMarcarOrigen();
+        this.cfgRastreo = inst;
+        this.cfgResolver(this.cfgRastreo);
       } catch (e) { this.createError = e.message; }
     },
 
-    // Una linea con lo que se va a usar, para no tener que abrir las seis
-    // pestanas para saberlo (UX-19).
+    // Una linea con lo que se va a usar, junto a «Configuración» plegada
+    // (UX-19): lo de «Así rastreará» en corto.
     resumenConfig() {
-      const f = this.createForm;
+      const i = this.cfgRastreo;
+      if (!i) return '';
+      const n = CAMPOS_CONFIG.filter(c => cfgTiene(i, c.ruta)).length;
       const partes = [
-        'profundidad ' + f.max_depth,
-        f.max_urls ? fmt.num(+f.max_urls) + ' URLs' : 'sin tope de URLs',
-        f.render_js ? 'con render JS' : 'sin render JS',
-        'robots: ' + ({ respect: 'respetar', ignore: 'ignorar', audit: 'auditar' }[f.robots_mode] || f.robots_mode),
+        cfgEfectivo(i, 'max_urls') ? fmt.num(cfgEfectivo(i, 'max_urls')) + ' URLs' : 'sin tope de URLs',
+        cfgEfectivo(i, 'concurrent_requests_per_domain') + ' a la vez por dominio',
+        cfgEfectivo(i, 'render_js') ? 'con render JS' : 'sin render JS',
       ];
+      if (n) partes.push(n === 1 ? '1 cambio en este rastreo' : n + ' cambios en este rastreo');
       return partes.join(' · ');
     },
 
     // El mismo rastreo con 250 URLs y «CANARY» en el nombre: se reconoce
     // como canario (tipo deducido) y no entra en la evolucion del cliente.
     async lanzarCanario() {
-      const original = { name: this.createForm.name, max_urls: this.createForm.max_urls };
+      const original = this.createForm.name;
       const host = (this.createForm.seeds.split('\n')[0] || '').replace(/^https?:\/\//, '').split('/')[0];
       // Sin repetir el prefijo si el nombre ya lo trae.
-      this.createForm.name = /^CANARY\b/i.test(original.name || '') ? original.name : 'CANARY - ' + (original.name || host);
-      this.createForm.max_urls = 250;
-      await this.submitCreate();
-      if (this.showCreate) Object.assign(this.createForm, original);  // fallo: se deja como estaba
+      this.createForm.name = /^CANARY\b/i.test(original || '') ? original : 'CANARY - ' + (original || host);
+      await this.submitCreate({ max_urls: 250 });
+      if (this.showCreate) this.createForm.name = original;  // fallo: se deja como estaba
     },
 
-    async submitCreate() {
-      this.creating = true;
+    // Se manda lo que fija ESTE rastreo (`cfgRastreo.propia`): lo heredado lo
+    // pone el servidor (create_job con exclude_unset). Sin cliente, lo mismo
+    // sobre lo de serie. `extra` es lo que pone el boton (el tope del canario).
+    async submitCreate(extra = null) {
       this.createError = null;
+      const i = this.cfgRastreo;
+      if (i && cfgHayErrores(i)) {
+        this.createError = 'Hay campos de la configuración con error: corrígelos o vuelve al heredado.';
+        return;
+      }
+      this.creating = true;
       try {
         const f = this.createForm;
         const seeds = f.seeds.split('\n').map(s => s.trim()).filter(Boolean);
-
-        const payload = { name: f.name, seeds, config: _configDesdeForm(f) };
+        const config = JSON.parse(JSON.stringify((i && i.propia) || {}));
+        Object.assign(config, extra || {});
+        const ce = _extraccionAConfig(f);
+        if (ce) config.custom_extraction = ce;
+        const payload = { name: f.name, seeds, config };
         if (f.cliente_id) payload.cliente_id = f.cliente_id;
         if (f.profile_id) payload.profile_id = f.profile_id;
 
@@ -1624,9 +1657,101 @@ function app() {
         this.showToast('Rastreo iniciado correctamente');
       } catch (e) {
         this.createError = e.message;
-        if (/custom_extraction/.test(e.message)) this.createForm.configTab = 'extraccion';
+        if (/custom_extraction/.test(e.message)) this.createExtraccionAbierta = true;
       }
       this.creating = false;
+    },
+
+    // ------- Configuracion en tres niveles (decision 196) -------
+    // La plantilla del formulario, una sola para los tres sitios: se inserta
+    // con x-html (Alpine 3 inicializa lo insertado) en un contenedor que
+    // define `i`, la instancia de ese nivel.
+    plantillaCfg() {
+      if (!this._tplCfg) {
+        const t = document.getElementById('tpl-config-niveles');
+        this._tplCfg = t ? t.innerHTML : '';
+      }
+      return this._tplCfg;
+    },
+
+    // La instancia de un nivel con su base: lo de arriba ya resuelto por la
+    // API (`config-resuelta`), con de donde sale cada valor.
+    async cfgCargar(nivel, ctx, propia) {
+      ctx = ctx || {};
+      let r;
+      if (ctx.cliente_id) {
+        const q = nivel === 'rastreo' && ctx.profile_id ? `?profile_id=${ctx.profile_id}` : '';
+        r = await api(`/clients/${ctx.cliente_id}/config-resuelta${q}`);
+      } else {
+        r = await api('/clients/config-resuelta', { method: 'POST', body: JSON.stringify({ config: {} }) });
+      }
+      const serie = r.serie || r.config;
+      const inst = cfgNuevo(nivel, {
+        base: nivel === 'cliente' ? serie : r.config,
+        origen: nivel === 'cliente' ? {} : (r.origen || {}),
+        serie, propia, ctx,
+      });
+      return { inst, r };
+    },
+
+    cfgProgramar(i) {
+      if (!i) return;
+      clearTimeout(i._temporizador);
+      i._temporizador = setTimeout(() => this.cfgResolver(i), 350);
+    },
+
+    // «Así rastreará»: la API resuelve el borrador de este nivel (y valida
+    // como al guardar). Con un campo con error no se pregunta.
+    async cfgResolver(i) {
+      if (!i || cfgHayErrores(i)) return;
+      i.resolviendo = true;
+      const cuerpo = { cliente_id: i.ctx.cliente_id || null, profile_id: i.ctx.profile_id || null,
+                       nivel: i.nivel, config: i.propia };
+      try {
+        const r = await api('/clients/config-resuelta', { method: 'POST', body: JSON.stringify(cuerpo) });
+        i.resuelta = r;
+        i.resueltaError = '';
+      } catch (e) {
+        i.resueltaError = e.message;
+      }
+      i.resolviendo = false;
+    },
+
+    cfgCambiarCampo(i, ruta, valor) {
+      cfgCambiar(i, ruta, valor);
+      this.cfgProgramar(i);
+    },
+
+    cfgVolver(i, ruta) {
+      cfgHeredar(i, ruta);
+      if (ruta === 'user_agent') i.uaPersonalizado = false;
+      this.cfgProgramar(i);
+    },
+
+    // El user agent: un preset o «Personalizado», que abre el campo de texto.
+    cfgElegirUa(i, preset) {
+      if (preset === 'custom') { i.uaPersonalizado = true; return; }
+      i.uaPersonalizado = false;
+      this.cfgCambiarCampo(i, 'user_agent', UA_PRESETS[preset]);
+    },
+
+    cfgUaPersonalizado(i) {
+      return !!i.uaPersonalizado || cfgTextoCampo(i, 'user_agent') === 'custom';
+    },
+
+    cfgAplicar(i) {
+      if (cfgAplicarJson(i)) this.cfgProgramar(i);
+    },
+
+    cfgOpcionesHuella(i) {
+      const heredada = i.origenBase.impersonate;
+      return [['', heredada ? 'La heredada (' + cfgLlano('impersonate', cfgHeredado(i, 'impersonate')) + ')'
+                            : 'Automática: la del navegador con el que se presenta'], ...HUELLAS_TLS];
+    },
+
+    cfgTextoProgramacion(p) {
+      return `La programación «${p.nombre}» cambia además: `
+        + p.claves.map(k => (CAMPO_CONFIG[k] || { etiqueta: k }).etiqueta.toLowerCase()).join(', ') + '.';
     },
 
     // ------- Clientes (#36) -------
@@ -1686,6 +1811,10 @@ function app() {
       this.clienteTab = tab;
       this.clienteError = '';
       if (!this.cliente || this.cliente.id !== id) { this.estadoCliente = null; this.alertasAbiertas = null; this.incidentesVer = 'vivos'; this.clienteProgramaciones = []; }
+      // Lo de «Así rastreará» y el formulario de configuracion son del cliente
+      // y de lo guardado: al volver a abrirlo se piden otra vez (decision 196).
+      this.asiPerfiles = {};
+      if (!this.cliente || this.cliente.id !== id) this.cfgCliente = null;
       this.altaForm = null;
       try {
         const [c, perfiles, jobs, serie] = await Promise.all([
@@ -2094,8 +2223,7 @@ function app() {
     async cargarGsc() {
       if (!this.cliente) return;
       const id = this.cliente.id;
-      this.gsc = { estado: null, llaves: [], llave: '', nombreNueva: 'GSC_' + this.cliente.slug.toUpperCase().replace(/[^A-Z0-9]/g, '_'),
-                   propiedades: null, propiedad: '', error: '', ocupado: false };
+      this.gsc = { estado: null, llaves: [], llave: '', propiedades: null, propiedad: '', error: '', ocupado: false };
       try {
         const [estado, llaves] = await Promise.all([api(`/clients/${id}/gsc`), api('/credenciales?tipo=gsc')]);
         if (!this.cliente || this.cliente.id !== id) return;
@@ -2105,23 +2233,6 @@ function app() {
         this.gsc.llave = actual ? actual.credencial : (llaves[0] ? llaves[0].nombre : '');
         this.gsc.propiedad = actual && actual.propiedad ? actual.propiedad : '';
       } catch (e) { this.gsc.error = e.message; }
-    },
-
-    async subirLlaveGsc(ev) {
-      const fichero = ev.target.files && ev.target.files[0];
-      ev.target.value = '';
-      if (!fichero) return;
-      this.gsc.error = ''; this.gsc.ocupado = true;
-      try {
-        const contenido = await fichero.text();
-        const r = await api('/credenciales', { method: 'POST',
-          body: JSON.stringify({ tipo: 'gsc', nombre: this.gsc.nombreNueva, contenido }) });
-        this.gsc.llaves = await api('/credenciales?tipo=gsc');
-        this.gsc.llave = r.nombre;
-        this.showToast('Llave subida: ' + r.client_email);
-        await this.verPropiedadesGsc();
-      } catch (e) { this.gsc.error = e.message; }
-      this.gsc.ocupado = false;
     },
 
     async verPropiedadesGsc() {
@@ -2146,7 +2257,7 @@ function app() {
       integ.credencial_env = this.gsc.llave;
       integ.parametros = 'propiedad=' + this.gsc.propiedad;
       integ.activa = true;
-      await this.guardarCliente();
+      await this.guardarCliente(['integraciones']);
       if (this.clienteError) { this.gsc.error = this.clienteError; return; }
       await this.sincronizarGsc();
     },
@@ -2163,8 +2274,7 @@ function app() {
     async cargarSlack() {
       if (!this.cliente) return;
       const id = this.cliente.id;
-      this.slack = { estado: null, tokens: [], token: '', nombreNuevo: 'SLACK_BOT',
-                     tokenTexto: '', canales: null, canal: '', canalNombre: '', alertas: true, resumen: true, informe: true,
+      this.slack = { estado: null, tokens: [], token: '', canales: null, canal: '', canalNombre: '', alertas: true, resumen: true, informe: true,
                      error: '', ocupado: false, prueba: null };
       try {
         const [estado, tokens] = await Promise.all([api(`/clients/${id}/slack`), api('/credenciales?tipo=slack')]);
@@ -2180,22 +2290,6 @@ function app() {
           this.slack.token = (tokens.find(t => t.valida) || tokens[0]).nombre;
         }
       } catch (e) { this.slack.error = e.message; }
-    },
-
-    async subirTokenSlack() {
-      const contenido = (this.slack.tokenTexto || '').trim();
-      if (!contenido) return;
-      this.slack.error = ''; this.slack.ocupado = true;
-      try {
-        const r = await api('/credenciales', { method: 'POST',
-          body: JSON.stringify({ tipo: 'slack', nombre: this.slack.nombreNuevo, contenido }) });
-        this.slack.tokenTexto = '';
-        this.slack.tokens = await api('/credenciales?tipo=slack');
-        this.slack.token = r.nombre;
-        this.showToast('Token guardado: bot ' + (r.bot || '') + ' en ' + (r.equipo || 'Slack'));
-        await this.verCanalesSlack();
-      } catch (e) { this.slack.error = e.message; }
-      this.slack.ocupado = false;
     },
 
     async verCanalesSlack() {
@@ -2311,39 +2405,128 @@ function app() {
                 majestic: 'MAJESTIC_', pagespeed: 'PAGESPEED_', slack: 'SLACK_' })[tipo] || '';
     },
 
-    async guardarCliente() {
+    // Guardar por secciones (revision de UX del 25-oct, 2.4): cada seccion
+    // plegable manda solo lo suyo, para que guardar los datos no se lleve
+    // tambien un borrador de la configuracion a medio hacer, ni al reves.
+    // `partes`: 'datos', 'config', 'integraciones' (sin nada, todo).
+    async guardarCliente(partes = null) {
       this.clienteError = '';
       const f = this.clienteForm;
-      let config = {};
-      try {
-        config = f.config_defecto.trim() ? JSON.parse(f.config_defecto) : {};
-      } catch (e) {
-        this.clienteError = 'La configuracion por defecto no es JSON valido: ' + e.message;
-        return;
+      const quiere = k => !partes || partes.includes(k);
+      const cuerpo = {};
+      if (quiere('datos')) {
+        Object.assign(cuerpo, {
+          nombre: f.nombre,
+          dominios: f.dominios.split('\n').map(s => s.trim()).filter(Boolean),
+          zona_horaria: f.zona_horaria || null,
+          notas: f.notas || null,
+        });
+        if (f.slug) cuerpo.slug = f.slug;
       }
-      const cuerpo = {
-        nombre: f.nombre,
-        dominios: f.dominios.split('\n').map(s => s.trim()).filter(Boolean),
-        zona_horaria: f.zona_horaria || null,
-        notas: f.notas || null,
-        config_defecto: config,
-        integraciones: f.integraciones.map(i => ({
+      if (quiere('config') && this.cfgCliente) {
+        if (cfgHayErrores(this.cfgCliente)) {
+          this.clienteError = 'Hay campos de la configuración con error: corrígelos o vuelve al heredado.';
+          return;
+        }
+        cuerpo.config_defecto = this.cfgCliente.propia;
+      }
+      if (quiere('integraciones')) {
+        cuerpo.integraciones = f.integraciones.map(i => ({
           tipo: i.tipo,
           etiqueta: i.etiqueta || null,
           parametros: _parseKV(i.parametros, '='),
           credencial_env: (i.credencial_env || '').trim() || null,
           activa: !!i.activa,
-        })),
-      };
-      if (f.slug) cuerpo.slug = f.slug;
+        }));
+      }
+      this.cfgClienteGuardando = true;
       try {
-        const c = this.cliente
-          ? await api(`/clients/${this.cliente.id}`, { method: 'PATCH', body: JSON.stringify(cuerpo) })
-          : await api('/clients', { method: 'POST', body: JSON.stringify(cuerpo) });
+        const c = await api(`/clients/${this.cliente.id}`, { method: 'PATCH', body: JSON.stringify(cuerpo) });
         this.clientes = await api('/clients');
         await this.abrirCliente(c.id, 'config');
-        this.showToast('Cliente guardado');
+        if (quiere('config')) await this.cargarCfgCliente();
+        this.showToast(partes && partes.length === 1
+          ? ({ datos: 'Datos guardados', config: 'Configuración guardada', integraciones: 'Integraciones guardadas' })[partes[0]]
+          : 'Cliente guardado');
       } catch (e) { this.clienteError = e.message; }
+      this.cfgClienteGuardando = false;
+    },
+
+    // La config del cliente con el mismo formulario que el perfil y el
+    // rastreo (decision 196): base = lo de serie.
+    async cargarCfgCliente() {
+      if (!this.cliente) return;
+      const id = this.cliente.id;
+      try {
+        const { inst } = await this.cfgCargar('cliente', { cliente_id: id }, this.cliente.config_defecto || {});
+        if (!this.cliente || this.cliente.id !== id) return;
+        if (this.cfgCliente) inst.abiertos = this.cfgCliente.abiertos;
+        this.cfgCliente = inst;
+        this.cfgResolver(this.cfgCliente);
+      } catch (e) { this.clienteError = e.message; }
+    },
+
+    cfgClienteCambiada() {
+      return !!(this.cfgCliente && this.cliente)
+        && !_cfgIgual(this.cfgCliente.propia, this.cliente.config_defecto || {});
+    },
+
+    irASeccionConfig(id) {
+      const ir = () => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (el.tagName === 'DETAILS') el.open = true;
+        el.scrollIntoView({ block: 'start' });
+      };
+      if (this.clienteTab !== 'config') { this.cambiarTabCliente('config'); this.$nextTick(() => setTimeout(ir, 50)); }
+      else ir();
+    },
+
+    // Una linea junto al titulo de cada seccion plegada: su estado.
+    resumenSeccionConfig(id) {
+      const c = this.cliente;
+      if (!c) return '';
+      if (id === 'cfg-perfiles') {
+        const n = (this.clientePerfiles || []).length;
+        const prog = (this.clienteProgramaciones || []).filter(g => g.activa).length;
+        return (n === 1 ? '1 perfil' : fmt.num(n) + ' perfiles') + ' · '
+          + (prog ? (prog === 1 ? '1 programación activa' : fmt.num(prog) + ' programaciones activas') : 'nada programado');
+      }
+      if (id === 'cfg-rastreo') {
+        const i = this.cfgCliente;
+        const n = i ? CAMPOS_CONFIG.filter(x => cfgTiene(i, x.ruta)).length : Object.keys(c.config_defecto || {}).length;
+        if (!i) return '';
+        const partes = [cfgEfectivo(i, 'concurrent_requests_per_domain') + ' a la vez por dominio',
+                        cfgEfectivo(i, 'render_js') ? 'con render JS' : 'sin render JS'];
+        partes.push(n ? (n === 1 ? '1 cambio sobre lo de serie' : n + ' cambios sobre lo de serie') : 'lo de serie');
+        const fuera = cfgClavesFuera(i);
+        if (fuera.length) partes.push('además ' + fuera.join(', ') + ' en «Avanzado»');
+        return partes.join(' · ');
+      }
+      if (id === 'cfg-datos') return (c.dominios || []).join(', ') || 'sin dominios';
+      if (id === 'cfg-gsc') {
+        const e = ((this.gsc && this.gsc.estado) || []).find(x => x.propiedad);
+        if (e) return this.textoEstadoGsc(e) + ' · ' + e.propiedad;
+        return (c.integraciones || []).some(i => i.tipo === 'gsc') ? '' : 'sin conectar';
+      }
+      if (id === 'cfg-slack') {
+        const canal = ((this.slack && this.slack.estado && this.slack.estado.canales) || [])[0];
+        if (canal) return (canal.canal_nombre || canal.canal) + ' · ' + this.textoEnviosSlack(canal);
+        return (c.integraciones || []).some(i => i.tipo === 'slack') ? '' : 'sin conectar';
+      }
+      if (id === 'cfg-enlace') {
+        const vivos = (this.enlaces || []).filter(e => !e.revocado_en).length;
+        return vivos ? (vivos === 1 ? '1 enlace activo' : vivos + ' enlaces activos') : 'ninguno activo';
+      }
+      if (id === 'cfg-integraciones') {
+        const otras = (c.integraciones || []).filter(i => !['gsc', 'slack'].includes(i.tipo)).length;
+        return otras ? (otras === 1 ? '1 integración' : otras + ' integraciones') : 'ninguna';
+      }
+      if (id === 'reglas-alertas') {
+        if (!this.reglasCliente) return '';
+        return this.reglasCliente.guardadas ? 'reglas propias sobre las de serie' : 'las de serie';
+      }
+      return '';
     },
 
     async borrarCliente() {
@@ -2366,39 +2549,68 @@ function app() {
       } catch (e) { this.clienteError = e.message; }
     },
 
-    nuevoPerfil() {
+    async nuevoPerfil() {
       this.perfilError = '';
-      this.perfilForm = { id: null, nombre: '', rol: 'propio', seeds: '', config: '{}', notas: '', activo: true };
+      this.cfgPerfil = null;
+      this.perfilForm = { id: null, nombre: '', rol: 'propio', seeds: '', notas: '', activo: true };
+      await this._cargarCfgPerfil(null, {});
     },
 
-    editarPerfil(p) {
+    async editarPerfil(p) {
       this.perfilError = '';
+      this.cfgPerfil = null;
       this.perfilForm = {
         id: p.id, nombre: p.nombre, rol: p.rol, seeds: (p.seeds || []).join('\n'),
-        config: JSON.stringify(p.config || {}, null, 2), notas: p.notas || '', activo: p.activo,
+        notas: p.notas || '', activo: p.activo,
       };
+      await this._cargarCfgPerfil(p.id, p.config || {});
+    },
+
+    // La config del perfil con el mismo formulario que el cliente y el
+    // rastreo (decision 196): base = el cliente ya resuelto.
+    async _cargarCfgPerfil(profileId, propia) {
+      try {
+        const { inst } = await this.cfgCargar('perfil', { cliente_id: this.cliente.id, profile_id: profileId }, propia);
+        if (!this.perfilForm) return;
+        this.cfgPerfil = inst;
+        this.cfgResolver(this.cfgPerfil);
+      } catch (e) { this.perfilError = e.message; }
+    },
+
+    // «Así rastreará» en la tarjeta del perfil: lo guardado, resuelto por la
+    // API (GET config-resuelta con el perfil), con su procedencia y avisos.
+    async cargarAsiPerfil(p) {
+      if (!this.cliente) return;
+      try {
+        const r = await api(`/clients/${this.cliente.id}/config-resuelta?profile_id=${p.id}`);
+        this.asiPerfiles = { ...this.asiPerfiles, [p.id]: { nivel: 'vista', resuelta: r } };
+      } catch (e) {
+        this.asiPerfiles = { ...this.asiPerfiles, [p.id]: { nivel: 'vista', error: e.message } };
+      }
     },
 
     async guardarPerfil() {
       this.perfilError = '';
       const f = this.perfilForm;
-      let config = {};
-      try {
-        config = f.config.trim() ? JSON.parse(f.config) : {};
-      } catch (e) {
-        this.perfilError = 'La configuracion no es JSON valido: ' + e.message;
+      const i = this.cfgPerfil;
+      if (i && cfgHayErrores(i)) {
+        this.perfilError = 'Hay campos de la configuración con error: corrígelos o vuelve al heredado.';
         return;
       }
       const cuerpo = {
         nombre: f.nombre, rol: f.rol,
         seeds: f.seeds.split('\n').map(s => s.trim()).filter(Boolean),
-        config, notas: f.notas || null, activo: !!f.activo,
+        notas: f.notas || null, activo: !!f.activo,
       };
+      // Sin la config cargada (fallo al pedirla) no se manda: no se pisa la
+      // guardada con un {} vacio.
+      if (i) cuerpo.config = i.propia;
       const base = `/clients/${this.cliente.id}/profiles`;
       try {
         if (f.id) await api(`${base}/${f.id}`, { method: 'PATCH', body: JSON.stringify(cuerpo) });
         else await api(base, { method: 'POST', body: JSON.stringify(cuerpo) });
         this.perfilForm = null;
+        this.cfgPerfil = null;
         await this.abrirCliente(this.cliente.id, 'config');
       } catch (e) { this.perfilError = e.message; }
     },
@@ -2902,6 +3114,88 @@ function app() {
     // Para decidir si esperar, lanzar otro o desplegar (que corta lo que esta
     // en marcha) y saber cuando estara el censo. Se refresca sola cada 10 s
     // mientras se mira; el temporizador se para solo al salir de la vista.
+    // ------- Ajustes de la agencia (revision de UX del 25-oct, 2.5) -------
+    // Lo que vale para todos los clientes: el bot de Slack, las llaves de
+    // Search Console, las claves de los modelos, importar un backup y el tema.
+    // NUNCA un secreto: de una llave se ve su email; de un token, el bot y el
+    // espacio; de las claves del entorno, solo si estan puestas.
+    async verAjustes() {
+      this._salirDeJob();
+      this.view = 'ajustes';
+      await this.cargarAjustes();
+    },
+
+    async cargarAjustes() {
+      const previo = this.ajustes || {};
+      this.ajustes = {
+        estado: 'cargando', error: '', modelos: null, gemini: null,
+        slack: { tokens: null, nombreNuevo: 'SLACK_BOT', tokenTexto: '', ocupado: false, error: '' },
+        gsc: { llaves: null, nombreNueva: 'GSC_AGENCIA', ocupado: false, error: '' },
+        guiaSlack: previo.guiaSlack || false,
+      };
+      const a = this.ajustes;
+      // Cada bloque por su lado: que falle uno (Slack sin red) no vacia los demas.
+      const [modelos, slack, gsc, gemini] = await Promise.allSettled([
+        api('/ajustes'), api('/credenciales?tipo=slack'), api('/credenciales?tipo=gsc'), api('/semantic/gemini-accounts')]);
+      a.modelos = modelos.status === 'fulfilled' ? modelos.value.modelos : null;
+      a.modelosError = modelos.status === 'rejected' ? modelos.reason.message : '';
+      a.slack.tokens = slack.status === 'fulfilled' ? slack.value : [];
+      if (slack.status === 'rejected') a.slack.error = slack.reason.message;
+      a.gsc.llaves = gsc.status === 'fulfilled' ? gsc.value : [];
+      if (gsc.status === 'rejected') a.gsc.error = gsc.reason.message;
+      a.gemini = gemini.status === 'fulfilled' ? gemini.value : null;
+      a.estado = 'ok';
+    },
+
+    async subirTokenSlackAgencia() {
+      const s = this.ajustes.slack;
+      const contenido = (s.tokenTexto || '').trim();
+      if (!contenido) return;
+      s.error = ''; s.ocupado = true;
+      try {
+        const r = await api('/credenciales', { method: 'POST',
+          body: JSON.stringify({ tipo: 'slack', nombre: s.nombreNuevo, contenido }) });
+        s.tokenTexto = '';
+        s.tokens = await api('/credenciales?tipo=slack');
+        this.showToast('Bot conectado: ' + (r.bot || '') + ' en ' + (r.equipo || 'Slack'));
+      } catch (e) { s.error = e.message; }
+      s.ocupado = false;
+    },
+
+    async subirLlaveGscAgencia(ev) {
+      const g = this.ajustes.gsc;
+      const fichero = ev.target.files && ev.target.files[0];
+      ev.target.value = '';
+      if (!fichero) return;
+      g.error = ''; g.ocupado = true;
+      try {
+        const contenido = await fichero.text();
+        const r = await api('/credenciales', { method: 'POST',
+          body: JSON.stringify({ tipo: 'gsc', nombre: g.nombreNueva, contenido }) });
+        g.llaves = await api('/credenciales?tipo=gsc');
+        this.showToast('Llave subida: ' + r.client_email);
+      } catch (e) { g.error = e.message; }
+      g.ocupado = false;
+    },
+
+    async quitarCredencial(tipo, c) {
+      const bloque = tipo === 'slack' ? this.ajustes.slack : this.ajustes.gsc;
+      const uso = (c.en_uso_por || []);
+      const ok = await this.preguntar({
+        titulo: tipo === 'slack' ? `Quitar el bot ${c.nombre}` : `Quitar la llave ${c.nombre}`,
+        mensaje: uso.length
+          ? 'La usan ' + uso.join(', ') + '. Quítala antes de sus fichas, en Configuración, o dejarán de recibir datos.'
+          : 'Se borra del servidor. No la usa ningún cliente.',
+        aceptar: 'Quitar', peligro: true });
+      if (!ok) return;
+      bloque.error = '';
+      try {
+        await api(`/credenciales/${encodeURIComponent(c.nombre)}`, { method: 'DELETE' });
+        if (tipo === 'slack') bloque.tokens = await api('/credenciales?tipo=slack');
+        else bloque.llaves = await api('/credenciales?tipo=gsc');
+      } catch (e) { bloque.error = e.message; }
+    },
+
     async verProduccion() {
       this._salirDeJob();
       this.view = 'produccion';
@@ -6373,25 +6667,6 @@ function textoEntidadWp(w) {
   return partes.join(' · ');
 }
 
-// La casilla «Analizar WordPress (REST API)» del modal: marcada = `auto` (o
-// el `on` heredado), sin marcar = `off`. Como las sondas, solo se manda si se
-// CAMBIA respecto a lo que cargó el modal (lo de serie o lo heredado del
-// cliente y el perfil): sin tocarla, el job hereda, y la fusión del servidor
-// es profunda, así que mandar solo `modo` no pisa los topes del perfil.
-function _wpModoDesdeConfig(f, cfg) {
-  const modo = ((cfg && cfg.adapters) || {}).wordpress && cfg.adapters.wordpress.modo;
-  if (!modo) return;
-  f._wpModoBase = modo;
-  f.wp_analizar = modo !== 'off';
-}
-
-function _wpConfigDesdeForm(f, cfg) {
-  // Sin cliente el servidor no hereda nada: se compara con lo de serie.
-  const base = (f.cliente_id && f._wpModoBase) || 'auto';
-  if (!!f.wp_analizar === (base !== 'off')) return;
-  cfg.adapters = { wordpress: { modo: f.wp_analizar ? 'auto' : 'off' } };
-}
-
 // El veredicto del modo lista con sus textos (decision 128).
 const VEREDICTO_TEXTO = {
   pasa: ['La lista pasa', 'green'],
@@ -6400,129 +6675,482 @@ const VEREDICTO_TEXTO = {
   no_concluyente: ['No concluyente', 'orange'],
 };
 
-// Sondas de respuesta (decisiones 123 y 124): campo -> [seccion de JobConfig,
-// valor de serie, tipo]. Los de serie son los de `api/schemas.py`. Estas
-// claves solo se mandan si quien lanza las CAMBIA respecto a lo que el modal
-// cargo (lo de serie o lo heredado del cliente/perfil): sin tocarlas, el job
-// hereda lo que diga el perfil, y si el perfil cambia mañana, tambien.
-const SONDAS_CAMPOS = {
-  check_external_resources:   ['resource_types', false, 'bool'],
-  comprobar_enlaces_externos: ['crawl_behavior', false, 'bool'],
-  comprobar_recursos:         ['crawl_behavior', false, 'bool'],
-  enlaces_externos_max:       ['crawl_behavior', 5000,  'int'],
-  recursos_max:               ['crawl_behavior', 20000, 'int'],
-  sondas_por_host:            ['crawl_behavior', 50,    'int'],
-  // Decision 154: medir la og:image, encendida de serie (0 = apagada).
-  og_image_muestra:           ['crawl_behavior', 200,   'int'],
-  // Decision 174: axe por muestra de plantilla, apagado de serie (0).
-  axe_muestra:                ['crawl_behavior', 0,     'int'],
-  axe_por_plantilla:          ['crawl_behavior', 1,     'int'],
-};
-
-function _valorSonda(campo, v) {
-  if (SONDAS_CAMPOS[campo][2] === 'bool') return !!v;
-  const n = parseInt(v);
-  return Number.isInteger(n) ? n : null;
-}
-
-function _sondasDeSerie() {
-  return Object.fromEntries(Object.entries(SONDAS_CAMPOS).map(([k, [, v]]) => [k, v]));
-}
-
+// El formulario de Nuevo rastreo: lo que no es configuracion. La
+// configuracion va en `cfgRastreo`, el mismo formulario que el del cliente y
+// el del perfil (decision 196; revision de UX del 25-oct, 2.4).
 function _freshForm() {
   return {
     name: '',
     seeds: '',
     cliente_id: '',
     profile_id: '',
-    configTab: 'general',
     extraccion: [],      // reglas a medida (decision 166): ver _extraccionAConfig
-    // General
-    max_depth: 3,
-    max_urls: 50000,
-    concurrent_requests: 32,
-    concurrent_requests_per_domain: 8,
-    follow_external: false,
-    robots_mode: 'respect',
-    render_js: false,
-    use_sitemap: true,
-    user_agent_preset: 'chrome_win',
-    user_agent_custom: '',
-    // '' = automatica: la API la deduce del UA (decision 132), asi un preset de
-    // Firefox no sale con la huella de Chrome.
-    impersonate: '',
-    // Spider — resource types
-    crawl_images: true,
-    crawl_css: true,
-    crawl_js: true,
-    crawl_pdfs: true,
-    crawl_fonts: false,
-    crawl_svg: true,
-    crawl_other: true,
-    check_external_resources: false,
-    // Spider — behavior
-    crawl_subdomains: false,
-    follow_nofollow: false,
-    // Sondas de respuesta (decisiones 123 y 124): fuera del censo y de
-    // max_urls. Valores de serie de `JobConfig`; solo se mandan si se tocan
-    // (`SONDAS_CAMPOS`, `_sondasBase`).
-    comprobar_enlaces_externos: false,
-    comprobar_recursos: false,
-    enlaces_externos_max: 5000,
-    recursos_max: 20000,
-    sondas_por_host: 50,
-    og_image_muestra: 200,
-    axe_muestra: 0,
-    axe_por_plantilla: 1,
-    _sondasBase: _sondasDeSerie(),
-    // Adaptador WordPress (decision 168): `_wpConfigDesdeForm`.
-    wp_analizar: true,
-    _wpModoBase: 'auto',
-    exclude_patterns: '',
-    include_patterns: '',
-    max_url_length: 0,
-    max_folder_depth: 0,
-    // Topes por carpeta (decision 172): «regla = tope» por linea.
-    topes_por_carpeta: '',
-    // Extraction (Contenido)
-    extract_structured_data: true,
-    extract_hreflang: true,
-    extract_security_headers: true,
-    extract_page_content: true,
-    store_raw_html: false,
-    // Velocidad
-    download_timeout: 30,
-    retry_count: 2,
-    request_delay: 0,
-    autothrottle_enabled: true,
-    autothrottle_target_concurrency: 8,
-    max_runtime_hours: 6,
-    // Paridad movil (decision 119): 0 = apagada
-    paridad_movil_muestra: 0,
-    paridad_movil_por_plantilla: 3,
-    paridad_movil_ua: 'chrome_android',
-    // Capturas de pantalla (decision 173): 0 = apagadas
-    capturas_muestra: 0,
-    capturas_por_plantilla: 1,
-    capturas_ambos_perfiles: false,
-    // HTTP
-    custom_headers: '',
-    accept_language: '',
-    cookies: '',
-    conservar_cookies: false,
-    basic_auth_user: '',
-    basic_auth_password: '',
-    // Analisis
-    title_min_length: 10,
-    title_max_length: 60,
-    description_min_length: 50,
-    description_max_length: 160,
-    min_word_count: 200,
-    // 1, no 2: dos saltos ya son una cadena (decision 43). El formulario
-    // mandaba 2 y pisaba el default del servidor en cada rastreo lanzado aqui.
-    max_redirect_chain_length: 1,
-    max_outlinks: 100,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Configuracion en tres niveles (decision 196; revision de UX del 25-oct, 2.4)
+// ---------------------------------------------------------------------------
+// El MISMO formulario para el cliente, el perfil y el rastreo. Cada nivel
+// guarda solo lo que fija (`propia`); lo de arriba (`base`, ya resuelto por la
+// API con `origen`) se ve con su procedencia: «del cliente», «del perfil» o
+// «de serie». Escribir lo mismo que lo heredado no lo fija en este nivel: asi
+// un cambio del cliente sigue llegando al perfil. Los limites son los de
+// `JobConfig` (api/schemas.py), comprobados por `tests/test_config_niveles_frontend.py`.
+const GRUPOS_CONFIG = [
+  ['principal', 'Lo principal'],
+  ['alcance', 'Qué se rastrea'],
+  ['ritmo', 'Ritmo, tiempos e identidad'],
+  ['sondas', 'Comprobaciones extra (fuera del censo)'],
+  ['contenido', 'Qué se guarda de cada página'],
+  ['http', 'Cabeceras, cookies y acceso'],
+  ['umbrales', 'Umbrales del análisis'],
+];
+
+// Huellas TLS de curl_cffi que se ofrecen (decision 132); las comprueba
+// `tests/test_huella_y_ua.py` contra las que tiene el curl_cffi instalado.
+const HUELLAS_TLS = [
+  ['chrome150', 'Chrome 150'],
+  ['chrome124', 'Chrome 124 (la de serie hasta octubre de 2026)'],
+  ['firefox147', 'Firefox 147'],
+  ['safari260', 'Safari 26'],
+  ['chrome131_android', 'Chrome 131 Android'],
+  ['edge101', 'Edge 101'],
+];
+
+const SI_NO = 'si_no';
+const CAMPOS_CONFIG = [
+  // --- Lo principal: lo que mas se cambia, siempre a la vista
+  { ruta: 'max_urls', grupo: 'principal', etiqueta: 'Máximo de URLs', tipo: 'entero', min: 1, max: 5000000,
+    nulo: 'Sin tope', ayuda: 'Vacío = sin tope: rastrea hasta agotar el sitio. Con tope, el censo queda truncado si no cabe.' },
+  { ruta: 'max_depth', grupo: 'principal', etiqueta: 'Profundidad (clics desde las semillas)', tipo: 'entero', min: 0, max: 1000,
+    ayuda: '0 = modo lista: solo las semillas, sin seguir enlaces ni leer el sitemap.' },
+  { ruta: 'concurrent_requests_per_domain', grupo: 'principal', etiqueta: 'Peticiones a la vez por dominio', tipo: 'entero', min: 1, max: 64,
+    ayuda: 'Lo que más nota el sitio. Bájalo si un WAF bloquea.' },
+  { ruta: 'concurrent_requests', grupo: 'principal', etiqueta: 'Peticiones a la vez en total', tipo: 'entero', min: 1, max: 256 },
+  { ruta: 'render_js', grupo: 'principal', etiqueta: 'Renderizar JavaScript', tipo: SI_NO,
+    ayuda: 'Abre cada página en un navegador: ve lo que monta el JavaScript, pero es varias veces más lento.' },
+  { ruta: 'robots_mode', grupo: 'principal', etiqueta: 'robots.txt', tipo: 'opciones',
+    opciones: [['respect', 'Respetarlo'], ['audit', 'No respetarlo, pero anotar lo que bloquearía'], ['ignore', 'No leerlo']] },
+  { ruta: 'user_agent', grupo: 'principal', etiqueta: 'Se presenta como', tipo: 'ua' },
+  { ruta: 'exclude_patterns', grupo: 'principal', etiqueta: 'No rastrear las URLs que casen con', tipo: 'lineas',
+    ejemplo: '/carrito/\n\\?orden=', ayuda: 'Una expresión por línea, sobre la URL entera.' },
+
+  // --- Que se rastrea
+  { ruta: 'include_patterns', grupo: 'alcance', etiqueta: 'Rastrear solo las URLs que casen con', tipo: 'lineas',
+    ejemplo: '/blog/', ayuda: 'Vacío = todas. Una expresión por línea.' },
+  { ruta: 'use_sitemap', grupo: 'alcance', etiqueta: 'Leer el sitemap', tipo: SI_NO,
+    ayuda: 'Siembra las URLs del sitemap y permite ver huérfanas y páginas que faltan en él.' },
+  { ruta: 'sitemap_urls', grupo: 'alcance', etiqueta: 'Sitemaps además de los de robots.txt', tipo: 'lineas',
+    ejemplo: 'https://www.cliente.com/sitemap_index.xml' },
+  { ruta: 'follow_external', grupo: 'alcance', etiqueta: 'Seguir enlaces a otros sitios', tipo: SI_NO },
+  { ruta: 'crawl_behavior.crawl_subdomains', grupo: 'alcance', etiqueta: 'Rastrear subdominios', tipo: SI_NO },
+  { ruta: 'crawl_behavior.follow_nofollow', grupo: 'alcance', etiqueta: 'Seguir enlaces nofollow', tipo: SI_NO },
+  { ruta: 'topes_por_carpeta', grupo: 'alcance', etiqueta: 'Topes por carpeta o subdominio', tipo: 'topes',
+    ejemplo: '/blog/ = 500\n* = 300',
+    ayuda: 'Una línea por regla: «regla = tope». «*» = cada carpeta de primer nivel; «blog.cliente.com/*» = el host entero.' },
+  { ruta: 'url_filters.max_url_length', grupo: 'alcance', etiqueta: 'Longitud máxima de URL (0 = sin límite)', tipo: 'entero', min: 0, max: 10000 },
+  { ruta: 'url_filters.max_folder_depth', grupo: 'alcance', etiqueta: 'Carpetas como mucho (0 = sin límite)', tipo: 'entero', min: 0, max: 100 },
+  { ruta: 'resource_types.crawl_images', grupo: 'alcance', etiqueta: 'Pedir imágenes', tipo: SI_NO },
+  { ruta: 'resource_types.crawl_css', grupo: 'alcance', etiqueta: 'Pedir CSS', tipo: SI_NO },
+  { ruta: 'resource_types.crawl_js', grupo: 'alcance', etiqueta: 'Pedir JavaScript', tipo: SI_NO },
+  { ruta: 'resource_types.crawl_pdfs', grupo: 'alcance', etiqueta: 'Pedir PDF', tipo: SI_NO },
+  { ruta: 'resource_types.crawl_fonts', grupo: 'alcance', etiqueta: 'Pedir fuentes', tipo: SI_NO },
+  { ruta: 'resource_types.crawl_svg', grupo: 'alcance', etiqueta: 'Pedir SVG', tipo: SI_NO },
+  { ruta: 'resource_types.crawl_other', grupo: 'alcance', etiqueta: 'Pedir otros ficheros', tipo: SI_NO },
+
+  // --- Ritmo, tiempos e identidad
+  { ruta: 'crawl_behavior.request_delay', grupo: 'ritmo', etiqueta: 'Pausa entre peticiones (segundos)', tipo: 'decimal', min: 0, max: 30 },
+  { ruta: 'crawl_behavior.autothrottle_enabled', grupo: 'ritmo', etiqueta: 'Ajustar el ritmo solo (según lo que tarda el sitio)', tipo: SI_NO },
+  { ruta: 'crawl_behavior.autothrottle_target_concurrency', grupo: 'ritmo', etiqueta: 'Peticiones a la vez que busca el ajuste', tipo: 'decimal', min: 1, max: 100 },
+  { ruta: 'crawl_behavior.download_timeout', grupo: 'ritmo', etiqueta: 'Espera máxima por página (segundos)', tipo: 'entero', min: 5, max: 120 },
+  { ruta: 'crawl_behavior.retry_count', grupo: 'ritmo', etiqueta: 'Reintentos', tipo: 'entero', min: 0, max: 10 },
+  { ruta: 'crawl_behavior.render_wait_ms', grupo: 'ritmo', etiqueta: 'Espera tras cargar con render (ms)', tipo: 'entero', min: 0, max: 60000,
+    nulo: 'La del servidor', ayuda: 'Vacío = la del servidor (2.000 ms).' },
+  { ruta: 'crawl_behavior.max_runtime_hours', grupo: 'ritmo', etiqueta: 'Duración máxima (horas)', tipo: 'entero', min: 1, max: 720 },
+  { ruta: 'crawl_behavior.stall_timeout_minutes', grupo: 'ritmo', etiqueta: 'Darlo por atascado tras (minutos sin avanzar; 0 = nunca)', tipo: 'entero', min: 0, max: 1440 },
+  { ruta: 'crawl_behavior.parar_si_bloqueado', grupo: 'ritmo', etiqueta: 'Pararse si el sitio lo bloquea', tipo: SI_NO },
+  { ruta: 'crawl_behavior.respetar_retry_after', grupo: 'ritmo', etiqueta: 'Esperar lo que pida el sitio con un 429 o un 503', tipo: SI_NO },
+  { ruta: 'impersonate', grupo: 'ritmo', etiqueta: 'Huella TLS', tipo: 'huella',
+    ayuda: 'Va con el navegador con el que se presenta. Lo normal es dejarla automática.' },
+
+  // --- Comprobaciones extra (sondas): fuera del censo y de max_urls
+  { ruta: 'crawl_behavior.comprobar_enlaces_externos', grupo: 'sondas', etiqueta: 'Comprobar los enlaces a otros sitios', tipo: SI_NO },
+  { ruta: 'crawl_behavior.enlaces_externos_max', grupo: 'sondas', etiqueta: 'Enlaces externos: como mucho', tipo: 'entero', min: 0, max: 100000 },
+  { ruta: 'crawl_behavior.comprobar_recursos', grupo: 'sondas', etiqueta: 'Comprobar imágenes, CSS y JS del sitio', tipo: SI_NO },
+  { ruta: 'resource_types.check_external_resources', grupo: 'sondas', etiqueta: 'Comprobar también los de otros sitios (un CDN)', tipo: SI_NO },
+  { ruta: 'crawl_behavior.recursos_max', grupo: 'sondas', etiqueta: 'Recursos: como mucho', tipo: 'entero', min: 0, max: 500000 },
+  { ruta: 'crawl_behavior.sondas_por_host', grupo: 'sondas', etiqueta: 'Por sitio externo, como mucho (0 = sin tope)', tipo: 'entero', min: 0, max: 10000 },
+  { ruta: 'crawl_behavior.og_image_muestra', grupo: 'sondas', etiqueta: 'og:image que se miden (0 = no)', tipo: 'entero', min: 0, max: 5000 },
+  { ruta: 'crawl_behavior.axe_muestra', grupo: 'sondas', etiqueta: 'Accesibilidad: páginas que se pasan por axe (0 = no)', tipo: 'entero', min: 0, max: 500 },
+  { ruta: 'crawl_behavior.axe_por_plantilla', grupo: 'sondas', etiqueta: 'Accesibilidad: por plantilla', tipo: 'entero', min: 1, max: 20 },
+  { ruta: 'crawl_behavior.paridad_movil_muestra', grupo: 'sondas', etiqueta: 'Móvil frente a escritorio: páginas (0 = no)', tipo: 'entero', min: 0, max: 500 },
+  { ruta: 'crawl_behavior.paridad_movil_por_plantilla', grupo: 'sondas', etiqueta: 'Móvil frente a escritorio: por plantilla', tipo: 'entero', min: 1, max: 50 },
+  { ruta: 'crawl_behavior.paridad_movil_ua', grupo: 'sondas', etiqueta: 'Móvil frente a escritorio: como', tipo: 'opciones',
+    opciones: [['chrome_android', 'Chrome Android'], ['googlebot_smartphone', 'Googlebot smartphone']] },
+  { ruta: 'crawl_behavior.capturas_muestra', grupo: 'sondas', etiqueta: 'Capturas de pantalla: páginas (0 = no)', tipo: 'entero', min: 0, max: 50 },
+  { ruta: 'crawl_behavior.capturas_por_plantilla', grupo: 'sondas', etiqueta: 'Capturas: por plantilla', tipo: 'entero', min: 1, max: 5 },
+  { ruta: 'crawl_behavior.capturas_ambos_perfiles', grupo: 'sondas', etiqueta: 'Capturas en móvil y en escritorio', tipo: SI_NO },
+  { ruta: 'crawl_behavior.soft404_sondas', grupo: 'sondas', etiqueta: 'URLs inventadas para ver si hay soft 404', tipo: 'entero', min: 0, max: 100 },
+  { ruta: 'crawl_behavior.sonda_tls', grupo: 'sondas', etiqueta: 'Mirar el certificado TLS', tipo: SI_NO },
+  { ruta: 'adapters.wordpress.modo', grupo: 'sondas', etiqueta: 'WordPress: leer su REST API', tipo: 'opciones',
+    opciones: [['auto', 'Si el sitio es un WordPress'], ['on', 'Siempre'], ['off', 'No']] },
+
+  // --- Que se guarda de cada pagina
+  { ruta: 'extraction.extract_structured_data', grupo: 'contenido', etiqueta: 'Datos estructurados', tipo: SI_NO },
+  { ruta: 'extraction.extract_hreflang', grupo: 'contenido', etiqueta: 'hreflang', tipo: SI_NO },
+  { ruta: 'extraction.extract_security_headers', grupo: 'contenido', etiqueta: 'Cabeceras de seguridad', tipo: SI_NO },
+  { ruta: 'extraction.extract_page_content', grupo: 'contenido', etiqueta: 'Texto de la página', tipo: SI_NO },
+  { ruta: 'extraction.strip_promo_blocks', grupo: 'contenido', etiqueta: 'Quitar banners y bloques promocionales del texto', tipo: SI_NO },
+  { ruta: 'extraction.store_raw_html', grupo: 'contenido', etiqueta: 'Guardar el HTML entero', tipo: SI_NO },
+
+  // --- Cabeceras, cookies y acceso
+  { ruta: 'http.accept_language', grupo: 'http', etiqueta: 'Idioma que pide (Accept-Language)', tipo: 'texto', ejemplo: 'es-ES,es;q=0.9' },
+  { ruta: 'http.custom_headers', grupo: 'http', etiqueta: 'Cabeceras propias', tipo: 'kv', sep: ':', ejemplo: 'X-Prueba: 1',
+    ayuda: 'Una por línea, «Nombre: valor». Solo van a los hosts de las semillas.' },
+  { ruta: 'http.cookies', grupo: 'http', etiqueta: 'Cookies', tipo: 'kv', sep: '=', ejemplo: 'consentimiento=si',
+    ayuda: 'Una por línea, «nombre=valor». Solo van a los hosts de las semillas.' },
+  { ruta: 'http.conservar_cookies', grupo: 'http', etiqueta: 'Guardar las cookies que pone el sitio entre páginas', tipo: SI_NO },
+  // La contrasena del Basic solo en un rastreo: en un cliente o un perfil se
+  // guardaria en la base de datos (decision 83; `validar_config_parcial`).
+  { ruta: 'http.basic_auth_user', grupo: 'http', etiqueta: 'Usuario (autenticación básica)', tipo: 'texto', niveles: ['rastreo'] },
+  { ruta: 'http.basic_auth_password', grupo: 'http', etiqueta: 'Contraseña (autenticación básica)', tipo: 'clave', niveles: ['rastreo'] },
+
+  // --- Umbrales del analisis
+  { ruta: 'analysis_thresholds.title_min_length', grupo: 'umbrales', etiqueta: 'Título: caracteres como mínimo', tipo: 'entero', min: 0, max: 200 },
+  { ruta: 'analysis_thresholds.title_max_length', grupo: 'umbrales', etiqueta: 'Título: caracteres como máximo', tipo: 'entero', min: 1, max: 500 },
+  { ruta: 'analysis_thresholds.description_min_length', grupo: 'umbrales', etiqueta: 'Descripción: caracteres como mínimo', tipo: 'entero', min: 0, max: 500 },
+  { ruta: 'analysis_thresholds.description_max_length', grupo: 'umbrales', etiqueta: 'Descripción: caracteres como máximo', tipo: 'entero', min: 1, max: 1000 },
+  { ruta: 'analysis_thresholds.min_word_count', grupo: 'umbrales', etiqueta: 'Palabras como mínimo', tipo: 'entero', min: 0, max: 10000 },
+  { ruta: 'analysis_thresholds.max_redirect_chain_length', grupo: 'umbrales', etiqueta: 'Redirecciones seguidas aceptables', tipo: 'entero', min: 1, max: 20 },
+  { ruta: 'analysis_thresholds.max_outlinks', grupo: 'umbrales', etiqueta: 'Enlaces salientes como mucho', tipo: 'entero', min: 1, max: 10000 },
+  { ruta: 'analysis_thresholds.tls_dias_aviso', grupo: 'umbrales', etiqueta: 'Avisar del certificado a estos días de caducar', tipo: 'entero', min: 1, max: 90 },
+];
+const CAMPO_CONFIG = Object.fromEntries(CAMPOS_CONFIG.map(c => [c.ruta, c]));
+
+// Las secciones plegables de Configuracion del cliente, en orden (revision de
+// UX del 25-oct, 2.4): el indice de arriba lleva a cada una y la abre.
+const SECCIONES_CONFIG_CLIENTE = [
+  ['cfg-perfiles', 'Perfiles'], ['cfg-rastreo', 'Cómo se rastrea'], ['cfg-datos', 'Datos'],
+  ['cfg-gsc', 'Search Console'], ['cfg-slack', 'Slack'], ['cfg-enlace', 'Enlace para el cliente'],
+  ['cfg-integraciones', 'Otras integraciones'], ['reglas-alertas', 'Reglas de alertas'],
+];
+
+const ORIGEN_TEXTO = { cliente: 'del cliente', perfil: 'del perfil', rastreo: 'de este rastreo', serie: 'de serie' };
+
+function cfgLeer(obj, ruta) {
+  let o = obj;
+  for (const p of ruta.split('.')) {
+    if (o === null || o === undefined || typeof o !== 'object') return undefined;
+    o = o[p];
+  }
+  return o;
+}
+
+// `in` antes que hasOwnProperty: el proxy reactivo de Alpine registra `in`
+// (trampa `has`) y no hasOwnProperty, y sin eso la etiqueta «cambiado aquí»
+// no se repintaba al fijar una clave nueva.
+function _cfgPropia(o, k) {
+  return !!o && typeof o === 'object' && (k in o) && Object.prototype.hasOwnProperty.call(o, k);
+}
+
+function cfgTieneRuta(obj, ruta) {
+  const partes = ruta.split('.');
+  let o = obj;
+  for (const p of partes.slice(0, -1)) {
+    if (!_cfgPropia(o, p)) return false;
+    o = o[p];
+  }
+  return _cfgPropia(o, partes[partes.length - 1]);
+}
+
+function cfgPoner(obj, ruta, valor) {
+  const partes = ruta.split('.');
+  let o = obj;
+  for (const p of partes.slice(0, -1)) {
+    if (!o[p] || typeof o[p] !== 'object') o[p] = {};
+    o = o[p];
+  }
+  o[partes[partes.length - 1]] = valor;
+}
+
+// Quita la clave y los padres que se queden vacios: un `{"crawl_behavior": {}}`
+// no fija nada, pero ensuciaria el JSON de «Avanzado».
+function cfgQuitar(obj, ruta) {
+  const partes = ruta.split('.');
+  const pila = [obj];
+  for (const p of partes.slice(0, -1)) {
+    const o = pila[pila.length - 1];
+    if (!o || typeof o[p] !== 'object' || o[p] === null) return;
+    pila.push(o[p]);
+  }
+  delete pila[pila.length - 1][partes[partes.length - 1]];
+  for (let i = partes.length - 2; i >= 0; i--) {
+    if (Object.keys(pila[i + 1]).length) break;
+    delete pila[i][partes[i]];
+  }
+}
+
+// Una instancia del formulario. `base` = la config resuelta de los niveles de
+// arriba (completa), `origen` = de que nivel sale cada ruta de `base`, `serie`
+// = los valores de JobConfig, `propia` = lo que fija este nivel.
+function cfgNuevo(nivel, d) {
+  d = d || {};
+  const propia = JSON.parse(JSON.stringify(d.propia || {}));
+  return {
+    nivel, base: d.base || {}, origenBase: d.origen || {}, serie: d.serie || d.base || {},
+    propia, textos: {}, errores: {}, abiertos: {},
+    json: JSON.stringify(propia, null, 2), jsonError: '',
+    ctx: d.ctx || {}, resuelta: null, resueltaError: '', resolviendo: false, cargada: !!d.base,
+  };
+}
+
+function cfgTiene(inst, ruta) {
+  return cfgTieneRuta(inst.propia, ruta);
+}
+
+function cfgHeredado(inst, ruta) {
+  const v = cfgLeer(inst.base, ruta);
+  return v === undefined ? cfgLeer(inst.serie, ruta) : v;
+}
+
+// El valor con el que saldria el rastreo con este nivel tal como esta.
+function cfgEfectivo(inst, ruta) {
+  const c = CAMPO_CONFIG[ruta] || {};
+  if (cfgTiene(inst, ruta)) {
+    const v = cfgLeer(inst.propia, ruta);
+    if (v === null) return cfgLeer(inst.serie, ruta) ?? null;
+    if (c.tipo === 'kv' || c.tipo === 'topes') return { ...(cfgHeredado(inst, ruta) || {}), ...v };
+    return v;
+  }
+  // Modo lista (decision 128): sin que nadie fije el sitemap, una lista no lo lee.
+  if (ruta === 'use_sitemap' && !inst.origenBase.use_sitemap && Number(cfgEfectivo(inst, 'max_depth')) === 0) return false;
+  return cfgHeredado(inst, ruta);
+}
+
+function cfgOrigen(inst, ruta) {
+  if (cfgTiene(inst, ruta)) return 'aqui';
+  return inst.origenBase[ruta] || 'serie';
+}
+
+// El valor en llano, para «Así rastreará» y para «el heredado es…».
+function cfgLlano(ruta, v) {
+  const c = CAMPO_CONFIG[ruta] || { tipo: typeof v === 'boolean' ? SI_NO : 'texto' };
+  if (v === null || v === undefined || v === '') {
+    if (c.nulo) return c.nulo.toLowerCase();
+    return c.tipo === 'lineas' || c.tipo === 'kv' || c.tipo === 'topes' ? 'ninguna' : '—';
+  }
+  if (c.tipo === SI_NO) return v ? 'sí' : 'no';
+  if (c.tipo === 'opciones') return ((c.opciones || []).find(o => o[0] === v) || [v, v])[1];
+  if (c.tipo === 'huella') return ((HUELLAS_TLS.find(o => o[0] === v)) || [v, v])[1];
+  if (c.tipo === 'ua') { const p = presetDeUserAgent(v); return p ? UA_LABELS[p] : 'personalizado'; }
+  if (c.tipo === 'entero' || c.tipo === 'decimal') return fmt.num(v);
+  if (c.tipo === 'clave') return 'puesta';
+  if (Array.isArray(v)) return v.length ? v.join(', ') : 'ninguna';
+  if (typeof v === 'object') {
+    const n = Object.keys(v).length;
+    return n ? Object.entries(v).map(([k, x]) => `${k} ${c.sep || '='} ${x}`).join(', ') : 'ninguna';
+  }
+  return String(v);
+}
+
+// El texto del campo: lo que se esta escribiendo (con error) o el valor.
+function cfgTextoCampo(inst, ruta) {
+  if (_cfgPropia(inst.textos, ruta)) return inst.textos[ruta];
+  const c = CAMPO_CONFIG[ruta];
+  const v = cfgEfectivo(inst, ruta);
+  if (c.tipo === 'huella') {
+    // Sin que nadie la fije, la deduce la API del user agent (decision 132).
+    return cfgTiene(inst, ruta) || inst.origenBase.impersonate ? (v || '') : '';
+  }
+  if (c.tipo === 'ua') return presetDeUserAgent(v) || 'custom';
+  if (v === null || v === undefined) return '';
+  if (c.tipo === 'lineas') return (v || []).join('\n');
+  if (c.tipo === 'kv') return Object.entries(v || {}).map(([k, x]) => `${k}${c.sep === ':' ? ': ' : '='}${x}`).join('\n');
+  if (c.tipo === 'topes') return Object.entries(v || {}).filter(([, x]) => x !== null).map(([k, x]) => `${k} = ${x}`).join('\n');
+  if (c.tipo === 'decimal') return String(v).replace('.', ',');
+  return String(v);
+}
+
+// Del texto al valor, con los limites de JobConfig. {valor} o {error}.
+function cfgParsear(c, texto) {
+  if (c.tipo === SI_NO) return { valor: !!texto };
+  if (c.tipo === 'opciones' || c.tipo === 'huella') return { valor: texto };
+  if (c.tipo === 'texto' || c.tipo === 'clave') return { valor: String(texto || '').trim() };
+  if (c.tipo === 'lineas') return { valor: String(texto || '').split('\n').map(s => s.trim()).filter(Boolean) };
+  if (c.tipo === 'kv') {
+    const salida = {};
+    for (const linea of String(texto || '').split('\n').map(s => s.trim()).filter(Boolean)) {
+      const i = linea.indexOf(c.sep);
+      if (i < 1) return { error: `Falta «${c.sep}» en «${linea}»` };
+      salida[linea.slice(0, i).trim()] = linea.slice(i + 1).trim();
+    }
+    return { valor: salida };
+  }
+  if (c.tipo === 'topes') {
+    const salida = {};
+    for (const linea of String(texto || '').split('\n').map(s => s.trim()).filter(Boolean)) {
+      const i = linea.lastIndexOf('=');
+      const n = i > 0 ? linea.slice(i + 1).trim() : '';
+      if (!/^\d+$/.test(n)) return { error: `«${linea}»: escribe «regla = número»` };
+      salida[linea.slice(0, i).trim()] = parseInt(n, 10);
+    }
+    return { valor: salida };
+  }
+  const t = String(texto ?? '').trim().replace(/\./g, c.tipo === 'entero' ? '' : '.').replace(',', '.');
+  if (t === '') return c.nulo ? { valor: null } : { error: 'Hace falta un número' };
+  const n = Number(t);
+  if (!Number.isFinite(n)) return { error: 'Tiene que ser un número' };
+  if (c.tipo === 'entero' && !Number.isInteger(n)) return { error: 'Tiene que ser un número entero' };
+  if ((c.min !== undefined && n < c.min) || (c.max !== undefined && n > c.max)) {
+    return { error: `Entre ${fmt.num(c.min)} y ${fmt.num(c.max)}` };
+  }
+  return { valor: n };
+}
+
+function _cfgIgual(a, b) {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+// Cambia un campo en este nivel. Devuelve el error, o ''.
+function cfgCambiar(inst, ruta, texto) {
+  const c = CAMPO_CONFIG[ruta];
+  const r = c.tipo === 'ua'
+    ? { valor: texto }
+    : cfgParsear(c, texto);
+  if (r.error) {
+    inst.errores[ruta] = r.error;
+    inst.textos[ruta] = texto;
+    return r.error;
+  }
+  delete inst.errores[ruta];
+  delete inst.textos[ruta];
+  const heredado = cfgHeredado(inst, ruta);
+  if (c.tipo === 'kv' || c.tipo === 'topes') {
+    // Se fusionan por clave con lo heredado: aqui solo lo nuevo o distinto.
+    // Quitar una heredada no se puede desde un nivel de abajo (un null aqui
+    // no lo admite la API): se dice en vez de perderla en silencio.
+    const her = heredado || {};
+    const faltan = Object.keys(her).filter(k => !(k in r.valor));
+    if (faltan.length) {
+      inst.errores[ruta] = `«${faltan.join('», «')}» viene ${ORIGEN_TEXTO[inst.origenBase[ruta]] || 'de arriba'}: quítala allí`;
+      inst.textos[ruta] = texto;
+      return inst.errores[ruta];
+    }
+    const propias = Object.fromEntries(Object.entries(r.valor).filter(([k, v]) => !_cfgIgual(her[k], v)));
+    if (Object.keys(propias).length) cfgPoner(inst.propia, ruta, propias); else cfgQuitar(inst.propia, ruta);
+  } else if (c.tipo === 'huella' && r.valor === '') {
+    cfgQuitar(inst.propia, ruta);
+  } else if (_cfgIgual(r.valor, ruta === 'use_sitemap' ? cfgEfectivoSinPropia(inst, ruta) : heredado)) {
+    // Lo mismo que lo heredado no se fija aqui: si cambia arriba, llega.
+    cfgQuitar(inst.propia, ruta);
+  } else {
+    cfgPoner(inst.propia, ruta, r.valor);
+  }
+  inst.json = JSON.stringify(inst.propia, null, 2);
+  inst.jsonError = '';
+  return '';
+}
+
+function cfgEfectivoSinPropia(inst, ruta) {
+  const copia = { ...inst, propia: JSON.parse(JSON.stringify(inst.propia)) };
+  cfgQuitar(copia.propia, ruta);
+  return cfgEfectivo(copia, ruta);
+}
+
+// «volver al heredado»
+function cfgHeredar(inst, ruta) {
+  cfgQuitar(inst.propia, ruta);
+  delete inst.errores[ruta];
+  delete inst.textos[ruta];
+  inst.json = JSON.stringify(inst.propia, null, 2);
+}
+
+// «Avanzado»: el JSON de este nivel, para lo que el formulario no tiene
+// (plantillas, segmentos, marcas…). Se valida en la API al guardar.
+function cfgAplicarJson(inst) {
+  let d;
+  try {
+    d = (inst.json || '').trim() ? JSON.parse(inst.json) : {};
+  } catch (e) {
+    inst.jsonError = 'No es JSON válido: ' + e.message;
+    return false;
+  }
+  if (!d || typeof d !== 'object' || Array.isArray(d)) {
+    inst.jsonError = 'Tiene que ser un objeto: { … }';
+    return false;
+  }
+  inst.propia = d;
+  inst.errores = {};
+  inst.textos = {};
+  inst.jsonError = '';
+  return true;
+}
+
+// Lo que este nivel fija y el formulario no tiene (plantillas, marcas…): se
+// dice en el resumen para que «lo de serie» no lo esconda.
+function cfgClavesFuera(inst) {
+  const fuera = [];
+  const bajar = (o, ruta) => {
+    for (const [k, v] of Object.entries(o || {})) {
+      const r = ruta ? ruta + '.' + k : k;
+      if (CAMPO_CONFIG[r]) continue;
+      if (v && typeof v === 'object' && !Array.isArray(v) && CAMPOS_CONFIG.some(c => c.ruta.startsWith(r + '.'))) bajar(v, r);
+      else fuera.push(r);
+    }
+  };
+  bajar(inst.propia, '');
+  return fuera;
+}
+
+function cfgHayErrores(inst) {
+  return !!inst && (Object.keys(inst.errores).length > 0 || !!inst.jsonError);
+}
+
+function cfgCamposDe(inst, grupo) {
+  return CAMPOS_CONFIG.filter(c => c.grupo === grupo && (!c.niveles || c.niveles.includes(inst.nivel)));
+}
+
+// Junto al titulo de un grupo plegado: lo que se ha cambiado en ESTE nivel.
+function cfgResumenGrupo(inst, grupo) {
+  const n = cfgCamposDe(inst, grupo).filter(c => cfgTiene(inst, c.ruta)).length;
+  const errores = cfgCamposDe(inst, grupo).filter(c => inst.errores[c.ruta]).length;
+  if (errores) return errores === 1 ? '· 1 campo con error' : `· ${errores} campos con error`;
+  if (!n) return '';
+  return n === 1 ? '· 1 cambiado aquí' : `· ${n} cambiados aquí`;
+}
+
+// La procedencia de un campo, en llano.
+function cfgEtiquetaOrigen(inst, ruta) {
+  const o = cfgOrigen(inst, ruta);
+  if (o === 'aqui') {
+    const de = inst.origenBase[ruta] || 'serie';
+    return 'cambiado aquí · ' + ORIGEN_TEXTO[de] + ': ' + cfgLlano(ruta, cfgHeredado(inst, ruta));
+  }
+  if (ruta === 'impersonate' && !inst.origenBase.impersonate) return 'automática';
+  if (ruta === 'use_sitemap' && !inst.origenBase.use_sitemap && Number(cfgEfectivo(inst, 'max_depth')) === 0) {
+    return 'en modo lista no se lee';
+  }
+  return ORIGEN_TEXTO[o] || o;
+}
+
+// Las lineas de «Así rastreará»: lo principal siempre y, del resto, lo que no
+// es de serie. Con la config que devuelve la API (la de verdad, deducciones
+// incluidas) y la procedencia que dice ella.
+function cfgAsiLineas(inst) {
+  const r = inst.resuelta;
+  if (!r) return [];
+  const origen = r.origen || {};
+  return CAMPOS_CONFIG
+    .filter(c => (!c.niveles || c.niveles.includes(inst.nivel))
+      && (c.grupo === 'principal' || origen[c.ruta]) && c.tipo !== 'clave')
+    .map(c => ({ ruta: c.ruta, etiqueta: c.etiqueta, valor: cfgLlano(c.ruta, cfgLeer(r.config, c.ruta)),
+                 origen: origen[c.ruta] || 'serie' }));
+}
+
+function cfgOrigenAsi(origen, nivel) {
+  if (origen === nivel) return nivel === 'rastreo' ? 'de este rastreo' : 'cambiado aquí';
+  return ORIGEN_TEXTO[origen] || origen;
 }
 
 function _parseKV(text, separator) {
@@ -6540,179 +7168,6 @@ function _parseKV(text, separator) {
   return obj;
 }
 
-// La configuracion de un job a partir del formulario del modal. Es lo que se
-// enviaba siempre; con cliente, el formulario llega precargado con lo heredado
-// (`_formDesdeConfig`), asi que lo que se ve es lo que se lanza.
-function _configDesdeForm(f) {
-  const cfg = {
-    // `|| 3` convertia el 0 del modo lista (decision 128) en 3.
-    max_depth:     Number.isInteger(parseInt(f.max_depth)) ? parseInt(f.max_depth) : 3,
-    max_urls:      parseInt(f.max_urls)      || 50000,
-    concurrent_requests:            parseInt(f.concurrent_requests)            || 32,
-    concurrent_requests_per_domain: parseInt(f.concurrent_requests_per_domain) || 8,
-    follow_external: f.follow_external,
-    robots_mode:     f.robots_mode,
-    render_js:       f.render_js,
-    use_sitemap:     f.use_sitemap,
-    user_agent:      f.user_agent_preset === 'custom' ? f.user_agent_custom : UA_PRESETS[f.user_agent_preset],
-    // Sin huella elegida no se manda: la deduce la API del UA (decision 132).
-    ...(f.impersonate ? { impersonate: f.impersonate } : {}),
-    exclude_patterns: f.exclude_patterns.split('\n').map(s => s.trim()).filter(Boolean),
-    include_patterns: f.include_patterns.split('\n').map(s => s.trim()).filter(Boolean),
-    resource_types: {
-      crawl_images: f.crawl_images,
-      crawl_css: f.crawl_css,
-      crawl_js: f.crawl_js,
-      crawl_pdfs: f.crawl_pdfs,
-      crawl_fonts: f.crawl_fonts,
-      crawl_svg: f.crawl_svg,
-      crawl_other: f.crawl_other,
-    },
-    crawl_behavior: {
-      download_timeout: parseInt(f.download_timeout) || 30,
-      retry_count: parseInt(f.retry_count) || 2,
-      request_delay: parseFloat(f.request_delay) || 0,
-      autothrottle_enabled: f.autothrottle_enabled,
-      autothrottle_target_concurrency: parseFloat(f.autothrottle_target_concurrency) || 8,
-      follow_nofollow: f.follow_nofollow,
-      crawl_subdomains: f.crawl_subdomains,
-      max_runtime_hours: parseInt(f.max_runtime_hours) || 6,
-      paridad_movil_muestra: parseInt(f.paridad_movil_muestra) || 0,
-      paridad_movil_por_plantilla: parseInt(f.paridad_movil_por_plantilla) || 3,
-      paridad_movil_ua: f.paridad_movil_ua || 'chrome_android',
-      capturas_muestra: parseInt(f.capturas_muestra) || 0,
-      capturas_por_plantilla: parseInt(f.capturas_por_plantilla) || 1,
-      capturas_ambos_perfiles: !!f.capturas_ambos_perfiles,
-    },
-    url_filters: {
-      max_url_length: parseInt(f.max_url_length) || 0,
-      max_folder_depth: parseInt(f.max_folder_depth) || 0,
-    },
-    // El formulario llega con lo heredado, asi que lo que se ve es lo que se
-    // lanza: una regla heredada que se borra va como `null`, que en la
-    // herencia la quita (un dict se fusiona por clave y no borraria nada).
-    topes_por_carpeta: _topesDesdeTexto(f.topes_por_carpeta,
-      (f.cliente_id && f._topesBase) || []),
-    extraction: {
-      extract_structured_data: f.extract_structured_data,
-      extract_hreflang: f.extract_hreflang,
-      extract_security_headers: f.extract_security_headers,
-      extract_page_content: f.extract_page_content,
-      store_raw_html: f.store_raw_html,
-    },
-    http: {
-      custom_headers: _parseKV(f.custom_headers, ':'),
-      accept_language: f.accept_language,
-      cookies: _parseKV(f.cookies, '='),
-      conservar_cookies: !!f.conservar_cookies,
-      basic_auth_user: f.basic_auth_user,
-      basic_auth_password: f.basic_auth_password,
-    },
-    analysis_thresholds: {
-      title_min_length: parseInt(f.title_min_length) || 10,
-      title_max_length: parseInt(f.title_max_length) || 60,
-      description_min_length: parseInt(f.description_min_length) || 50,
-      description_max_length: parseInt(f.description_max_length) || 160,
-      min_word_count: parseInt(f.min_word_count) || 200,
-      max_redirect_chain_length: parseInt(f.max_redirect_chain_length) || 1,
-      max_outlinks: parseInt(f.max_outlinks) || 100,
-    },
-  };
-  // Las sondas, solo si se han tocado (ver SONDAS_CAMPOS). La base heredada
-  // solo vale con cliente: al volver a «Sin cliente» el modal no rehace el
-  // formulario, y sin cliente el servidor no hereda nada; lo que se ve tiene
-  // que mandarse contra lo de serie.
-  const base = (f.cliente_id && f._sondasBase) || _sondasDeSerie();
-  for (const [campo, [seccion]] of Object.entries(SONDAS_CAMPOS)) {
-    const v = _valorSonda(campo, f[campo]);
-    if (v === null || v === _valorSonda(campo, base[campo])) continue;
-    cfg[seccion][campo] = v;
-  }
-  _wpConfigDesdeForm(f, cfg);
-  const ce = _extraccionAConfig(f);
-  if (ce) cfg.custom_extraction = ce;
-  return cfg;
-}
-
-// Lo contrario: vuelca en el formulario una configuracion PARCIAL (la que
-// fijan cliente y perfil). Solo toca los campos que la configuracion trae; el
-// resto se queda con los valores de siempre del modal.
-function _formDesdeConfig(f, cfg) {
-  const poner = (campo, valor) => { if (valor !== undefined && valor !== null) f[campo] = valor; };
-  _extraccionDesdeConfig(f, cfg);
-  ['max_depth', 'max_urls', 'concurrent_requests', 'concurrent_requests_per_domain',
-   'follow_external', 'robots_mode', 'render_js', 'use_sitemap', 'impersonate']
-    .forEach(k => poner(k, cfg[k]));
-  // Modo lista (decision 128): un perfil con `max_depth: 0` y sin
-  // `use_sitemap` hereda «sin sitemap» en la API. La casilla marcada por
-  // defecto lo mandaba como `true` explicito y la lista sembraba el sitemap.
-  if (Number(cfg.max_depth) === 0 && (cfg.use_sitemap === undefined || cfg.use_sitemap === null)) {
-    f.use_sitemap = false;
-  }
-  if (cfg.user_agent) {
-    const preset = presetDeUserAgent(cfg.user_agent);
-    f.user_agent_preset = preset || 'custom';
-    if (!preset) f.user_agent_custom = cfg.user_agent;
-  }
-  if (Array.isArray(cfg.exclude_patterns)) f.exclude_patterns = cfg.exclude_patterns.join('\n');
-  if (Array.isArray(cfg.include_patterns)) f.include_patterns = cfg.include_patterns.join('\n');
-  const sub = (obj, campos) => campos.forEach(k => poner(k, (obj || {})[k]));
-  sub(cfg.resource_types, ['crawl_images', 'crawl_css', 'crawl_js', 'crawl_pdfs', 'crawl_fonts',
-    'crawl_svg', 'crawl_other']);
-  sub(cfg.crawl_behavior, ['download_timeout', 'retry_count', 'request_delay', 'autothrottle_enabled',
-    'autothrottle_target_concurrency', 'follow_nofollow', 'crawl_subdomains', 'max_runtime_hours',
-    'paridad_movil_muestra', 'paridad_movil_por_plantilla', 'paridad_movil_ua',
-    'capturas_muestra', 'capturas_por_plantilla', 'capturas_ambos_perfiles']);
-  // Las sondas (decisiones 123 y 124): lo heredado se pinta Y pasa a ser la
-  // base, para que lanzar sin tocarlas no lo repita en el job.
-  f._sondasBase = { ...(f._sondasBase || _sondasDeSerie()) };
-  for (const [campo, [seccion]] of Object.entries(SONDAS_CAMPOS)) {
-    const v = (cfg[seccion] || {})[campo];
-    if (v === undefined || v === null) continue;
-    f[campo] = v;
-    f._sondasBase[campo] = v;
-  }
-  sub(cfg.url_filters, ['max_url_length', 'max_folder_depth']);
-  if (cfg.topes_por_carpeta && typeof cfg.topes_por_carpeta === 'object') {
-    f.topes_por_carpeta = _topesATexto(cfg.topes_por_carpeta);
-    f._topesBase = Object.keys(cfg.topes_por_carpeta);
-  }
-  sub(cfg.extraction, ['extract_structured_data', 'extract_hreflang', 'extract_security_headers',
-    'extract_page_content', 'store_raw_html']);
-  const http = cfg.http || {};
-  if (http.custom_headers) f.custom_headers = _kvTexto(http.custom_headers, ': ');
-  if (http.cookies) f.cookies = _kvTexto(http.cookies, '=');
-  poner('accept_language', http.accept_language);
-  poner('conservar_cookies', http.conservar_cookies);
-  poner('basic_auth_user', http.basic_auth_user);
-  sub(cfg.analysis_thresholds, ['title_min_length', 'title_max_length', 'description_min_length',
-    'description_max_length', 'min_word_count', 'max_redirect_chain_length', 'max_outlinks']);
-  _wpModoDesdeConfig(f, cfg);
-  return f;
-}
-
-// Topes por carpeta (decision 172): «regla = tope» por linea <-> {regla: tope}.
-// Una linea sin numero se manda igual, como texto, para que la API diga que
-// esta mal en vez de tirarla aqui en silencio.
-function _topesDesdeTexto(texto, heredadas) {
-  const salida = {};
-  (heredadas || []).forEach(regla => { salida[regla] = null; });
-  (texto || '').split('\n').forEach(linea => {
-    linea = linea.trim();
-    if (!linea) return;
-    const i = linea.lastIndexOf('=');
-    const regla = (i > 0 ? linea.substring(0, i) : linea).trim();
-    const valor = i > 0 ? linea.substring(i + 1).trim() : '';
-    salida[regla] = /^\d+$/.test(valor) ? parseInt(valor, 10) : valor;
-  });
-  return salida;
-}
-
-function _topesATexto(obj) {
-  return Object.entries(obj || {}).filter(([, v]) => v !== null && v !== undefined)
-    .map(([k, v]) => `${k} = ${v}`).join('\n');
-}
-
 function _kvTexto(obj, sep) {
   return Object.entries(obj || {}).map(([k, v]) => `${k}${sep}${v}`).join('\n');
 }
@@ -6727,7 +7182,6 @@ function _formCliente(c) {
     dominios: c ? (c.dominios || []).join('\n') : '',
     zona_horaria: c ? (c.zona_horaria || '') : 'Europe/Madrid',
     notas: c ? (c.notas || '') : '',
-    config_defecto: c ? JSON.stringify(c.config_defecto || {}, null, 2) : '{}',
     integraciones: c ? (c.integraciones || []).map(i => ({
       tipo: i.tipo,
       etiqueta: i.etiqueta || '',
@@ -7058,9 +7512,11 @@ function extraccionUI() {
         const cuerpo = { url: (p.url || '').trim(), custom_extraction: _extraccionAConfig(f) || {} };
         if (f.cliente_id) cuerpo.cliente_id = f.cliente_id;
         if (f.profile_id) cuerpo.profile_id = f.profile_id;
-        const ua = f.user_agent_preset === 'custom' ? f.user_agent_custom : UA_PRESETS[f.user_agent_preset];
-        if (ua) cuerpo.user_agent = ua;
-        if (f.impersonate) cuerpo.impersonate = f.impersonate;
+        // El user agent y la huella solo si este rastreo los cambia: si no,
+        // la API usa los heredados del cliente y el perfil (decision 196).
+        const i = this.cfgRastreo;
+        if (i && cfgTiene(i, 'user_agent')) cuerpo.user_agent = cfgEfectivo(i, 'user_agent');
+        if (i && cfgTiene(i, 'impersonate')) cuerpo.impersonate = cfgEfectivo(i, 'impersonate');
         p.resultado = await api('/extraccion/probar', { method: 'POST', body: JSON.stringify(cuerpo) });
       } catch (e) {
         p.error = e.message;

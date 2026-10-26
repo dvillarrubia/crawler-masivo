@@ -1,6 +1,6 @@
 """El formulario de lanzar con un perfil en modo lista (decision 128),
-ejecutando `frontend/app.js` en Chromium: se llama a `_formDesdeConfig` y a
-`_configDesdeForm` y se mira lo que se mandaria.
+ejecutando `frontend/app.js` en Chromium: con el formulario de configuracion
+en tres niveles (decision 196) se mira lo que se ve y lo que se mandaria.
 
 Un perfil con `max_depth: 0` y sin `use_sitemap` hereda «sin sitemap» en la API
 (`JobConfig._lista_sin_sitemap`). El modal precarga `config_heredada` —la
@@ -46,15 +46,20 @@ def _evaluar(expr: str):
 
 
 def _lanzado_con(cfg: str):
+    """El rastreo sobre un perfil con `cfg` (la base que da la API, con su
+    procedencia): que casilla se ve y que se mandaria sin tocar nada."""
     return _evaluar(
-        "() => { const f = _freshForm(); "
-        "f.max_depth = 3; _formDesdeConfig(f, " + cfg + "); return _configDesdeForm(f); }")
+        "() => { const cfg = " + cfg + "; const origen = {};"
+        " for (const k of Object.keys(cfg)) origen[k] = 'perfil';"
+        " const base = Object.assign({max_depth: 3, use_sitemap: true}, cfg);"
+        " const i = cfgNuevo('rastreo', {base, origen});"
+        " return {use_sitemap: cfgEfectivo(i, 'use_sitemap'), propia: i.propia}; }")
 
 
 def test_un_perfil_en_modo_lista_se_lanza_sin_sitemap():
     c = _lanzado_con("{max_depth: 0}")
-    assert c["max_depth"] == 0
     assert c["use_sitemap"] is False
+    assert c["propia"] == {}, "sin tocarla no se manda: la API deduce «sin sitemap»"
 
 
 def test_si_el_perfil_pide_el_sitemap_se_respeta():
@@ -63,3 +68,9 @@ def test_si_el_perfil_pide_el_sitemap_se_respeta():
 
 def test_un_perfil_normal_no_toca_el_sitemap():
     assert _lanzado_con("{max_depth: 5}")["use_sitemap"] is True
+
+
+def test_marcar_el_sitemap_en_una_lista_si_se_manda():
+    r = _evaluar("() => { const i = cfgNuevo('rastreo', {base: {max_depth: 0, use_sitemap: true},"
+                 " origen: {max_depth: 'perfil'}}); cfgCambiar(i, 'use_sitemap', true); return i.propia; }")
+    assert r == {"use_sitemap": True}

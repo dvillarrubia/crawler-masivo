@@ -51,7 +51,7 @@ HEREDADA = "{custom_extraction: {precio: {tipo: 'css', expresion: '.precio', val
 
 def test_heredadas_sin_tocar_no_se_mandan_con_cliente():
     r = _evaluar("() => { const f = _freshForm(); f.cliente_id = 'c1'; "
-                 "_formDesdeConfig(f, " + HEREDADA + "); return _configDesdeForm(f); }")
+                 "_extraccionDesdeConfig(f, " + HEREDADA + "); return (_extraccionAConfig(f) ? {custom_extraction: _extraccionAConfig(f)} : {}); }")
     assert "custom_extraction" not in r
 
 
@@ -59,13 +59,13 @@ def test_al_volver_a_sin_cliente_las_heredadas_se_lanzan():
     r = _evaluar("""async () => {
         const a = app();
         const f = _freshForm(); f.cliente_id = 'c1';
-        _formDesdeConfig(f, """ + HEREDADA + """);
+        _extraccionDesdeConfig(f, """ + HEREDADA + """);
         f.extraccion.push(_xmFila('sku', {tipo: 'css', expresion: '.sku'}, true));
         f.extraccion[1].quitada = true;      // quitada con cliente: sin cliente, fuera
         a.createForm = f;
         f.cliente_id = '';
         await a.cambiarClienteModal();
-        return {cfg: _configDesdeForm(a.createForm),
+        return {cfg: (_extraccionAConfig(a.createForm) ? {custom_extraction: _extraccionAConfig(a.createForm)} : {}),
                 filas: a.createForm.extraccion.map(x => [x.nombre, x.heredada])};
     }""")
     assert r["cfg"]["custom_extraction"]["precio"]["expresion"] == ".precio"
@@ -75,7 +75,7 @@ def test_al_volver_a_sin_cliente_las_heredadas_se_lanzan():
 
 def test_sin_cliente_una_fila_heredada_se_manda_aunque_no_se_haya_convertido():
     r = _evaluar("() => { const f = _freshForm(); f.cliente_id = 'c1'; "
-                 "_formDesdeConfig(f, " + HEREDADA + "); f.cliente_id = ''; "
+                 "_extraccionDesdeConfig(f, " + HEREDADA + "); f.cliente_id = ''; "
                  "return _extraccionAConfig(f); }")
     assert r["precio"]["tipo"] == "css"
 
@@ -92,7 +92,7 @@ def test_cambiar_de_perfil_conserva_las_reglas_propias():
                         _xmFila('sku', {tipo: 'css', expresion: '.ean'}, false)];
         a.createForm = f;
         await a.aplicarHerencia();
-        return {cfg: _configDesdeForm(a.createForm),
+        return {cfg: (_extraccionAConfig(a.createForm) ? {custom_extraction: _extraccionAConfig(a.createForm)} : {}),
                 filas: a.createForm.extraccion.map(x => [x.nombre, x.heredada])};
     }""")
     assert sorted(r["filas"]) == [["mio", False], ["precio", True], ["sku", False]]

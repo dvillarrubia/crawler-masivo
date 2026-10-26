@@ -62,11 +62,10 @@
           <i data-lucide="more-horizontal" style="width:16px;height:16px"></i>
         </button>
         <div class="menu" x-show="menuAbierto === 'app'" x-transition.opacity role="menu">
-          <button role="menuitem" @click="menuAbierto = ''; showImportModal = true">
-            <i data-lucide="upload" style="width:14px;height:14px"></i> Importar backup de un rastreo</button>
-          <button role="menuitem" @click="menuAbierto = ''; toggleTheme()">
-            <i data-lucide="contrast" style="width:14px;height:14px"></i>
-            <span x-text="theme === 'terminal' ? 'Tema claro' : 'Tema terminal'"></span></button>
+          <!-- Ajustes de la agencia (revision de UX del 25-oct, 2.5): Slack,
+               Search Console, modelos, importar backup y tema. -->
+          <a role="menuitem" href="#/ajustes" @click="menuAbierto = ''" data-testid="menu-ajustes">
+            <i data-lucide="settings" style="width:14px;height:14px"></i> Ajustes de la agencia</a>
           <button role="menuitem" @click="menuAbierto = ''; salirDeLaSesion()">
             <i data-lucide="log-out" style="width:14px;height:14px"></i> Cerrar sesión</button>
         </div>
@@ -1209,7 +1208,7 @@
                 </template>
               </div>
               <p class="text-sm text-dim" style="margin:.2rem 0 .5rem">Una alerta de un perfil o de una programación se abre la primera vez que salta y solo entonces se avisa. Se cierra sola cuando un rastreo posterior que puede comprobarlo ya no la ve.
-                Cuándo salta cada una se decide en <a href="#" @click.prevent="cambiarTabCliente('config'); $nextTick(() => { const r = document.getElementById('reglas-alertas'); r && r.scrollIntoView() })">Configuración › Reglas de alertas</a>.</p>
+                Cuándo salta cada una se decide en <a href="#" @click.prevent="irASeccionConfig('reglas-alertas')">Configuración › Reglas de alertas</a>.</p>
               <template x-if="incidentes === null"><div class="text-dim text-sm">Cargando…</div></template>
               <template x-if="incidentes && !incidentes.length">
                 <div class="text-dim text-sm">
@@ -1299,18 +1298,24 @@
 
         <template x-if="cliente && clienteTab === 'config'">
           <div data-testid="cliente-config">
-            <!-- La pestana es larga: un indice arriba para ir a lo que se busca. -->
-            <div class="text-sm config-indice" x-show="cliente">
-              Ir a:
-              <a href="#" @click.prevent="document.getElementById('cfg-perfiles').scrollIntoView()">Perfiles de rastreo</a> ·
-              <a href="#" @click.prevent="document.getElementById('cfg-datos').scrollIntoView()">Datos del cliente e integraciones</a> ·
-              <a href="#" @click.prevent="document.getElementById('reglas-alertas').scrollIntoView()">Reglas de alertas</a>
-            </div>
+            <!-- Secciones plegables con un indice (revision de UX del 25-oct,
+                 2.4): la pestaña medía unos 4.000 px con todo abierto. Lo que es
+                 de la agencia (el bot de Slack, las llaves de Search Console,
+                 las claves de los modelos) esta en Ajustes (2.5). -->
+            <nav class="text-sm config-indice" aria-label="Secciones de la configuración">
+              <template x-for="[id, texto] in SECCIONES_CONFIG_CLIENTE" :key="id">
+                <a href="#" @click.prevent="irASeccionConfig(id)" x-text="texto"></a>
+              </template>
+            </nav>
             <template x-if="cliente">
-              <div id="cfg-perfiles">
-              <div class="card mb-2">
-                <div class="flex items-center justify-between mb-1">
-                  <h3 style="font-size:1rem">Perfiles de rastreo</h3>
+            <details class="cfg-seccion" id="cfg-perfiles" open data-testid="seccion-cfg-perfiles">
+              <summary>
+                <span class="cfg-seccion-titulo">Perfiles de rastreo</span>
+                <span class="cfg-seccion-resumen text-sm text-dim" x-text="resumenSeccionConfig('cfg-perfiles')"></span>
+              </summary>
+              <div class="cfg-seccion-cuerpo">
+              <div>
+                <div class="flex items-center justify-end mb-1">
                   <button class="btn btn-sm" @click="nuevoPerfil()">Nuevo perfil</button>
                 </div>
                 <p class="text-dim text-sm mb-1">
@@ -1370,6 +1375,34 @@
                       <button class="btn btn-sm" @click="borrarPerfil(p)" :aria-label="'Borrar el perfil ' + p.nombre"
                               data-tip="Borra el perfil y su programación. Sus rastreos NO se borran">&times;</button>
                     </div>
+                    <!-- Asi rastreara el proximo rastreo de este perfil (decision
+                         196): la config resuelta por la API, con su procedencia. -->
+                    <details class="perfil-asi" @toggle="$event.target.open && cargarAsiPerfil(p)" data-testid="perfil-asi">
+                      <summary class="text-sm">Así rastreará</summary>
+                      <template x-if="asiPerfiles[p.id] && asiPerfiles[p.id].error">
+                        <p class="text-sm cfg-aviso cfg-aviso--peligro" x-text="asiPerfiles[p.id].error"></p>
+                      </template>
+                      <template x-if="!asiPerfiles[p.id]"><p class="text-sm text-dim">Calculando…</p></template>
+                      <template x-if="asiPerfiles[p.id] && asiPerfiles[p.id].resuelta">
+                        <div>
+                          <ul class="cfg-asi-lista">
+                            <template x-for="l in cfgAsiLineas(asiPerfiles[p.id])" :key="l.ruta">
+                              <li>
+                                <span class="cfg-asi-etq" x-text="l.etiqueta"></span>
+                                <strong class="cfg-asi-valor" x-text="l.valor" :title="l.valor"></strong>
+                                <span class="cfg-chip" :class="'cfg-chip--' + l.origen" x-text="cfgOrigenAsi(l.origen, 'vista')"></span>
+                              </li>
+                            </template>
+                          </ul>
+                          <template x-for="(a, n) in (asiPerfiles[p.id].resuelta.avisos || [])" :key="'a' + n">
+                            <p class="cfg-aviso" :class="'cfg-aviso--' + a.nivel" x-text="a.texto"></p>
+                          </template>
+                          <template x-for="g in (asiPerfiles[p.id].resuelta.programaciones || [])" :key="g.id">
+                            <p class="cfg-aviso cfg-aviso--info" x-text="cfgTextoProgramacion(g)"></p>
+                          </template>
+                        </div>
+                      </template>
+                    </details>
                   </div>
                 </template>
 
@@ -1398,10 +1431,38 @@
                 </template>
               </div>
               </div>
+            </details>
             </template>
-
-            <div class="card mb-2" id="cfg-datos">
-              <h3 style="font-size:1rem" class="mb-1" x-show="cliente">Datos del cliente</h3>
+            <details class="cfg-seccion" id="cfg-rastreo" data-testid="seccion-cfg-rastreo">
+              <summary>
+                <span class="cfg-seccion-titulo">Cómo se rastrea</span>
+                <span class="cfg-seccion-resumen text-sm text-dim" x-text="resumenSeccionConfig('cfg-rastreo')"></span>
+              </summary>
+              <div class="cfg-seccion-cuerpo">
+                <!-- El mismo formulario que el perfil y el rastreo (decision 196;
+                     revision de UX del 25-oct, 2.4): sin JSON a mano. -->
+                <p class="text-sm text-dim" style="margin:0 0 .5rem">Lo que vale para todos los rastreos de este cliente salvo que un perfil o un rastreo lo cambie.</p>
+                <div x-init="cargarCfgCliente()"></div>
+                <template x-if="cfgCliente">
+                  <div>
+                    <div class="cfg-host" x-data="{ get i() { return cfgCliente } }" x-html="plantillaCfg()"></div>
+                    <div class="flex items-center gap-1" style="margin-top:.6rem;flex-wrap:wrap">
+                      <button class="btn btn-primary btn-sm" @click="guardarCliente(['config'])" :disabled="cfgHayErrores(cfgCliente) || cfgClienteGuardando"
+                              data-testid="guardar-config-cliente">Guardar la configuración</button>
+                      <button class="btn btn-sm" @click="cargarCfgCliente()" x-show="cfgClienteCambiada()">Descartar los cambios</button>
+                      <span class="text-sm text-orange" x-show="cfgClienteCambiada()">Sin guardar</span>
+                    </div>
+                  </div>
+                </template>
+                <template x-if="!cfgCliente"><p class="text-sm text-dim">Cargando la configuración…</p></template>
+              </div>
+            </details>
+            <details class="cfg-seccion" id="cfg-datos" data-testid="seccion-cfg-datos">
+              <summary>
+                <span class="cfg-seccion-titulo">Datos del cliente</span>
+                <span class="cfg-seccion-resumen text-sm text-dim" x-text="resumenSeccionConfig('cfg-datos')"></span>
+              </summary>
+              <div class="cfg-seccion-cuerpo">
             <div class="form-row">
               <div class="form-group">
                 <label>Nombre *</label>
@@ -1409,13 +1470,13 @@
               </div>
               <div class="form-group">
                 <label>Slug</label>
-                <input type="text" x-model="clienteForm.slug" placeholder="sale del nombre si se deja vacio">
-                <div class="form-hint">Identificador estable: con el se casa el cliente al importar un backup.</div>
+                <input type="text" x-model="clienteForm.slug" placeholder="sale del nombre si se deja vacío">
+                <div class="form-hint">Identificador estable: con él se casa el cliente al importar un backup.</div>
               </div>
             </div>
             <div class="form-row">
               <div class="form-group">
-                <label>Dominios (uno por linea)</label>
+                <label>Dominios (uno por línea)</label>
                 <textarea x-model="clienteForm.dominios" rows="3" placeholder="www.cliente.com&#10;blog.cliente.com"></textarea>
               </div>
               <div class="form-group">
@@ -1427,24 +1488,24 @@
               <label>Notas</label>
               <textarea x-model="clienteForm.notas" rows="2"></textarea>
             </div>
-
-            <div class="form-group">
-              <label>Configuracion de rastreo por defecto (JSON)</label>
-              <textarea x-model="clienteForm.config_defecto" rows="6" style="font-family:monospace;font-size:.8rem"
-                        placeholder='{"render_js": true, "exclude_patterns": ["/carrito/"]}'></textarea>
-              <div class="form-hint">
-                Solo lo que este cliente fija; lo demas queda con los valores de siempre. Mismas claves que
-                <code>projects/&lt;cliente&gt;/config.json</code>. Una clave que no existe se rechaza al guardar.
-              </div>
+            <div class="flex items-center gap-1" style="margin-top:.6rem">
+              <button class="btn btn-primary btn-sm" @click="guardarCliente(['datos'])" data-testid="guardar-datos">Guardar los datos</button>
+              <button class="btn btn-sm" @click="clienteForm = _formCliente(cliente)">Descartar</button>
             </div>
-
+              </div>
+            </details>
+            <details class="cfg-seccion" id="cfg-gsc" data-testid="seccion-cfg-gsc">
+              <summary>
+                <span class="cfg-seccion-titulo">Search Console</span>
+                <span class="cfg-seccion-resumen text-sm text-dim" x-text="resumenSeccionConfig('cfg-gsc')"></span>
+              </summary>
+              <div class="cfg-seccion-cuerpo">
             <!-- Search Console (decision 141): la llave se sube y va a un
                  fichero del servidor, nunca a la base de datos. Aqui solo se
                  ve el email de la cuenta, que es el que hay que dar de alta en
                  Search Console, y como va la descarga diaria. -->
             <template x-if="cliente">
-              <div x-init="cargarGsc()" data-testid="gsc" style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
-                <h3 style="font-size:1rem;margin-bottom:.3rem">Search Console</h3>
+              <div x-init="cargarGsc()" data-testid="gsc">
                 <p class="text-dim text-sm mb-1">Con la llave de una cuenta de servicio y la propiedad, se descargan solos cada noche los clics, las impresiones y la posición de cada URL (la primera vez, 90 días hacia atrás).</p>
                 <template x-if="gsc.error">
                   <div class="card mb-1" style="border-color:var(--red);color:var(--red);padding:.4rem .6rem;font-size:.85rem" x-text="gsc.error"></div>
@@ -1486,13 +1547,10 @@
                             <option :value="l.nombre" x-text="l.nombre + ' · ' + (l.client_email || 'no válida')"></option>
                           </template>
                         </select>
-                        <span class="text-sm text-dim">o sube una nueva como</span>
-                        <input type="text" x-model="gsc.nombreNueva" style="width:12rem;font-family:monospace">
-                        <label class="btn btn-sm" :class="gsc.ocupado && 'disabled'">Subir JSON…
-                          <input type="file" accept=".json,application/json" style="display:none" @change="subirLlaveGsc($event)" data-testid="gsc-fichero">
-                        </label>
                       </div>
-                      <div class="form-hint">La misma llave puede servir a varios clientes. Se guarda en el servidor, fuera de la base de datos, y no se vuelve a enseñar: solo su email.</div>
+                      <!-- Las llaves son de la agencia: se suben en Ajustes (revision de UX del 25-oct, 2.5) -->
+                      <div class="form-hint" x-show="(gsc.llaves || []).length">Las llaves son de la agencia: una sirve a varios clientes. Para subir otra, <a href="#/ajustes">Ajustes › Search Console</a>.</div>
+                      <div class="form-hint text-orange" x-show="!(gsc.llaves || []).length" data-testid="gsc-sin-llaves">Aún no hay ninguna llave subida: súbela en <a href="#/ajustes">Ajustes › Search Console</a> y vuelve aquí.</div>
                     </div>
                     <div class="form-group">
                       <label>2. Propiedad</label>
@@ -1516,12 +1574,18 @@
                 </details>
               </div>
             </template>
-
+              </div>
+            </details>
+            <details class="cfg-seccion" id="cfg-slack" data-testid="seccion-cfg-slack">
+              <summary>
+                <span class="cfg-seccion-titulo">Slack del cliente</span>
+                <span class="cfg-seccion-resumen text-sm text-dim" x-text="resumenSeccionConfig('cfg-slack')"></span>
+              </summary>
+              <div class="cfg-seccion-cuerpo">
             <!-- Slack (decision 149): un canal por cliente. El token del bot
                  va a un fichero del servidor, como la llave de Search Console. -->
             <template x-if="cliente">
-              <div x-init="cargarSlack()" data-testid="slack" style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
-                <h3 style="font-size:1rem;margin-bottom:.3rem">Slack</h3>
+              <div x-init="cargarSlack()" data-testid="slack">
                 <p class="text-dim text-sm mb-1">El canal donde llegan las alertas de este cliente en cuanto termina un rastreo, el resumen semanal y el informe de cada rastreo programado.</p>
                 <template x-if="slack.error">
                   <div class="card mb-1" style="border-color:var(--red);color:var(--red);padding:.4rem .6rem;font-size:.85rem" x-text="slack.error"></div>
@@ -1548,53 +1612,33 @@
                   <div class="text-sm mb-1" :class="p.ok ? 'text-green' : 'text-red'" data-testid="slack-prueba"
                        x-text="p.ok ? 'Prueba enviada a ' + p.canal + ': mira el canal.' : 'No llegó a ' + p.canal + ': ' + p.motivo"></div>
                 </template>
-                <!-- Guia para quien no lo ha hecho nunca: abierta mientras no
-                     haya ningun token guardado. -->
-                <details class="mb-1 slack-guia" :open="!(slack.tokens || []).length" data-testid="slack-guia">
-                  <summary class="text-sm" style="cursor:pointer">Cómo se configura (paso a paso)</summary>
-                  <div class="text-sm" style="margin:.5rem 0 .25rem">
-                    <p><strong>A. Una sola vez para toda la agencia: crear el bot.</strong> Si en «1. Token del bot» ya aparece uno, sáltate esta parte.</p>
-                    <ol style="margin:.35rem 0 .6rem 1.2rem;line-height:1.55">
-                      <li>Abre <a href="https://api.slack.com/apps?new_app=1" target="_blank" rel="noopener">api.slack.com/apps</a> con tu cuenta de Slack y pulsa <em>Create New App</em> → <em>From a manifest</em>.</li>
-                      <li>Elige el espacio de trabajo de la agencia, cambia a la pestaña <em>YAML</em>, borra lo que haya y pega este manifiesto:
-                        <pre style="margin:.35rem 0;padding:.5rem;background:var(--bg-alt,rgba(0,0,0,.04));border:1px solid var(--border);border-radius:4px;font-size:.78rem;overflow-x:auto;max-width:100%" x-text="manifiestoSlack()"></pre>
-                        <button class="btn btn-sm" type="button" @click="copiarManifiestoSlack()" data-testid="slack-copiar-manifiesto">Copiar manifiesto</button>
-                        <span class="text-dim">Da al bot permiso para escribir y para ver la lista de canales. Nada más: no lee mensajes.</span>
-                      </li>
-                      <li>Pulsa <em>Next</em> → <em>Create</em> y luego <em>Install to Workspace</em> → <em>Allow</em>. Si tu espacio exige aprobación, un administrador de Slack tendrá que aprobarla.</li>
-                      <li>En el menú de la izquierda, <em>OAuth &amp; Permissions</em>: copia el <em>Bot User OAuth Token</em>, el que empieza por <code>xoxb-</code>.</li>
-                      <li>Pégalo abajo en «1. Token del bot» y pulsa <em>Guardar token</em>. Se comprueba con Slack en ese momento y desde entonces sirve para todos los clientes: no hay que repetirlo.</li>
-                    </ol>
-                    <p><strong>B. Para cada cliente: elegir su canal.</strong></p>
-                    <ol style="margin:.35rem 0 .6rem 1.2rem;line-height:1.55">
-                      <li>En Slack, crea el canal del cliente si no existe (por ejemplo <code>#seo-cliente</code>) y escribe en él <code>/invite @Crawler SEO</code>. Sin esto el bot no puede escribir ahí; en un canal privado, ni siquiera lo ve.</li>
-                      <li>Aquí, en «2. Canal», pulsa <em>Ver los canales</em> y elígelo (los que dicen «sin el bot» aún no tienen la invitación).</li>
-                      <li>En «3. Qué se manda» marca lo que quieras: las alertas llegan en cuanto termina un rastreo que las tiene; el resumen, el día de la semana que diga Configuración › Reglas de alertas; el informe, al terminar cada rastreo programado (los lanzados a mano no lo mandan).</li>
-                      <li>Pulsa <em>Guardar y mandar una prueba</em> y mira el canal. Si no llega, aquí mismo sale por qué.</li>
-                    </ol>
-                    <p class="text-dim">El token se guarda en el servidor, fuera de la base de datos, y no se vuelve a enseñar. Para quitarlo de todos los clientes a la vez, en Slack: tu app → <em>Install App</em> → <em>Revoke</em>.</p>
-                  </div>
+                <!-- Solo lo del cliente: el bot es de la agencia y se conecta una vez
+                     en Ajustes (revision de UX del 25-oct, 2.5). -->
+                <details class="mb-1 slack-guia" data-testid="slack-guia">
+                  <summary class="text-sm" style="cursor:pointer">Cómo se elige el canal (paso a paso)</summary>
+                  <ol class="text-sm" style="margin:.5rem 0 .6rem 1.2rem;line-height:1.55">
+                    <li>Si en «1. Bot» no sale ninguno, conéctalo antes en <a href="#/ajustes">Ajustes › Slack</a> (una sola vez para toda la agencia).</li>
+                    <li>En Slack, crea el canal del cliente si no existe (por ejemplo <code>#seo-cliente</code>) y escribe en él <code>/invite @Crawler SEO</code>. Sin esto el bot no puede escribir ahí; en un canal privado, ni siquiera lo ve.</li>
+                    <li>Aquí, en «2. Canal», pulsa <em>Ver los canales</em> y elígelo (los que dicen «sin el bot» aún no tienen la invitación).</li>
+                    <li>En «3. Qué se manda» marca lo que quieras: las alertas llegan en cuanto termina un rastreo que las tiene; el resumen, el día de la semana que diga «Reglas de alertas»; el informe, al terminar cada rastreo programado.</li>
+                    <li>Pulsa <em>Guardar y mandar una prueba</em> y mira el canal. Si no llega, aquí mismo sale por qué.</li>
+                  </ol>
                 </details>
                 <details class="mb-1" :open="!((slack.estado && slack.estado.canales) || []).length">
                   <summary class="text-sm" style="cursor:pointer" x-text="((slack.estado && slack.estado.canales) || []).length ? 'Cambiar el canal o qué se manda' : 'Conectar Slack'"></summary>
                   <div class="gsc-pasos">
                     <div class="form-group">
-                      <label>1. Token del bot</label>
+                      <label>1. Bot</label>
                       <div class="flex gap-1 items-center" style="flex-wrap:wrap">
                         <select x-model="slack.token" @change="slack.canales = null" style="width:auto;min-width:16rem">
-                          <option value="">— elige un token ya guardado —</option>
+                          <option value="">— elige el bot —</option>
                           <template x-for="t in slack.tokens" :key="t.nombre">
                             <option :value="t.nombre" x-text="t.nombre + ' · ' + (t.valida ? t.bot + ' en ' + t.equipo : 'no válido')"></option>
                           </template>
                         </select>
                       </div>
-                      <div class="flex gap-1 items-center" style="flex-wrap:wrap;margin-top:.35rem">
-                        <span class="text-sm text-dim">o pega uno nuevo como</span>
-                        <input type="text" x-model="slack.nombreNuevo" style="width:12rem;font-family:monospace">
-                        <input type="password" x-model="slack.tokenTexto" placeholder="xoxb-…" autocomplete="off" style="width:16rem;font-family:monospace" data-testid="slack-token">
-                        <button class="btn btn-sm" @click="subirTokenSlack()" :disabled="!slack.tokenTexto || slack.ocupado">Guardar token</button>
-                      </div>
-                      <div class="form-hint">Es el «Bot User OAuth Token» de la app de Slack (OAuth &amp; Permissions), con el permiso <code>chat:write</code> (y <code>channels:read</code> para elegir el canal de una lista). Un token sirve para todos los clientes. Se guarda en el servidor, fuera de la base de datos, y no se vuelve a enseñar.</div>
+                      <div class="form-hint" x-show="(slack.tokens || []).length">El bot es de la agencia y sirve para todos los clientes; se cambia en <a href="#/ajustes">Ajustes › Slack</a>.</div>
+                      <div class="form-hint text-orange" x-show="!(slack.tokens || []).length" data-testid="slack-sin-bot">Aún no hay bot: conéctalo en <a href="#/ajustes">Ajustes › Slack</a> (una vez para toda la agencia).</div>
                     </div>
                     <div class="form-group">
                       <label>2. Canal</label>
@@ -1623,13 +1667,18 @@
                 </details>
               </div>
             </template>
-
+              </div>
+            </details>
+            <details class="cfg-seccion" id="cfg-enlace" data-testid="seccion-cfg-enlace">
+              <summary>
+                <span class="cfg-seccion-titulo">Enlace para el cliente</span>
+                <span class="cfg-seccion-resumen text-sm text-dim" x-text="resumenSeccionConfig('cfg-enlace')"></span>
+              </summary>
+              <div class="cfg-seccion-cuerpo">
             <!-- Enlaces de solo lectura (decision 143): el cliente ve el
                  informe de sus censos en /c/<token>, sin la sesion de la agencia. -->
             <template x-if="cliente">
-              <div x-init="cargarEnlaces()" data-testid="enlaces" x-data="{ nombre: '', dias: 365 }"
-                   style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
-                <h3 style="font-size:1rem;margin-bottom:.3rem">Enlace para el cliente</h3>
+              <div x-init="cargarEnlaces()" data-testid="enlaces" x-data="{ nombre: '', dias: 365 }">
                 <p class="text-dim text-sm mb-1">Una dirección que puedes mandarle: ve el informe de cada censo (nota, cambios, qué arreglar primero y tráfico de Google) y nada más de la herramienta. Se puede revocar cuando quieras.</p>
                 <template x-if="enlaceNuevo">
                   <div class="card mb-1" style="border-color:var(--green,#2e7d32)" data-testid="enlace-nuevo">
@@ -1658,19 +1707,26 @@
                 </div>
               </div>
             </template>
-
+              </div>
+            </details>
+            <details class="cfg-seccion" id="cfg-integraciones" data-testid="seccion-cfg-integraciones">
+              <summary>
+                <span class="cfg-seccion-titulo">Otras integraciones</span>
+                <span class="cfg-seccion-resumen text-sm text-dim" x-text="resumenSeccionConfig('cfg-integraciones')"></span>
+              </summary>
+              <div class="cfg-seccion-cuerpo">
             <!-- Integraciones: NUNCA el secreto. Se guarda el nombre de la
                  variable de entorno; la API solo dice si esta puesta. -->
-            <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
+            <div>
               <div class="flex items-center justify-between mb-1">
-                <h3 style="font-size:1rem">Integraciones</h3>
-                <button class="btn btn-sm" @click="agregarIntegracion()">Anadir integracion</button>
+                <span class="text-sm text-dim">Otras APIs de este cliente.</span>
+                <button class="btn btn-sm" @click="agregarIntegracion()">Añadir integración</button>
               </div>
               <p class="text-dim text-sm mb-1">
                 APIs externas del cliente (Search Console, DataForSEO, Ahrefs, Semrush...). <strong>Las claves no se
                 guardan en la base de datos</strong>: se escribe el <em>nombre</em> de la credencial y el secreto va en
                 el <code>.env</code> del servidor (<code>DATAFORSEO_LIN3S=login:password</code>) o, para Search Console,
-                se sube arriba.
+                se conecta en su sección.
               </p>
               <template x-for="(i, idx) in clienteForm.integraciones" :key="idx">
                 <div class="card mb-1" style="padding:.6rem .75rem">
@@ -1703,7 +1759,7 @@
                           <span style="color:var(--green,#2e7d32)">&#10003; configurada en el servidor</span>
                         </template>
                         <template x-if="i.configurada === false">
-                          <span style="color:var(--orange,#e67e22)">no esta puesta en el servidor</span>
+                          <span style="color:var(--orange,#e67e22)">no está puesta en el servidor</span>
                         </template>
                         <template x-if="i.configurada === null">
                           <span class="text-dim">se comprueba al guardar</span>
@@ -1711,7 +1767,7 @@
                       </div>
                     </div>
                     <div class="form-group">
-                      <label>Parametros (clave=valor, uno por linea)</label>
+                      <label>Parámetros (clave=valor, uno por línea)</label>
                       <textarea x-model="i.parametros" rows="2" style="font-family:monospace;font-size:.8rem"
                                 :placeholder="i.tipo === 'gsc' ? 'propiedad=sc-domain:cliente.com' : 'location_code=2724\nlanguage_code=es'"></textarea>
                     </div>
@@ -1722,25 +1778,23 @@
                   </div>
                 </div>
               </template>
+              <div class="flex items-center gap-1" style="margin-top:.6rem">
+                <button class="btn btn-primary btn-sm" @click="guardarCliente(['integraciones'])" data-testid="guardar-integraciones">Guardar integraciones</button>
+              </div>
             </div>
-
-            <div class="flex items-center gap-1" style="margin-top:1rem">
-              <button class="btn btn-primary" @click="guardarCliente()"
-                      x-text="cliente ? 'Guardar cambios' : 'Crear cliente'"></button>
-              <button class="btn" @click="cliente ? (clienteForm = _formCliente(cliente)) : verClientes()">Cancelar</button>
-              <template x-if="cliente">
-                <button class="btn btn-danger" style="margin-left:auto" @click="borrarCliente()"
-                        data-tip="Borra el cliente y sus perfiles. Sus rastreos NO se borran">Borrar cliente</button>
-              </template>
-            </div>
-            </div>
-
+              </div>
+            </details>
+            <details class="cfg-seccion" id="reglas-alertas" data-testid="seccion-reglas-alertas">
+              <summary>
+                <span class="cfg-seccion-titulo">Reglas de alertas</span>
+                <span class="cfg-seccion-resumen text-sm text-dim" x-text="resumenSeccionConfig('reglas-alertas')"></span>
+              </summary>
+              <div class="cfg-seccion-cuerpo">
             <!-- Reglas de alertas y resumen semanal (decision 135). Lo que se ve
                  son las reglas EFECTIVAS: las de serie con lo que el cliente haya
                  cambiado encima. Guardar solo manda las diferencias. -->
             <template x-if="cliente">
               <div data-testid="reglas-cliente">
-                <h3 style="font-size:1.05rem;margin:1.25rem 0 .5rem" id="reglas-alertas">Reglas de alertas</h3>
                 <template x-if="reglasError">
                   <div class="card mb-2" style="border-color:var(--red);color:var(--red);padding:.5rem .75rem;font-size:.85rem" x-text="reglasError"></div>
                 </template>
@@ -1909,15 +1963,158 @@
                 </template>
               </div>
             </template>
+              </div>
+            </details>
+            <template x-if="clienteError">
+              <div class="card mb-2" style="border-color:var(--red);color:var(--red);padding:.5rem .75rem;font-size:.85rem" x-text="clienteError"></div>
+            </template>
+            <div class="cfg-borrar">
+              <button class="btn btn-danger btn-sm" @click="borrarCliente()"
+                      data-tip="Borra el cliente y sus perfiles. Sus rastreos NO se borran">Borrar cliente</button>
+            </div>
           </div>
         </template>
+      </div>
+    </template>
+
+    <!-- ============================================================ -->
+    <!--         VISTA: AJUSTES DE LA AGENCIA (revision de UX 2.5)       -->
+    <!-- ============================================================ -->
+    <!-- Lo que vale para todos los clientes. NUNCA un secreto: de una llave
+         se ve su email; de un token, el bot y el espacio; de las claves del
+         entorno, solo si estan puestas. Lo que es de cada cliente (su canal,
+         su propiedad de Search Console) sigue en su Configuración. -->
+    <template x-if="view === 'ajustes' && ajustes">
+      <div class="ajustes" data-testid="vista-ajustes">
+        <h2 class="ajustes-titulo">Ajustes de la agencia</h2>
+        <p class="text-sm text-dim ajustes-intro">Lo que vale para todos los clientes. El canal de Slack y la propiedad de Search Console
+          de cada cliente se eligen en su ficha, en Configuración.</p>
+
+        <!-- Slack -->
+        <section class="card mb-2 ajustes-bloque" data-testid="ajustes-slack">
+          <div class="card-header"><h2>Bot de Slack</h2></div>
+          <p class="text-sm text-dim">Un bot para toda la agencia: con él llegan a cada canal de cliente sus alertas, el resumen semanal
+            y el informe de cada rastreo programado.</p>
+          <template x-if="ajustes.slack.error">
+            <div class="cfg-aviso cfg-aviso--peligro text-sm" x-text="ajustes.slack.error"></div>
+          </template>
+          <template x-if="ajustes.slack.tokens === null"><p class="text-sm text-dim">Cargando…</p></template>
+          <template x-if="ajustes.slack.tokens && !ajustes.slack.tokens.length">
+            <p class="text-sm text-orange" data-testid="ajustes-sin-bot">Aún no hay ningún bot conectado: sin él no sale nada a Slack.</p>
+          </template>
+          <ul class="ajustes-lista" x-show="(ajustes.slack.tokens || []).length">
+            <template x-for="t in (ajustes.slack.tokens || [])" :key="t.nombre">
+              <li>
+                <span class="badge" :class="t.valida ? 'badge-completed' : 'badge-failed'" x-text="t.valida ? 'Funciona' : 'No funciona'"></span>
+                <strong x-text="t.valida ? t.bot + ' en ' + t.equipo : t.nombre"></strong>
+                <span class="text-sm text-dim" x-text="(t.valida ? t.nombre + ' · ' : (t.motivo ? t.motivo + ' · ' : '')) + ((t.en_uso_por || []).length ? 'lo usan ' + t.en_uso_por.join(', ') : 'no lo usa ningún cliente') + (t.origen === 'entorno' ? ' · está en el .env del servidor' : '')"></span>
+                <button class="btn btn-sm" x-show="t.origen !== 'entorno'" @click="quitarCredencial('slack', t)">Quitar</button>
+              </li>
+            </template>
+          </ul>
+          <details class="ajustes-alta" :open="ajustes.slack.tokens && !ajustes.slack.tokens.length">
+            <summary class="text-sm" x-text="(ajustes.slack.tokens || []).length ? 'Conectar otro bot' : 'Conectar el bot (una sola vez)'"></summary>
+            <ol class="text-sm ajustes-pasos">
+              <li>Abre <a href="https://api.slack.com/apps?new_app=1" target="_blank" rel="noopener">api.slack.com/apps</a> con tu cuenta de Slack y pulsa <em>Create New App</em> → <em>From a manifest</em>.</li>
+              <li>Elige el espacio de trabajo de la agencia, cambia a la pestaña <em>YAML</em>, borra lo que haya y pega este manifiesto:
+                <pre class="ajustes-manifiesto" x-text="manifiestoSlack()"></pre>
+                <button class="btn btn-sm" type="button" @click="copiarManifiestoSlack()" data-testid="slack-copiar-manifiesto">Copiar manifiesto</button>
+                <span class="text-dim">Da al bot permiso para escribir y para ver la lista de canales. Nada más: no lee mensajes.</span>
+              </li>
+              <li>Pulsa <em>Next</em> → <em>Create</em> y luego <em>Install to Workspace</em> → <em>Allow</em>. Si tu espacio exige aprobación, un administrador de Slack tendrá que aprobarla.</li>
+              <li>En <em>OAuth &amp; Permissions</em>, copia el <em>Bot User OAuth Token</em> (empieza por <code>xoxb-</code>) y pégalo aquí:</li>
+            </ol>
+            <div class="ajustes-fila">
+              <label class="text-sm">Nombre <input type="text" x-model="ajustes.slack.nombreNuevo" class="mono" style="width:11rem"></label>
+              <input type="password" x-model="ajustes.slack.tokenTexto" placeholder="xoxb-…" autocomplete="off" class="mono" aria-label="Token del bot" data-testid="slack-token">
+              <button class="btn btn-sm btn-primary" @click="subirTokenSlackAgencia()" :disabled="!ajustes.slack.tokenTexto || ajustes.slack.ocupado">Guardar el token</button>
+            </div>
+            <p class="form-hint">Se comprueba con Slack al guardarlo y se guarda en el servidor, fuera de la base de datos. No se vuelve a enseñar.
+              Para cortarlo de golpe en todos los clientes: en Slack, tu app → <em>Install App</em> → <em>Revoke</em>.</p>
+          </details>
+        </section>
+
+        <!-- Search Console -->
+        <section class="card mb-2 ajustes-bloque" data-testid="ajustes-gsc">
+          <div class="card-header"><h2>Llaves de Search Console</h2></div>
+          <p class="text-sm text-dim">Cuentas de servicio de Google con las que se descargan cada noche los clics, las impresiones y la posición
+            de cada URL. Una llave sirve a varios clientes: en cada uno se elige cuál y qué propiedad.</p>
+          <template x-if="ajustes.gsc.error">
+            <div class="cfg-aviso cfg-aviso--peligro text-sm" x-text="ajustes.gsc.error"></div>
+          </template>
+          <template x-if="ajustes.gsc.llaves === null"><p class="text-sm text-dim">Cargando…</p></template>
+          <template x-if="ajustes.gsc.llaves && !ajustes.gsc.llaves.length">
+            <p class="text-sm text-dim">Aún no hay ninguna llave.</p>
+          </template>
+          <ul class="ajustes-lista" x-show="(ajustes.gsc.llaves || []).length">
+            <template x-for="l in (ajustes.gsc.llaves || [])" :key="l.nombre">
+              <li>
+                <span class="badge" :class="l.valida ? 'badge-completed' : 'badge-failed'" x-text="l.valida ? 'Válida' : 'No válida'"></span>
+                <strong class="mono" x-text="l.nombre"></strong>
+                <span class="text-sm text-dim ajustes-email" x-text="(l.client_email || l.motivo || '') + ' · ' + ((l.en_uso_por || []).length ? 'la usan ' + l.en_uso_por.join(', ') : 'no la usa ningún cliente') + (l.origen === 'entorno' ? ' · está en el .env del servidor' : '')"></span>
+                <button class="btn btn-sm" x-show="l.origen !== 'entorno'" @click="quitarCredencial('gsc', l)">Quitar</button>
+              </li>
+            </template>
+          </ul>
+          <div class="ajustes-fila">
+            <label class="text-sm">Subir una llave como <input type="text" x-model="ajustes.gsc.nombreNueva" class="mono" style="width:11rem"></label>
+            <label class="btn btn-sm" :class="ajustes.gsc.ocupado && 'disabled'">Elegir el JSON…
+              <input type="file" accept=".json,application/json" style="display:none" @change="subirLlaveGscAgencia($event)" data-testid="gsc-fichero">
+            </label>
+          </div>
+          <p class="form-hint">El JSON de la cuenta de servicio, tal cual se descarga de Google Cloud. Se guarda en el servidor, fuera de la base
+            de datos, y no se vuelve a enseñar: solo su email, que es el que hay que dar de alta como usuario en Search Console.</p>
+        </section>
+
+        <!-- Modelos -->
+        <section class="card mb-2 ajustes-bloque" data-testid="ajustes-modelos">
+          <div class="card-header"><h2>Claves de los modelos (IA)</h2></div>
+          <p class="text-sm text-dim">Las usa la pestaña IA de cada censo, que pregunta a un modelo por las páginas dudosas (soft 404,
+            intención, categoría). Nada llama al modelo solo: hay que lanzarlo, y cuesta dinero. Se ponen en el <code>.env</code> del
+            servidor; aquí solo se ve si están.</p>
+          <template x-if="ajustes.modelosError">
+            <p class="text-sm text-orange" x-text="'No se ha podido saber: ' + ajustes.modelosError"></p>
+          </template>
+          <template x-if="ajustes.modelos">
+            <ul class="ajustes-lista ajustes-claves">
+              <li><span class="badge" :class="ajustes.modelos.clave_modelo ? 'badge-completed' : 'badge-pending'" x-text="ajustes.modelos.clave_modelo ? 'Puesta' : 'Sin poner'"></span>
+                <strong>Clave del modelo</strong> <span class="text-sm text-dim">con la que se llama al modelo (OpenRouter)</span></li>
+              <li><span class="badge" :class="ajustes.modelos.clave_autorizacion ? 'badge-completed' : 'badge-pending'" x-text="ajustes.modelos.clave_autorizacion ? 'Puesta' : 'Sin poner'"></span>
+                <strong>Clave de autorización</strong> <span class="text-sm text-dim">la que se pide al lanzar un análisis de pago</span></li>
+              <li><span class="badge" :class="ajustes.modelos.activada ? 'badge-completed' : 'badge-pending'" x-text="ajustes.modelos.activada ? 'Activada' : 'Apagada'"></span>
+                <strong>Capa de decisiones</strong> <span class="text-sm text-dim">sin activarla no se llama al modelo aunque haya clave</span></li>
+              <li><span class="badge" :class="ajustes.modelos.tope_mensual_usd != null ? 'badge-completed' : 'badge-pending'"
+                        x-text="ajustes.modelos.tope_mensual_usd != null ? fmt.num(ajustes.modelos.tope_mensual_usd) + ' $ al mes' : 'Sin tope'"></span>
+                <strong>Tope de gasto de la agencia</strong> <span class="text-sm text-dim">al llegar, se deja de preguntar hasta el mes siguiente</span></li>
+            </ul>
+          </template>
+          <p class="text-sm text-dim" x-show="ajustes.gemini && ajustes.gemini.length"
+             x-text="'Análisis semántico: ' + (ajustes.gemini || []).length + ((ajustes.gemini || []).length === 1 ? ' clave de Gemini guardada' : ' claves de Gemini guardadas') + ' (' + (ajustes.gemini || []).map(g => g.name).join(', ') + '). Se eligen en la pestaña Semántico de cada censo.'"></p>
+        </section>
+
+        <!-- Backup y tema -->
+        <section class="card mb-2 ajustes-bloque ajustes-dos" data-testid="ajustes-otros">
+          <div>
+            <h3>Importar un backup</h3>
+            <p class="text-sm text-dim">Restaura un rastreo completo desde el ZIP de «Backup completo» de otra instalación.</p>
+            <button class="btn btn-sm" @click="showImportModal = true" style="display:inline-flex;align-items:center;gap:.35rem">
+              <i data-lucide="upload" style="width:14px;height:14px"></i> Importar backup…</button>
+          </div>
+          <div>
+            <h3>Tema</h3>
+            <p class="text-sm text-dim" x-text="theme === 'terminal' ? 'Ahora: terminal (oscuro). Se guarda en este navegador.' : 'Ahora: claro. Se guarda en este navegador.'"></p>
+            <button class="btn btn-sm" @click="toggleTheme()" style="display:inline-flex;align-items:center;gap:.35rem">
+              <i data-lucide="contrast" style="width:14px;height:14px"></i>
+              <span x-text="theme === 'terminal' ? 'Pasar al tema claro' : 'Pasar al tema terminal'"></span></button>
+          </div>
+        </section>
       </div>
     </template>
 
     <!-- ===== MODAL: PERFIL DE RASTREO ===== -->
     <template x-if="perfilForm && cliente">
       <div class="modal-backdrop" @click.self="perfilForm = null">
-        <div class="modal" style="max-width:38rem">
+        <div class="modal modal--wide">
           <div class="modal-header">
             <h3 x-text="perfilForm.id ? 'Editar perfil' : 'Nuevo perfil'"></h3>
             <button class="btn-icon" @click="perfilForm = null" style="font-size:1.25rem">&times;</button>
@@ -1937,14 +2134,19 @@
               </div>
             </div>
             <div class="form-group">
-              <label>URLs semilla * (una por linea)</label>
+              <label>URLs semilla * (una por línea)</label>
               <textarea x-model="perfilForm.seeds" rows="3" placeholder="https://www.cliente.com/"></textarea>
             </div>
+            <!-- El mismo formulario que el cliente y el rastreo (decision 196):
+                 lo que no se toca sale del cliente o es de serie. -->
             <div class="form-group">
-              <label>Configuracion del perfil (JSON)</label>
-              <textarea x-model="perfilForm.config" rows="5" style="font-family:monospace;font-size:.8rem"></textarea>
-              <div class="form-hint">Se aplica encima de la del cliente. <code>null</code> quita lo heredado
-                (por ejemplo <code>{"max_urls": null}</code> deja sin tope a un cliente que lo fija).</div>
+              <label>Cómo se rastrea</label>
+              <div class="form-hint" style="margin:0 0 .4rem">Encima de la configuración del cliente: lo que cambies aquí vale para
+                todos los rastreos de este perfil, también los programados.</div>
+              <template x-if="cfgPerfil">
+                <div class="cfg-host" x-data="{ get i() { return cfgPerfil } }" x-html="plantillaCfg()"></div>
+              </template>
+              <template x-if="!cfgPerfil"><p class="text-sm text-dim">Cargando la configuración…</p></template>
             </div>
             <div class="form-group">
               <label>Notas</label>
@@ -1957,7 +2159,7 @@
           </div>
           <div class="modal-footer">
             <button class="btn" @click="perfilForm = null">Cancelar</button>
-            <button class="btn btn-primary" @click="guardarPerfil()">Guardar</button>
+            <button class="btn btn-primary" @click="guardarPerfil()" :disabled="cfgHayErrores(cfgPerfil)">Guardar</button>
           </div>
         </div>
       </div>
@@ -6926,14 +7128,14 @@
             </select>
           </div>
         </div>
-        <div class="form-hint orange" x-show="!createForm.cliente_id" style="margin:-.4rem 0 .8rem" data-testid="aviso-sin-cliente">
-          Sin cliente, el rastreo no hereda ninguna configuración ni cuenta en la evolución,
+        <!-- Sin cliente, aviso claro y el boton lo dice (revision de UX del 25-oct, 2.4) -->
+        <div class="cfg-aviso cfg-aviso--aviso aviso-modal-sin-cliente" x-show="!createForm.cliente_id" data-testid="aviso-sin-cliente">
+          <strong>Sin cliente.</strong> Este rastreo no hereda ninguna configuración ni cuenta en la evolución,
           las alertas o la portada de nadie. Elige uno salvo que sea una prueba suelta.
         </div>
         <div class="form-hint" x-show="createForm.cliente_id" style="margin:-.4rem 0 .8rem">
-          La configuracion viene precargada con la del cliente y la del perfil. Lo que cambies aqui
-          solo vale para este rastreo; lo que el formulario no muestra (plantillas, umbrales extra)
-          se hereda igual.
+          Sale con la configuración del cliente y la del perfil. Lo que cambies en «Configuración»
+          solo vale para este rastreo; lo que no toques se hereda tal cual.
         </div>
 
         <!-- Campos siempre visibles -->
@@ -6942,428 +7144,40 @@
           <input type="text" x-model="createForm.name" placeholder="Ej: midominio.com - auditoria completa">
         </div>
         <div class="form-group">
-          <label>URLs semilla * (una por linea)</label>
+          <label>URLs semilla * (una por línea)</label>
           <textarea x-model="createForm.seeds" placeholder="https://midominio.com" rows="3"></textarea>
         </div>
-        <!-- Lo tecnico, plegado (UX-19): seis pestanas de spider, HTTP y
-             velocidad delante de quien solo quiere lanzar el censo de un
-             cliente con su perfil. El resumen dice lo que se va a usar. -->
-        <details class="config-avanzada" :open="!createForm.cliente_id">
+        <!-- La configuracion, plegada (UX-19) y con el MISMO formulario que el
+             cliente y el perfil (decision 196; revision de UX del 25-oct, 2.4):
+             cada campo dice si viene del cliente, del perfil o de serie, y solo
+             se manda lo que se cambia aqui. Los avisos graves, fuera del pliegue. -->
+        <template x-if="cfgRastreo && cfgRastreo.resuelta">
+          <div>
+            <template x-for="(a, n) in (cfgRastreo.resuelta.avisos || []).filter(a => a.nivel === 'peligro')" :key="'p' + n">
+              <p class="cfg-aviso cfg-aviso--peligro" data-testid="aviso-modal" x-text="a.texto"></p>
+            </template>
+          </div>
+        </template>
+        <details class="config-avanzada" data-testid="config-rastreo">
           <summary>
-            <span>Configuración avanzada</span>
+            <span>Configuración</span>
             <span class="text-dim text-sm" x-text="resumenConfig()"></span>
           </summary>
-        <!-- Barra de pestanas -->
-        <div class="config-tabs">
-          <button type="button" class="tab" :class="createForm.configTab === 'general' && 'active'" @click="createForm.configTab = 'general'" style="display:flex;align-items:center;gap:.3rem">
-            <i data-lucide="settings" style="width:13px;height:13px"></i> General
-          </button>
-          <button type="button" class="tab" :class="createForm.configTab === 'spider' && 'active'" @click="createForm.configTab = 'spider'" style="display:flex;align-items:center;gap:.3rem">
-            <i data-lucide="bug" style="width:13px;height:13px"></i> Spider
-          </button>
-          <button type="button" class="tab" :class="createForm.configTab === 'content' && 'active'" @click="createForm.configTab = 'content'" style="display:flex;align-items:center;gap:.3rem">
-            <i data-lucide="file-text" style="width:13px;height:13px"></i> Contenido
-          </button>
-          <button type="button" class="tab" :class="createForm.configTab === 'speed' && 'active'" @click="createForm.configTab = 'speed'" style="display:flex;align-items:center;gap:.3rem">
-            <i data-lucide="gauge" style="width:13px;height:13px"></i> Velocidad
-          </button>
-          <button type="button" class="tab" :class="createForm.configTab === 'http' && 'active'" @click="createForm.configTab = 'http'" style="display:flex;align-items:center;gap:.3rem">
-            <i data-lucide="globe" style="width:13px;height:13px"></i> HTTP
-          </button>
-          <button type="button" class="tab" :class="createForm.configTab === 'analysis' && 'active'" @click="createForm.configTab = 'analysis'" style="display:flex;align-items:center;gap:.3rem">
-            <i data-lucide="bar-chart-2" style="width:13px;height:13px"></i> Análisis
-          </button>
-          <!-- Extraccion a medida (#34, decision 166): bloque propio -->
-          <button type="button" class="tab tab-con-icono" :class="createForm.configTab === 'extraccion' && 'active'"
-                  @click="createForm.configTab = 'extraccion'" data-testid="tab-extraccion">
-            <i data-lucide="scan-text" class="icono-13"></i> Extracción
-            <span class="xm-contador" x-show="extraccionActivas()" x-text="extraccionActivas()"></span>
-          </button>
-        </div>
-
-        <!-- ===== TAB: General ===== -->
-        <div x-show="createForm.configTab === 'general'" style="margin-top:1rem">
-          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="sliders-horizontal" style="width:14px;height:14px;opacity:.6"></i> Límites de rastreo
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label data-tip="0 = modo lista: solo las semillas, sin seguir enlaces ni leer el sitemap (QA de despliegues; veredicto en /api/jobs/{id}/veredicto)">Profundidad máxima</label>
-              <input type="number" x-model="createForm.max_depth" min="0" max="1000"
-                     @change="if (parseInt(createForm.max_depth) === 0) createForm.use_sitemap = false">
-            </div>
-            <div class="form-group">
-              <label>Máximo de URLs</label>
-              <input type="number" x-model="createForm.max_urls" min="1" max="5000000">
-            </div>
-          </div>
-          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="zap" style="width:14px;height:14px;opacity:.6"></i> Concurrencia
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Peticiones concurrentes</label>
-              <input type="number" x-model="createForm.concurrent_requests" min="1" max="256">
-            </div>
-            <div class="form-group">
-              <label>Por dominio</label>
-              <input type="number" x-model="createForm.concurrent_requests_per_domain" min="1" max="64">
-            </div>
-          </div>
-          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="shield" style="width:14px;height:14px;opacity:.6"></i> Identidad del crawler
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>User Agent</label>
-              <select x-model="createForm.user_agent_preset" @change="createForm.impersonate = ''">
-                <option value="chrome_win">Chrome - Windows (recomendado)</option>
-                <option value="chrome_mac">Chrome - macOS</option>
-                <option value="safari_mac">Safari - macOS</option>
-                <option value="firefox_win">Firefox - Windows</option>
-                <option value="edge_win">Edge - Windows</option>
-                <option value="chrome_android" title="Un móvil que es un navegador: huella TLS de Android y, con render, ventana de 412×915 a DPR 2,625 y táctil (decisión 173). La comparación entre censos distingue el perfil">Chrome - Android (móvil)</option>
-                <optgroup label="Buscadores">
-                  <option value="googlebot_mobile">Googlebot smartphone</option>
-                  <option value="googlebot">Googlebot escritorio (cadena antigua)</option>
-                  <option value="bingbot">Bingbot</option>
-                </optgroup>
-                <optgroup label="Asistentes de IA">
-                  <option value="gptbot">GPTBot (OpenAI, entrenamiento)</option>
-                  <option value="oai_searchbot">OAI-SearchBot (búsqueda de ChatGPT)</option>
-                  <option value="claudebot">ClaudeBot (Anthropic)</option>
-                  <option value="perplexitybot">PerplexityBot</option>
-                </optgroup>
-                <option value="custom">Personalizado</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Huella TLS (anti-WAF)</label>
-              <select x-model="createForm.impersonate">
-                <option value="">Automática: la del navegador del User Agent (recomendado)</option>
-                <option value="chrome150">Chrome 150</option>
-                <option value="chrome124">Chrome 124 (la de serie hasta octubre de 2026)</option>
-                <option value="firefox147">Firefox 147</option>
-                <option value="safari260">Safari 26</option>
-                <option value="chrome131_android">Chrome 131 Android</option>
-                <option value="edge101">Edge 101</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-group" x-show="createForm.user_agent_preset === 'custom'">
-            <label>User Agent personalizado</label>
-            <input type="text" x-model="createForm.user_agent_custom" @change="createForm.impersonate = ''" placeholder="Mozilla/5.0 ...">
-          </div>
-          <div class="form-hint aviso-ua-bot" x-show="botDelFormulario()" style="margin-bottom:.5rem">
-            <strong>Te haces pasar por <span x-text="botDelFormulario()"></span>.</strong>
-            robots.txt se evalúa con este User Agent: se aplican las reglas del grupo
-            <code x-text="'User-agent: ' + botDelFormulario()"></code> (o las de <code>*</code> si no hay), no las de un navegador.
-            Y la petición sale con huella TLS de navegador (y desde nuestra IP, no la del proveedor): un WAF que verifica bots
-            ve un bot falso y puede bloquearlo o servirle otra cosa. Si las cifras salen raras, compáralo con un rastreo con UA de Chrome.
-          </div>
-          <div class="form-hint" style="margin-bottom:.75rem">El User Agent y la huella TLS se envian juntos. Para maxima eficacia, usa el mismo navegador en ambos (ej: Chrome + Chrome)</div>
-          <div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:center">
-            <label class="checkbox-label"><input type="checkbox" x-model="createForm.follow_external"> Seguir externos</label>
-            <label class="checkbox-label"><input type="checkbox" x-model="createForm.render_js"> Renderizar JS</label>
-            <label class="checkbox-label" data-tip="Lee robots.txt y sitemap.xml, rastrea las URLs listadas y detecta huérfanas (en sitemap sin enlaces) y páginas indexables ausentes del sitemap"><input type="checkbox" x-model="createForm.use_sitemap"> Usar sitemap.xml</label>
-          </div>
-          <div class="form-group" style="margin-top:.75rem">
-            <label>Robots.txt</label>
-            <select x-model="createForm.robots_mode">
-              <option value="respect">Respetar (no entrar en URLs bloqueadas)</option>
-              <option value="ignore">Ignorar (no leer robots.txt)</option>
-              <option value="audit">Ignorar pero auditar (crawlear todo y reportar qué bloquearía)</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- ===== TAB: Spider ===== -->
-        <div x-show="createForm.configTab === 'spider'" style="margin-top:1rem">
-          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="layers" style="width:14px;height:14px;opacity:.6"></i> Tipos de recurso
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:.4rem .75rem;margin-bottom:1rem">
-            <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_images"> Imagenes</label>
-            <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_css"> CSS</label>
-            <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_js"> JavaScript</label>
-            <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_pdfs"> PDFs</label>
-            <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_fonts"> Fuentes</label>
-            <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_svg"> SVG</label>
-            <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_other"> Otros</label>
-          </div>
-
-          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="compass" style="width:14px;height:14px;opacity:.6"></i> Comportamiento
-          </div>
-          <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:1rem">
-            <label class="checkbox-label"><input type="checkbox" x-model="createForm.crawl_subdomains"> Rastrear subdominios</label>
-            <label class="checkbox-label"><input type="checkbox" x-model="createForm.follow_nofollow"> Seguir nofollow</label>
-          </div>
-          <!-- Sondas fuera del censo: paridad movil (119), enlaces externos
-               (123) y recursos embebidos (124). Apagadas de serie: multiplican
-               las peticiones. Las de 123/124 solo se mandan si se tocan. -->
-          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="radar" style="width:14px;height:14px;opacity:.6"></i> Sondas fuera del censo
-          </div>
-          <p class="text-sm text-dim" style="margin:0 0 .5rem" data-testid="sondas-aviso">
-            Piden URLs que no son del censo y no cuentan para el máximo de URLs:
-            cada una es una petición más al sitio (o a un tercero). Respetan el
-            robots.txt de cada host y no llevan cabeceras, cookies ni credenciales del rastreo.
-          </p>
-          <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:.5rem">
-            <label class="checkbox-label" title="Pide con HEAD (y GET si hace falta) cada URL de otro sitio que enlaza el sitio, para avisar de enlaces externos rotos y dominios muertos. A diferencia de «Seguir externos», que mete las páginas externas en el censo."><input type="checkbox" x-model="createForm.comprobar_enlaces_externos" data-testid="sonda-enlaces"> Comprobar enlaces externos</label>
-            <label class="checkbox-label" title="Pide con HEAD las imágenes, CSS y JS del propio sitio que la página carga y el censo no rastrea, para avisar de recursos rotos y anotar su peso."><input type="checkbox" x-model="createForm.comprobar_recursos" data-testid="sonda-recursos"> Comprobar recursos embebidos</label>
-            <label class="checkbox-label" title="Comprueba también las imágenes, CSS y JS que la página carga de OTROS hosts (un CDN, un script de terceros), con el mismo tope que los recursos."><input type="checkbox" x-model="createForm.check_external_resources"> Recursos de otros hosts</label>
-          </div>
-          <div class="form-row-3" x-show="createForm.comprobar_enlaces_externos || createForm.comprobar_recursos || createForm.check_external_resources">
-            <div class="form-group" x-show="createForm.comprobar_enlaces_externos">
-              <label title="URLs externas distintas que se comprueban como mucho">Enlaces externos: tope</label>
-              <input type="number" x-model="createForm.enlaces_externos_max" min="0" max="100000">
-            </div>
-            <div class="form-group" x-show="createForm.comprobar_recursos || createForm.check_external_resources">
-              <label title="Recursos distintos (internos y externos) que se comprueban como mucho">Recursos: tope</label>
-              <input type="number" x-model="createForm.recursos_max" min="0" max="500000">
-            </div>
-            <div class="form-group">
-              <label title="URLs como mucho por host externo, enlaces y recursos juntos. 0 = sin tope">Por host externo (0 = sin tope)</label>
-              <input type="number" x-model="createForm.sondas_por_host" min="0" max="10000">
-            </div>
-          </div>
-          <div class="form-row-3">
-            <div class="form-group">
-              <label title="Imágenes de og:image distintas que se descargan (los primeros 64 KB) para medir su ancho y alto, como mucho 5 nuevas por plantilla. 0 = apagado">og:image a medir (0 = no)</label>
-              <input type="number" x-model="createForm.og_image_muestra" min="0" max="5000" data-testid="sonda-og-image">
-            </div>
-            <div class="form-group">
-              <label title="Páginas del censo que se vuelven a renderizar para pasarles axe-core (WCAG 2.x A/AA), como mucho las de «por plantilla» de cada plantilla. Cada una es un render más, también sin «Render JS». 0 = apagado">Accesibilidad (axe): páginas (0 = no)</label>
-              <input type="number" x-model="createForm.axe_muestra" min="0" max="500" data-testid="sonda-axe">
-            </div>
-            <div class="form-group" x-show="parseInt(createForm.axe_muestra) > 0">
-              <label>Por plantilla</label>
-              <input type="number" x-model="createForm.axe_por_plantilla" min="1" max="20">
-            </div>
-          </div>
-          <div class="form-row-3">
-            <div class="form-group">
-              <label title="Páginas que se vuelven a pedir con el perfil móvil (o escritorio, si el UA ya es de móvil) para compararlas. 0 = apagado">Paridad móvil: páginas (0 = no)</label>
-              <input type="number" x-model="createForm.paridad_movil_muestra" min="0" max="500">
-            </div>
-            <div class="form-group">
-              <label>Por plantilla</label>
-              <input type="number" x-model="createForm.paridad_movil_por_plantilla" min="1" max="50">
-            </div>
-            <div class="form-group">
-              <label title="Con Googlebot desde nuestra IP, un WAF que verifica bots puede bloquearlo o servirle otra cosa (decisión 98)">UA móvil</label>
-              <select x-model="createForm.paridad_movil_ua">
-                <option value="chrome_android">Chrome Android</option>
-                <option value="googlebot_smartphone">Googlebot smartphone</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-row-3">
-            <div class="form-group">
-              <label title="Páginas de las que se guarda una captura de la primera pantalla, una muestra por plantilla, con render aunque el rastreo no lo lleve. Se ven en la ficha de la URL. 0 = apagado (decisión 173)">Capturas: páginas (0 = no)</label>
-              <input type="number" x-model="createForm.capturas_muestra" min="0" max="50" data-testid="capturas-muestra">
-            </div>
-            <div class="form-group">
-              <label>Por plantilla</label>
-              <input type="number" x-model="createForm.capturas_por_plantilla" min="1" max="5">
-            </div>
-            <div class="form-group">
-              <label class="checkbox-label" title="Además del dispositivo del rastreo, el otro: móvil si se rastrea de escritorio y al revés"><input type="checkbox" x-model="createForm.capturas_ambos_perfiles"> Móvil y escritorio</label>
-            </div>
-          </div>
-
-          <!-- Adaptador WordPress (decisiones 161 y 168): «auto» de serie. Solo
-               se manda si se toca (`_wpConfigDesdeForm`): sin tocarla, hereda
-               del cliente y el perfil. -->
-          <div class="wp-opcion" data-testid="wp-opcion">
-            <label class="checkbox-label" title="Pide /wp-json/ al sitio y, solo si responde un WordPress, lee lo que publica: entradas, páginas, taxonomías y medios. Así salen las entradas publicadas que el rastreo no encontró, los adjuntos indexables, las taxonomías casi vacías y la paginación sin fin."><input type="checkbox" x-model="createForm.wp_analizar" data-testid="wp-analizar"> Analizar WordPress (REST API)</label>
-            <p class="text-sm text-dim">Si el sitio no es un WordPress, cuesta una petición. Si lo es, hasta 1.000 peticiones a su REST API, dos a la vez y con el ritmo y el robots.txt del rastreo, sin contar en el máximo de URLs.</p>
-          </div>
-
-          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="filter" style="width:14px;height:14px;opacity:.6"></i> Filtros de URL
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Longitud maxima URL (0 = sin limite)</label>
-              <input type="number" x-model="createForm.max_url_length" min="0" max="10000">
-            </div>
-            <div class="form-group">
-              <label>Profundidad de carpetas max (0 = sin limite)</label>
-              <input type="number" x-model="createForm.max_folder_depth" min="0" max="100">
-            </div>
-          </div>
-          <!-- Topes por subdominio o carpeta (decision 172): aparte de max_urls -->
-          <div class="form-group">
-            <label title="Un cupo de URLs por parte del sitio, aparte del máximo de URLs. «*» = cada carpeta de primer nivel; «/blog/» = ese prefijo en cada host; «blogs.uoc.edu/*» = el host entero; «blogs.uoc.edu/*/» = cada carpeta de ese host. Lo que no cabe no se rastrea; si alguno se queda corto, el censo cuenta como truncado y no se afirman huérfanas.">Topes por carpeta o subdominio (uno por línea: regla = tope)</label>
-            <textarea x-model="createForm.topes_por_carpeta" rows="2" data-testid="topes-carpeta"
-                      placeholder="Ej: blogs.uoc.edu/* = 2000&#10;/blog/ = 500&#10;* = 300"></textarea>
-          </div>
-
-          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="regex" style="width:14px;height:14px;opacity:.6"></i> Patrones
-          </div>
-          <div class="form-group">
-            <label>Patrones de exclusion (uno por linea)</label>
-            <textarea x-model="createForm.exclude_patterns" rows="2" placeholder="Ej: /admin/*&#10;*.pdf"></textarea>
-          </div>
-          <div class="form-group">
-            <label>Patrones de inclusion (uno por linea)</label>
-            <textarea x-model="createForm.include_patterns" rows="2" placeholder="Ej: /blog/*"></textarea>
-          </div>
-        </div>
-
-        <!-- ===== TAB: Contenido ===== -->
-        <div x-show="createForm.configTab === 'content'" style="margin-top:1rem">
-          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="database" style="width:14px;height:14px;opacity:.6"></i> Extraccion de datos
-          </div>
-          <div style="display:flex;flex-direction:column;gap:.5rem">
-            <label class="checkbox-label"><input type="checkbox" x-model="createForm.extract_structured_data"> Datos estructurados (JSON-LD, Microdata)</label>
-            <label class="checkbox-label"><input type="checkbox" x-model="createForm.extract_hreflang"> Etiquetas hreflang</label>
-            <label class="checkbox-label"><input type="checkbox" x-model="createForm.extract_security_headers"> Cabeceras de seguridad</label>
-            <label class="checkbox-label"><input type="checkbox" x-model="createForm.extract_page_content"> Contenido de pagina (texto + markdown)</label>
-            <label class="checkbox-label"><input type="checkbox" x-model="createForm.store_raw_html"> Almacenar HTML crudo</label>
-          </div>
-        </div>
-
-        <!-- ===== TAB: Velocidad ===== -->
-        <div x-show="createForm.configTab === 'speed'" style="margin-top:1rem">
-          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="timer" style="width:14px;height:14px;opacity:.6"></i> Tiempos y reintentos
-          </div>
-          <div class="form-row-3">
-            <div class="form-group">
-              <label>Timeout descarga (s)</label>
-              <input type="number" x-model="createForm.download_timeout" min="5" max="120">
-            </div>
-            <div class="form-group">
-              <label>Reintentos</label>
-              <input type="number" x-model="createForm.retry_count" min="0" max="10">
-            </div>
-            <div class="form-group">
-              <label>Delay entre peticiones (s)</label>
-              <input type="number" x-model="createForm.request_delay" min="0" max="30" step="0.5">
-            </div>
-          </div>
-          <div class="form-group">
-            <label>Tiempo maximo del crawl (horas)</label>
-            <input type="number" x-model="createForm.max_runtime_hours" min="1" max="72">
-            <div class="form-hint">Si el crawl no termina en este tiempo, se marca como fallido. Por defecto 6h, máximo 72h.</div>
-          </div>
-
-          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="activity" style="width:14px;height:14px;opacity:.6"></i> AutoThrottle
-          </div>
-          <div style="display:flex;flex-direction:column;gap:.5rem">
-            <label class="checkbox-label"><input type="checkbox" x-model="createForm.autothrottle_enabled"> Habilitar autothrottle</label>
-          </div>
-          <div class="form-group" style="margin-top:.75rem" x-show="createForm.autothrottle_enabled">
-            <label>Concurrencia objetivo</label>
-            <input type="number" x-model="createForm.autothrottle_target_concurrency" min="1" max="100" step="0.5">
-            <div class="form-hint">Número de peticiones simultaneas que el autothrottle intentara mantener</div>
-          </div>
-        </div>
-
-        <!-- ===== TAB: HTTP ===== -->
-        <div x-show="createForm.configTab === 'http'" style="margin-top:1rem">
-          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="file-code" style="width:14px;height:14px;opacity:.6"></i> Cabeceras personalizadas
-          </div>
-          <div class="form-group">
-            <label>Headers (uno por linea, formato "Nombre: Valor")</label>
-            <textarea x-model="createForm.custom_headers" rows="3" placeholder="X-Custom-Header: valor&#10;Cache-Control: no-cache"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label>Accept-Language</label>
-            <input type="text" x-model="createForm.accept_language" placeholder="Ej: es-ES,es;q=0.9,en;q=0.8">
-          </div>
-
-          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="cookie" style="width:14px;height:14px;opacity:.6"></i> Cookies
-          </div>
-          <div class="form-group">
-            <label>Cookies (una por linea, formato "nombre=valor")</label>
-            <textarea x-model="createForm.cookies" rows="3" placeholder="session_id=abc123&#10;lang=es"></textarea>
-          </div>
-          <div style="margin-bottom:1rem">
-            <label class="checkbox-label" title="Por defecto no, como Googlebot. Las cookies de arriba se mandan siempre, y solo a los hosts de las semillas."><input type="checkbox" x-model="createForm.conservar_cookies"> Guardar las cookies que pone el sitio entre páginas</label>
-          </div>
-
-          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="lock" style="width:14px;height:14px;opacity:.6"></i> Autenticacion basica
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Usuario</label>
-              <input type="text" x-model="createForm.basic_auth_user" placeholder="usuario">
-            </div>
-            <div class="form-group">
-              <label>Contrasena</label>
-              <input type="text" x-model="createForm.basic_auth_password" placeholder="contrasena">
-            </div>
-          </div>
-        </div>
-
-        <!-- ===== TAB: Analisis ===== -->
-        <div x-show="createForm.configTab === 'analysis'" style="margin-top:1rem">
-          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="type" style="width:14px;height:14px;opacity:.6"></i> Título
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Longitud minima</label>
-              <input type="number" x-model="createForm.title_min_length" min="0" max="200">
-            </div>
-            <div class="form-group">
-              <label>Longitud máxima</label>
-              <input type="number" x-model="createForm.title_max_length" min="1" max="500">
-            </div>
-          </div>
-
-          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="align-left" style="width:14px;height:14px;opacity:.6"></i> Meta descripción
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Longitud minima</label>
-              <input type="number" x-model="createForm.description_min_length" min="0" max="500">
-            </div>
-            <div class="form-group">
-              <label>Longitud máxima</label>
-              <input type="number" x-model="createForm.description_max_length" min="1" max="1000">
-            </div>
-          </div>
-
-          <div class="config-section" style="display:flex;align-items:center;gap:.35rem">
-            <i data-lucide="text-cursor-input" style="width:14px;height:14px;opacity:.6"></i> Contenido y enlaces
-          </div>
-          <div class="form-row-3">
-            <div class="form-group">
-              <label>Palabras minimas</label>
-              <input type="number" x-model="createForm.min_word_count" min="0" max="10000">
-            </div>
-            <div class="form-group">
-              <label>Max cadena redirecciones</label>
-              <input type="number" x-model="createForm.max_redirect_chain_length" min="1" max="20">
-            </div>
-            <div class="form-group">
-              <label>Max enlaces salientes</label>
-              <input type="number" x-model="createForm.max_outlinks" min="1" max="10000">
-            </div>
-          </div>
-        </div>
-
+          <template x-if="cfgRastreo">
+            <div class="cfg-host" x-data="{ get i() { return cfgRastreo } }" x-html="plantillaCfg()"></div>
+          </template>
         <!-- ===== TAB: Extraccion a medida (#34, decision 166) =====
              Reglas CSS/XPath/regex que el rastreo aplica a cada pagina HTML 2xx.
              Las heredadas del cliente o del perfil llevan su marca: si no se
              tocan no se mandan (se heredan en el servidor), si se cambian se
              sustituyen enteras y si se quitan se manda `null`. La validacion
              es la del servidor (422) y sale arriba, en el aviso del modal. -->
-        <div x-show="createForm.configTab === 'extraccion'" class="xm-pestana" data-testid="pestana-extraccion">
+        <details class="cfg-grupo xm-grupo" :open="createExtraccionAbierta" @toggle="createExtraccionAbierta = $event.target.open" data-testid="pestana-extraccion">
+          <summary>
+            <span>Extracción a medida</span>
+            <span class="text-sm text-dim" x-text="extraccionActivas() ? '· ' + extraccionActivas() + (extraccionActivas() === 1 ? ' regla' : ' reglas') : '· ninguna'"></span>
+          </summary>
+          <div class="xm-pestana">
           <p class="text-sm text-dim xm-intro">
             Datos que se sacan de cada página HTML 2xx del rastreo (precio, SKU, autor…): salen como
             columnas <code>x.&lt;nombre&gt;</code> en la pestaña URLs y en el CSV. Una página sin fila es
@@ -7490,7 +7304,7 @@
             </div>
           </template>
         </div>
-
+        </details>
         </details>
       </div>
       <div class="modal-footer">
@@ -7505,7 +7319,7 @@
         <button class="btn" :class="createSugerencia !== 'canario' && 'btn-primary'" @click="submitCreate()" :disabled="creating || !createForm.name || !createForm.seeds" style="display:flex;align-items:center;gap:.4rem">
           <template x-if="creating"><span class="spinner" style="width:14px;height:14px"></span></template>
           <i data-lucide="rocket" style="width:14px;height:14px" x-show="!creating"></i>
-          Iniciar rastreo
+          <span x-text="createForm.cliente_id ? 'Iniciar rastreo' : 'Iniciar sin cliente'"></span>
         </button>
       </div>
     </div>
@@ -8090,6 +7904,147 @@
         <button class="btn btn-primary" @click="verAlmacenamiento = false" data-foco>Cerrar</button>
       </div>
     </div>
+  </div>
+</template>
+
+<!-- ===== PLANTILLA: CONFIGURACION EN TRES NIVELES (decision 196) =====
+     Revision de UX del 25-oct, 2.4: el MISMO formulario para el cliente, el
+     perfil y el rastreo, sin JSON a mano (queda en «Avanzado»). Se inserta con
+     x-html (`plantillaCfg()`) en un contenedor que define `i`, la instancia
+     del nivel (`cfgNuevo`). Cada campo dice de donde viene su valor y, si se
+     ha cambiado aqui, deja volver al heredado. -->
+<template id="tpl-config-niveles">
+  <div class="cfg-form" :data-nivel="i.nivel" data-testid="cfg-form">
+    <!-- Asi rastreara: la config de verdad (la resuelve la API con este
+         borrador) y los avisos que se pueden afirmar -->
+    <div class="cfg-asi" data-testid="asi-rastreara">
+      <div class="cfg-asi-cab">
+        <strong>Así rastreará</strong>
+        <span class="text-dim text-sm" x-text="i.nivel === 'cliente' ? 'un rastreo de este cliente sin perfil ni cambios propios' : (i.nivel === 'perfil' ? 'el próximo rastreo de este perfil' : 'este rastreo')"></span>
+        <span class="spinner cfg-spinner" x-show="i.resolviendo"></span>
+      </div>
+      <template x-if="i.resueltaError">
+        <p class="text-sm cfg-aviso cfg-aviso--peligro" x-text="'No se puede calcular: ' + i.resueltaError"></p>
+      </template>
+      <template x-if="cfgHayErrores(i)">
+        <p class="text-sm cfg-aviso cfg-aviso--aviso">Hay un campo con error: corrígelo para ver cómo quedaría.</p>
+      </template>
+      <template x-if="!i.resuelta && !i.resueltaError">
+        <p class="text-sm text-dim">Calculando…</p>
+      </template>
+      <template x-if="i.resuelta">
+        <div>
+          <ul class="cfg-asi-lista">
+            <template x-for="l in cfgAsiLineas(i)" :key="l.ruta">
+              <li>
+                <span class="cfg-asi-etq" x-text="l.etiqueta"></span>
+                <strong class="cfg-asi-valor" x-text="l.valor" :title="l.valor"></strong>
+                <span class="cfg-chip" :class="'cfg-chip--' + (l.origen === i.nivel ? 'aqui' : l.origen)" x-text="cfgOrigenAsi(l.origen, i.nivel)"></span>
+              </li>
+            </template>
+          </ul>
+          <template x-for="(a, n) in (i.resuelta.avisos || [])" :key="'a' + n">
+            <p class="cfg-aviso" :class="'cfg-aviso--' + a.nivel" data-testid="cfg-aviso" x-text="a.texto"></p>
+          </template>
+          <template x-for="p in (i.resuelta.programaciones || [])" :key="p.id">
+            <p class="cfg-aviso cfg-aviso--info" x-text="cfgTextoProgramacion(p)"></p>
+          </template>
+        </div>
+      </template>
+    </div>
+
+    <!-- Los campos, por grupos: lo principal abierto, lo raro plegado -->
+    <template x-for="g in GRUPOS_CONFIG" :key="g[0]">
+      <details class="cfg-grupo" :open="g[0] === 'principal' || !!i.abiertos[g[0]]"
+               @toggle="i.abiertos[g[0]] = $event.target.open" :data-grupo="g[0]">
+        <summary>
+          <span x-text="g[1]"></span>
+          <span class="text-sm cfg-resumen-grupo" :class="cfgResumenGrupo(i, g[0]).includes('error') ? 'text-red' : 'text-dim'"
+                x-text="cfgResumenGrupo(i, g[0])"></span>
+        </summary>
+        <div class="cfg-campos">
+          <template x-for="c in cfgCamposDe(i, g[0])" :key="c.ruta">
+            <div class="cfg-campo" :data-ruta="c.ruta"
+                 :class="{ 'cfg-campo--aqui': cfgTiene(i, c.ruta), 'cfg-campo--ancho': ['lineas', 'kv', 'topes', 'ua'].includes(c.tipo), 'cfg-campo--error': !!i.errores[c.ruta] }">
+              <div class="cfg-cab">
+                <label :for="'cfg-' + i.nivel + '-' + c.ruta" x-text="c.etiqueta"></label>
+              </div>
+              <template x-if="c.tipo === 'si_no'">
+                <label class="checkbox-label cfg-casilla">
+                  <input type="checkbox" :id="'cfg-' + i.nivel + '-' + c.ruta" :checked="!!cfgEfectivo(i, c.ruta)"
+                         @change="cfgCambiarCampo(i, c.ruta, $event.target.checked)">
+                  <span x-text="cfgEfectivo(i, c.ruta) ? 'Sí' : 'No'"></span>
+                </label>
+              </template>
+              <template x-if="c.tipo === 'entero' || c.tipo === 'decimal' || c.tipo === 'texto'">
+                <input type="text" :id="'cfg-' + i.nivel + '-' + c.ruta" :inputmode="c.tipo === 'texto' ? 'text' : 'decimal'"
+                       :value="cfgTextoCampo(i, c.ruta)" :placeholder="c.nulo || c.ejemplo || ''"
+                       :aria-invalid="!!i.errores[c.ruta]" @change="cfgCambiarCampo(i, c.ruta, $event.target.value)">
+              </template>
+              <template x-if="c.tipo === 'clave'">
+                <input type="password" autocomplete="off" :id="'cfg-' + i.nivel + '-' + c.ruta" :value="cfgTextoCampo(i, c.ruta)"
+                       @change="cfgCambiarCampo(i, c.ruta, $event.target.value)">
+              </template>
+              <template x-if="c.tipo === 'opciones'">
+                <select :id="'cfg-' + i.nivel + '-' + c.ruta" @change="cfgCambiarCampo(i, c.ruta, $event.target.value)">
+                  <template x-for="o in c.opciones" :key="o[0]">
+                    <option :value="o[0]" :selected="o[0] === cfgTextoCampo(i, c.ruta)" x-text="o[1]"></option>
+                  </template>
+                </select>
+              </template>
+              <template x-if="c.tipo === 'huella'">
+                <select :id="'cfg-' + i.nivel + '-' + c.ruta" @change="cfgCambiarCampo(i, c.ruta, $event.target.value)">
+                  <template x-for="o in cfgOpcionesHuella(i)" :key="o[0]">
+                    <option :value="o[0]" :selected="o[0] === cfgTextoCampo(i, c.ruta)" x-text="o[1]"></option>
+                  </template>
+                </select>
+              </template>
+              <template x-if="c.tipo === 'ua'">
+                <div class="cfg-ua">
+                  <select :id="'cfg-' + i.nivel + '-' + c.ruta" @change="cfgElegirUa(i, $event.target.value)">
+                    <template x-for="[k, etq] in Object.entries(UA_LABELS)" :key="k">
+                      <option :value="k" :selected="k === (cfgUaPersonalizado(i) ? 'custom' : cfgTextoCampo(i, c.ruta))" x-text="etq"></option>
+                    </template>
+                  </select>
+                  <template x-if="cfgUaPersonalizado(i)">
+                    <input type="text" class="mono" :value="cfgEfectivo(i, 'user_agent')" placeholder="Mozilla/5.0 …"
+                           aria-label="User agent personalizado" @change="cfgCambiarCampo(i, 'user_agent', $event.target.value)">
+                  </template>
+                </div>
+              </template>
+              <template x-if="['lineas', 'kv', 'topes'].includes(c.tipo)">
+                <textarea rows="2" class="mono" :id="'cfg-' + i.nivel + '-' + c.ruta" :value="cfgTextoCampo(i, c.ruta)"
+                          :placeholder="c.ejemplo || ''" :aria-invalid="!!i.errores[c.ruta]"
+                          @change="cfgCambiarCampo(i, c.ruta, $event.target.value)"></textarea>
+              </template>
+              <div class="cfg-pie">
+                <span class="cfg-origen" :class="'cfg-origen--' + cfgOrigen(i, c.ruta)" x-text="cfgEtiquetaOrigen(i, c.ruta)"></span>
+                <button type="button" class="cfg-volver" x-show="cfgTiene(i, c.ruta) || !!i.errores[c.ruta]"
+                        @click="cfgVolver(i, c.ruta)" data-testid="cfg-volver">volver al heredado</button>
+              </div>
+              <div class="cfg-error" x-show="!!i.errores[c.ruta]" x-text="i.errores[c.ruta]" role="alert"></div>
+              <div class="form-hint" x-show="c.ayuda" x-text="c.ayuda"></div>
+            </div>
+          </template>
+        </div>
+      </details>
+    </template>
+
+    <!-- Avanzado: el JSON de este nivel, para lo que el formulario no tiene -->
+    <details class="cfg-grupo cfg-json" data-grupo="json">
+      <summary>
+        <span>Avanzado: este nivel en JSON</span>
+        <span class="text-sm text-dim" x-text="Object.keys(i.propia).length ? '· ' + Object.keys(i.propia).length + (Object.keys(i.propia).length === 1 ? ' clave' : ' claves') : '· vacío'"></span>
+      </summary>
+      <div class="cfg-json-cuerpo">
+        <p class="text-sm text-dim">Solo lo que fija este nivel; lo demás se hereda. Aquí va también lo que el formulario no tiene
+          (plantillas, segmentos, marcas, extracción a medida…). Las mismas claves que <code>projects/&lt;cliente&gt;/config.json</code>;
+          <code>null</code> quita lo heredado.</p>
+        <textarea rows="7" class="mono" x-model="i.json" aria-label="Configuración de este nivel en JSON"></textarea>
+        <div class="cfg-error" x-show="i.jsonError" x-text="i.jsonError" role="alert"></div>
+        <button type="button" class="btn btn-sm" @click="cfgAplicar(i)">Aplicar el JSON</button>
+      </div>
+    </details>
   </div>
 </template>
 

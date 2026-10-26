@@ -184,10 +184,10 @@ def test_un_rastreo_parado_por_el_waf_avisa_con_cifras(entorno):
          if x["campo"] == "concurrent_requests_per_domain"]
     assert len(a) == 1 and a[0]["nivel"] == "peligro"
     assert "«Censo octubre» del 19 oct se paró" in a[0]["texto"]
-    assert "8 peticiones a la vez por dominio; este saldría con 8" in a[0]["texto"]
+    assert "8 peticiones a la vez por dominio; este saldría con 8, las mismas" in a[0]["texto"]
     menos = [x for x in _avisos(api, c, {"concurrent_requests_per_domain": 2})
              if x["campo"] == "concurrent_requests_per_domain"]
-    assert menos[0]["nivel"] == "aviso" and "(menos)" in menos[0]["texto"]
+    assert menos[0]["nivel"] == "aviso" and "menos que entonces" in menos[0]["texto"]
 
 
 def test_muros_sin_parar_tambien_se_dicen(entorno):
@@ -196,7 +196,12 @@ def test_muros_sin_parar_tambien_se_dicen(entorno):
     _job(Sesion, c, status="completed", finish_reason="finished",
          health={"respuestas": 4000, "no_validas": 1234}, config={"concurrent_requests_per_domain": 8})
     a = [x for x in _avisos(api, c, {}) if x["campo"] == "concurrent_requests_per_domain"]
-    assert "1.234 de 4.000 respuestas fueron un muro" in a[0]["texto"]
+    assert "1.234 de 4.000 respuestas (30,9 %) fueron un muro" in a[0]["texto"]
+    # Unos muros que no pararon el rastreo no son un peligro: un aviso.
+    assert a[0]["nivel"] == "aviso"
+    menos = [x for x in _avisos(api, c, {"concurrent_requests_per_domain": 2})
+             if x["campo"] == "concurrent_requests_per_domain"]
+    assert menos[0]["nivel"] == "info"
 
 
 def test_avisos_de_la_propia_config(entorno):
