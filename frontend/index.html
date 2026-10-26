@@ -1659,15 +1659,19 @@
     <!-- ============================================================ -->
     <!--                  VISTA: DETALLE DEL TRABAJO                  -->
     <!-- ============================================================ -->
-    <template x-if="view === 'detail' && job">
+    <!-- Cabecera y pestanas del censo, comunes a la ficha, al Explorador
+         (pestana URLs) y a la ficha de una URL (revision de UX del 25-oct,
+         2.6): antes el Explorador salia de la ficha y para volver habia un
+         boton con el nombre del rastreo. En URLs la cabecera va compacta para
+         que la tabla quepa debajo. -->
+    <template x-if="['detail', 'explorer', 'url-detail'].includes(view) && job">
       <div>
-        <!-- Hero gradient header -->
-        <div class="ficha-cabecera">
+        <div class="ficha-cabecera" :class="view !== 'detail' && 'ficha-compacta'">
           <!-- Cabecera -->
           <div class="flex items-center justify-between" style="flex-wrap:wrap;gap:.5rem">
-            <div>
-              <h2 style="font-size:1.2rem;font-weight:700" x-text="job.name"></h2>
-              <div class="text-dim text-sm flex items-center gap-1 mt-1">
+            <div class="ficha-titulo-bloque">
+              <h2 class="ficha-titulo" x-text="job.name"></h2>
+              <div class="ficha-subtitulo text-dim text-sm flex items-center gap-1 mt-1">
                 <span class="badge" :class="statusColor(job.status)" x-text="fmt.status(job.status)"></span>
                 <span>&middot;</span>
                 <span x-text="'Creado ' + fmt.ago(job.created_at)"></span>
@@ -1679,7 +1683,7 @@
             </div>
             <!-- flex-wrap: con el boton del informe, en movil la fila se salia
                  de la pantalla (revision de la fase 1.3). -->
-            <div class="flex gap-1" style="flex-wrap:wrap;justify-content:flex-end">
+            <div class="ficha-acciones flex gap-1" style="flex-wrap:wrap;justify-content:flex-end">
               <template x-if="['pending','running'].includes(job.status)">
                 <button class="btn btn-sm btn-danger" @click="cancelJob()" style="display:flex;align-items:center;gap:.3rem">
                   <i data-lucide="x-circle" style="width:13px;height:13px"></i> Cancelar
@@ -1757,7 +1761,11 @@
             </div>
           </div>
         </div>
+      </div>
+    </template>
 
+    <template x-if="view === 'detail' && job">
+      <div>
         <!-- Barra de progreso para trabajos en curso -->
         <template x-if="progress && ['pending','running','analyzing'].includes(job.status)">
           <div class="card mb-2">
@@ -1936,7 +1944,13 @@
         <!-- Tarjetas (UX-13). Antes eran «URLs totales» y «Procesadas» con
              la misma cifra, y «Fallidas 0» en rojo. Ahora cada una contesta
              una pregunta y lleva a donde se mira el detalle. -->
-        <template x-if="stats">
+      </div>
+    </template>
+
+    <template x-if="['detail', 'explorer', 'url-detail'].includes(view) && job">
+      <div>
+        <!-- Las tarjetas, solo en la ficha: en URLs la tabla necesita el alto. -->
+        <template x-if="stats && view === 'detail'">
           <div class="stats-grid">
             <button class="stat-card stat-link" @click="openExplorer(); setExplorerTab('html')"
                     data-tip="Páginas HTML internas que responden 2xx: lo que el buscador puede indexar">
@@ -1990,33 +2004,37 @@
 
         <!-- Pestanas (UX-09/10/11). Cinco de uso diario y lo especializado
              bajo «Avanzado». La antigua pestana URLs era una version pobre
-             del Explorador: ahora la pestana Explorador abre el de verdad. -->
-        <div class="tabs tabs-main" role="tablist">
-          <button class="tab" role="tab" :aria-selected="detailTab === 'overview'" :class="detailTab === 'overview' && 'active'" @click="switchTab('overview')">
+             del Explorador: ahora la pestana URLs es el Explorador (2.6). -->
+        <div class="tabs tabs-main" :class="view === 'explorer' && 'tabs-urls'" role="tablist">
+          <button class="tab" role="tab" :aria-selected="pestanaActiva('overview')" :class="pestanaActiva('overview') && 'active'" @click="switchTab('overview')">
             <i data-lucide="layout-dashboard" style="width:14px;height:14px"></i> Resumen
           </button>
-          <button class="tab" role="tab" aria-selected="false" @click="openExplorer()" data-tip="Todas las URLs, con filtros por columna">
-            <i data-lucide="table-2" style="width:14px;height:14px"></i> Explorador
+          <!-- URLs = el Explorador y la ficha de cada URL (revision de UX del
+               25-oct, 2.6; V29: antes nunca salia activa). Vuelve a la ultima
+               consulta, con sus filtros y su pagina. -->
+          <button class="tab" role="tab" data-testid="pestana-urls" :aria-selected="pestanaActiva('urls')" :class="pestanaActiva('urls') && 'active'"
+                  @click="irAUrls()" data-tip="Todas las URLs, con filtros por columna">
+            <i data-lucide="table-2" style="width:14px;height:14px"></i> URLs
             <span class="count" x-text="stats ? fmt.num(stats.total_urls) : ''"></span>
           </button>
-          <button class="tab" role="tab" :aria-selected="detailTab === 'issues'" :class="detailTab === 'issues' && 'active'" @click="switchTab('issues')">
+          <button class="tab" role="tab" :aria-selected="pestanaActiva('issues')" :class="pestanaActiva('issues') && 'active'" @click="switchTab('issues')">
             <i data-lucide="alert-triangle" style="width:14px;height:14px"></i> Problemas <span class="count" x-text="(n => n ? fmt.num(n) : '')(stats ? stats.issues_by_type.reduce((a,i) => a + i.count, 0) : 0)"></span>
           </button>
-          <button class="tab" role="tab" :aria-selected="detailTab === 'links'" :class="detailTab === 'links' && 'active'" @click="switchTab('links')">
+          <button class="tab" role="tab" :aria-selected="pestanaActiva('links')" :class="pestanaActiva('links') && 'active'" @click="switchTab('links')">
             <i data-lucide="share-2" style="width:14px;height:14px"></i> Enlaces <span class="count" x-text="linksTotal ? fmt.num(linksTotal) : ''"></span>
           </button>
-          <button class="tab" role="tab" :aria-selected="detailTab === 'diff'" :class="detailTab === 'diff' && 'active'" @click="switchTab('diff')" data-tip="Que ha cambiado respecto a otro rastreo del mismo sitio">
+          <button class="tab" role="tab" :aria-selected="pestanaActiva('diff')" :class="pestanaActiva('diff') && 'active'" @click="switchTab('diff')" data-tip="Que ha cambiado respecto a otro rastreo del mismo sitio">
             <i data-lucide="git-compare" style="width:14px;height:14px"></i> Comparar
           </button>
-          <button class="tab" role="tab" :aria-selected="detailTab === 'insights'" :class="detailTab === 'insights' && 'active'" @click="switchTab('insights')" data-tip="Puntuación SEO por categorías, con recomendaciones. El entregable es «Informe para el cliente», arriba">
+          <button class="tab" role="tab" :aria-selected="pestanaActiva('insights')" :class="pestanaActiva('insights') && 'active'" @click="switchTab('insights')" data-tip="Puntuación SEO por categorías, con recomendaciones. El entregable es «Informe para el cliente», arriba">
             <i data-lucide="file-bar-chart" style="width:14px;height:14px"></i> Puntuación
           </button>
           <div class="menu-wrap" @click.outside="menuAbierto === 'avanzado' && (menuAbierto = '')">
-            <button class="tab" role="tab" :aria-selected="['semantic','enriquecido','cleaning'].includes(detailTab)"
-                    :class="['semantic','enriquecido','cleaning'].includes(detailTab) && 'active'"
+            <button class="tab" role="tab" :aria-selected="['semantic','enriquecido','cleaning'].some(t => pestanaActiva(t))"
+                    :class="['semantic','enriquecido','cleaning'].some(t => pestanaActiva(t)) && 'active'"
                     @click="menuAbierto = menuAbierto === 'avanzado' ? '' : 'avanzado'" aria-haspopup="menu">
               <i data-lucide="flask-conical" style="width:14px;height:14px"></i>
-              <span x-text="({semantic:'Semántico', enriquecido:'Enriquecido', cleaning:'Limpieza'})[detailTab] || 'Avanzado'"></span>
+              <span x-text="(view === 'detail' && ({semantic:'Semántico', enriquecido:'Enriquecido', cleaning:'Limpieza'})[detailTab]) || 'Avanzado'"></span>
               <i data-lucide="chevron-down" style="width:12px;height:12px"></i>
             </button>
             <div class="menu" x-show="menuAbierto === 'avanzado'" x-transition.opacity role="menu" style="left:0;right:auto;min-width:20rem">
@@ -2033,6 +2051,13 @@
             </div>
           </div>
         </div>
+      </div>
+    </template>
+
+    <!-- Contenido de las pestanas de la ficha (en URLs lo pone el Explorador
+         o la ficha de la URL, mas abajo). -->
+    <template x-if="view === 'detail' && job">
+      <div>
 
         <!-- Lo que antes iba encima de las pestanas y se repetia en todas
              (revision de UX del 25-oct, fase 1.1): Search Console y la
@@ -2189,7 +2214,7 @@
           <div class="card mb-2">
             <div class="veredicto-titulo">
               Extracción a medida
-              <a href="#" class="text-sm" style="margin-left:auto" @click.prevent="verAMedida(resumenAMedida.reglas[0].nombre, null)">ver en el Explorador</a>
+              <a href="#" class="text-sm" style="margin-left:auto" @click.prevent="verAMedida(resumenAMedida.reglas[0].nombre, null)">ver en URLs</a>
             </div>
             <template x-if="resumenAMedida.render_js">
               <div class="text-sm text-dim">Se extrae del DOM renderizado y sin banners: una etiqueta que inyecta el JavaScript sí está; un banner que el rastreo quitó, no.</div>
@@ -3322,7 +3347,7 @@
                            exportables (docs/INVESTIGACION_EXPLORADOR.md). -->
                       <button class="btn btn-sm" @click="verProblemaEnExplorador(r.issue_type)">
                         <i data-lucide="table-2" style="width:13px;height:13px"></i>
-                        Ver las <span x-text="fmt.num(r.paginas)"></span> páginas en el Explorador
+                        Ver las <span x-text="fmt.num(r.paginas)"></span> páginas en URLs
                       </button>
                     </div>
                   </div>
@@ -4655,13 +4680,10 @@
                   <!-- La URL se abre y se copia (revision de UX del 25-oct, 1.10). -->
                   <div class="url-full-display" style="display:flex;gap:.4rem;align-items:baseline">
                     <a :href="urlDetail.url" target="_blank" rel="noopener" x-text="urlDetail.url" :title="'Abrir ' + urlDetail.url" style="word-break:break-all"></a>
-                    <button class="btn btn-sm" type="button" title="Copiar la URL"
+                    <button class="btn btn-sm" type="button" title="Copiar la URL" style="flex-shrink:0"
                             @click="navigator.clipboard ? navigator.clipboard.writeText(urlDetail.url).then(() => showToast('URL copiada')).catch(() => showToast('No se pudo copiar', 'error')) : showToast('El navegador no deja copiar aquí', 'error')">Copiar</button>
                   </div>
                 </div>
-                <button class="btn btn-sm" @click="backToDetail()" style="display:flex;align-items:center;gap:.3rem">
-                  <i data-lucide="arrow-left" style="width:13px;height:13px"></i> Volver
-                </button>
               </div>
             </div>
 
@@ -5079,7 +5101,7 @@
                           x-text="fmt.num(urlDetail.inlinks?.length || 0) + ((urlDetail.inlinks?.length || 0) >= 200 ? ' primeras filas: hay más' : ' filas')"></span>
                   </div>
                   <div class="text-sm text-dim" style="margin-bottom:.5rem" x-show="(urlDetail.inlinks?.length || 0) >= 200"
-                       x-text="'La ficha trae como mucho 200 filas. El análisis cuenta ' + fmt.num(urlDetail.inlinks_count || 0) + ' enlaces internos que llegan aquí (por aparición). La lista entera: Explorador › CSV › Enlaces que apuntan a estas URLs.'"></div>
+                       x-text="'La ficha trae como mucho 200 filas. El análisis cuenta ' + fmt.num(urlDetail.inlinks_count || 0) + ' enlaces internos que llegan aquí (por aparición). La lista entera: pestaña URLs › CSV › Enlaces que apuntan a estas URLs.'"></div>
                   <template x-if="urlDetail.inlinks && urlDetail.inlinks.length > 0">
                     <div class="table-wrap">
                       <table>
@@ -5296,14 +5318,10 @@
     <!--                  VISTA: EXPLORER (Screaming Frog)            -->
     <!-- ============================================================ -->
     <template x-if="view === 'explorer' && job">
-      <div class="explorer">
+      <div class="explorer" x-init="$nextTick(() => ajustarAltoExplorador())">
 
         <!-- Sidebar -->
         <div class="exp-sidebar">
-          <div class="exp-sidebar-header">
-            <i data-lucide="table-2" style="width:14px;height:14px;color:var(--accent)"></i>
-            Explorador
-          </div>
           <!-- Vistas guardadas del cliente (#131) -->
           <template x-if="job.cliente_id">
             <div class="exp-vistas">
@@ -5409,10 +5427,6 @@
 
           <!-- Toolbar -->
           <div class="exp-toolbar">
-            <button class="exp-back" @click="backFromExplorer()">
-              <i data-lucide="arrow-left" style="width:13px;height:13px"></i>
-              <span x-text="job.name" :title="job.name" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
-            </button>
             <div class="exp-search-wrap">
               <i data-lucide="search"></i>
               <input type="text" class="exp-search" placeholder="Buscar URL o título..." x-model="expSearch" @input="explorerSearchInput()">
@@ -6638,7 +6652,7 @@
         <div x-show="createForm.configTab === 'extraccion'" class="xm-pestana" data-testid="pestana-extraccion">
           <p class="text-sm text-dim xm-intro">
             Datos que se sacan de cada página HTML 2xx del rastreo (precio, SKU, autor…): salen como
-            columnas <code>x.&lt;nombre&gt;</code> en el Explorador y en el CSV. Una página sin fila es
+            columnas <code>x.&lt;nombre&gt;</code> en la pestaña URLs y en el CSV. Una página sin fila es
             «no evaluada», que no es «vacía».
           </p>
           <template x-if="!createForm.extraccion.length">
