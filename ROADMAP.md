@@ -991,6 +991,12 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
 - [#122](https://github.com/dvillarrubia/crawler-masivo/issues/122) **El cliente como entrada**: portada por cliente, con su
   último censo y sus alertas.
 - [#123](https://github.com/dvillarrubia/crawler-masivo/issues/123) **Pulido**: teclado, tildes, diálogos propios, móvil.
+- **Producción** (revisión de UX del 25-oct, 2.12; hecho): la barra queda en
+  Clientes · Producción, con lo que corre (barra, total estimado y hora de fin
+  cuando hay base), lo que espera con su puesto real en la cola
+  (`GET /api/jobs/cola`), los próximos disparos y los rastreos sin cliente;
+  Programados y Todos los rastreos son apartados suyos. Detalle en
+  `docs/AUDITORIA_UX.md`.
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 
