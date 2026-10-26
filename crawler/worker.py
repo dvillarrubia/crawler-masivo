@@ -1437,7 +1437,7 @@ def _lanzar_programados(rconn) -> None:
     from shared.database import SessionLocal
     from shared.models import Job, Programacion
     from shared.programaciones import (
-        hay_rastreo_vivo, proxima_desde, resolver_disparo, toca_lanzar,
+        motivo_rastreo_vivo, proxima_desde, resolver_disparo, toca_lanzar,
     )
 
     session = None
@@ -1460,10 +1460,9 @@ def _lanzar_programados(rconn) -> None:
                 proxima = proxima.replace(tzinfo=timezone.utc)
 
             lanzar, motivo = toca_lanzar(proxima, ahora)
-            if lanzar and hay_rastreo_vivo(session, prog):
-                lanzar, motivo = False, (
-                    "el rastreo anterior de esta programacion sigue sin "
-                    "terminar; no se encola otro encima")
+            vivo = motivo_rastreo_vivo(session, prog) if lanzar else None
+            if vivo:
+                lanzar, motivo = False, vivo
 
             datos = None
             if lanzar:

@@ -168,6 +168,39 @@ def huella_para_ua(ua: str | None) -> str | None:
     return min(candidatos)[2] if candidatos else None
 
 
+def claves_deducidas(fijadas, valores: dict) -> dict:
+    """Las claves que `JobConfig` DEDUCE de otras, segun que claves vienen
+    fijadas en la config (fusionada) y con que valores.
+
+    Una sola copia para los dos que resuelven una config: los validadores de
+    `api.schemas.JobConfig` (la API, con Pydantic) y
+    `shared.programaciones.config_del_momento` (el worker, que no lo lleva).
+    Con dos copias, el mismo perfil salia con una config lanzado a mano y con
+    otra lanzado por una programacion (revision del 26-oct de la decision 193).
+
+    - Modo lista (decision 128): con `max_depth == 0` y sin `use_sitemap`
+      fijado, sin sitemap. Si no, una lista de 50 URLs sembraba TODO el sitemap.
+    - UA y huella TLS (decision 132): si solo se fija uno, el otro se deduce
+      de el. Si se fijan los dos, mandan los dos.
+
+    `valores` es la config con los defaults ya puestos. Devuelve solo lo que
+    hay que cambiar.
+    """
+    fijadas = set(fijadas or ())
+    salida: dict = {}
+    if valores.get("max_depth") == 0 and "use_sitemap" not in fijadas:
+        salida["use_sitemap"] = False
+    if "impersonate" not in fijadas and "user_agent" in fijadas:
+        huella = huella_para_ua(valores.get("user_agent"))
+        if huella:
+            salida["impersonate"] = huella
+    elif "impersonate" in fijadas and "user_agent" not in fijadas:
+        ua = ua_para_huella(valores.get("impersonate"))
+        if ua:
+            salida["user_agent"] = ua
+    return salida
+
+
 def incoherencia_ua_huella(ua: str | None, perfil: str | None) -> str | None:
     """Por que un UA y una huella TLS no pueden ser el mismo navegador, o None.
 

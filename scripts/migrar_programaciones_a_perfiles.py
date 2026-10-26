@@ -73,10 +73,9 @@ def migrar(db, *, confirmar: bool = False) -> list[dict]:
     """Devuelve una linea por programacion con lo que hizo (o haria). Con
     `confirmar=False` deshace todo al final: la simulacion recorre el mismo
     camino que la migracion de verdad, sin commit."""
-    from shared.clientes import diferencia_de_config, fusionar_config
     from shared.models import Client, CrawlProfile, Programacion
     from shared.programaciones import (
-        config_del_momento, config_por_defecto, unir_serie_al_perfil,
+        capa_que_reproduce, con_defaults, config_del_momento, unir_serie_al_perfil,
     )
 
     progs = (db.query(Programacion)
@@ -103,7 +102,13 @@ def migrar(db, *, confirmar: bool = False) -> list[dict]:
             continue
         # Lo que lanzaria HOY, con los defaults debajo (una copia vieja puede
         # no tener las claves que JobConfig gano despues).
-        efectiva = fusionar_config(config_por_defecto(), prog.config or {})
+        # (Sin deducir claves: el worker manda la copia de una de copia fija
+        # tal cual.)
+        efectiva = con_defaults(prog.config or {})
+        # Un savepoint por programacion: si la comprobacion de abajo falla, el
+        # perfil que se acaba de crear se deshace con ella (con --confirmar
+        # quedaba grabado, huerfano, porque `flush` ya lo habia insertado).
+        punto = db.begin_nested()
 
         perfiles = (db.query(CrawlProfile)
                     .filter(CrawlProfile.cliente_id == prog.cliente_id).all())
@@ -116,22 +121,23 @@ def migrar(db, *, confirmar: bool = False) -> list[dict]:
             perfil = next((p for p in perfiles if _semillas(p.seeds) == mias), None)
         creado = perfil is None
         if creado:
-            base_cliente = config_del_momento(cliente, None, None)
             perfil = CrawlProfile(
                 cliente_id=prog.cliente_id, nombre=_nombre_libre(perfiles),
                 rol="propio", seeds=list(prog.seeds), activo=True,
-                config=diferencia_de_config(base_cliente, efectiva),
+                config=capa_que_reproduce(
+                    lambda capa: config_del_momento(cliente, None, capa), efectiva),
                 notas=f"Creado al migrar la programacion «{prog.nombre}» (decision 193).")
             db.add(perfil)
             db.flush()
 
-        propia = diferencia_de_config(config_del_momento(cliente, perfil, None), efectiva)
+        propia = capa_que_reproduce(
+            lambda capa: config_del_momento(cliente, perfil, capa), efectiva)
         despues = config_del_momento(cliente, perfil, propia)
         if despues != efectiva:
             # No deberia pasar; si pasa, mejor no tocarla que cambiar en
-            # silencio lo que rastrea el lunes.
-            if creado:
-                db.expunge(perfil)
+            # silencio lo que rastrea el lunes. El rollback del savepoint se
+            # lleva tambien el perfil recien creado.
+            punto.rollback()
             salida.append({**linea, "accion": "omitida",
                            "motivo": "la configuracion heredada no reproduce la copia"})
             continue
@@ -142,6 +148,7 @@ def migrar(db, *, confirmar: bool = False) -> list[dict]:
         prog.config = propia
         db.flush()
         movidos = unir_serie_al_perfil(db, prog, perfil)
+        punto.commit()
         salida.append({**linea, "accion": "colgada",
                        "perfil": perfil.nombre, "perfil_nuevo": creado,
                        "config_del_perfil": sorted((perfil.config or {}).keys()) if creado else None,

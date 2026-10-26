@@ -200,7 +200,47 @@
      dice por qué. Las activas van primero, para que el perfil salga de la que
      se lanza. Idempotente. NO se ha ejecutado en producción.
 
+   **Revisión del 26-oct (antes de mergear).** Una revisión independiente
+   encontró que el worker no resolvía igual que la API, y se corrigió:
+   - `config_del_momento` fundía las capas sobre los defaults y se saltaba los
+     `model_validator` de `JobConfig`: el perfil «lista» de Lopesan
+     (`max_depth: 0`) programado habría sembrado el sitemap entero (lo que la
+     decisión 128 evita) y un UA de iPhone salía con huella de Chrome. Las
+     claves que `JobConfig` deduce de otras viven ahora en una sola función,
+     `shared.perfiles.claves_deducidas` (modo lista sin sitemap; UA y huella,
+     decisión 132), que llaman los validadores de `JobConfig` y el worker.
+     `config_por_defecto.json` lleva también los defaults que valen `None`
+     (`render_wait_ms`…) y los de cada regla (`custom_extraction`,
+     `custom_search`, `segmentos`), que Pydantic rellena y una capa guardada no
+     lleva. Un test compara `config_del_momento` con `resolver_config` caso a
+     caso (clientes con la forma de los de producción × perfiles que deducen
+     claves × lo propio); con las configuraciones reales de producción del
+     26-oct (17 clientes, su perfil y las 4 programaciones) dan lo mismo en los
+     1.785 casos.
+   - La migración fija explícitas las claves que la resolución deduciría
+     distinto (`capa_que_reproduce`) y va con un savepoint por programación:
+     si la comprobación falla, el perfil recién creado se deshace con ella (con
+     `flush` ya insertado, quedaba huérfano).
+   - El bloqueo por «rastreo vivo del perfil» solo vale para las colgadas
+     (`hereda_perfil`): una de copia fija con `profile_id` sigue mirando solo su
+     rastreo anterior, como antes. Y `ultimo_motivo` distingue «el rastreo
+     anterior de esta programación sigue sin terminar» de «su perfil ya tiene
+     un rastreo sin terminar (lanzado a mano o por otra programación)»: un
+     canario diario colgado del mismo perfil que un censo semanal se salta los
+     días que corre el censo, a propósito, y ahora lo dice con verdad.
+   - «Programar» desde un rastreo con «Crear un perfil con este rastreo»
+     (`POST /api/clients/{id}/profiles` con `desde_job_id`) guarda en el perfil
+     lo que la config del rastreo tiene de distinto respecto al cliente. Antes
+     guardaba solo las semillas, y el censo de Lopesan 1e7ea651 se habría
+     programado sin sus `exclude_patterns` (entre ellos `%25`, el que evita los
+     400 del F5). Lo que no cabe en un perfil (la contraseña de autenticación
+     básica, claves que `JobConfig` ya no tiene) no se copia y se dice en
+     `avisos`.
+
    Tests: `tests/test_programaciones_perfil.py` (disparo con lo del momento,
    copia fija igual que antes, perfil desactivado o sin semillas, rastreo vivo
-   del perfil, borrado, validaciones, repetidas, migración en simulación y de
-   verdad sobre el caso Lopesan, serie única en la evolución, defaults al día).
+   del perfil y su motivo, copia fija con perfil que no lo mira, borrado,
+   validaciones, repetidas, worker igual que la API, perfil desde un rastreo,
+   migración en simulación y de verdad sobre el caso Lopesan, con claves
+   deducidas y sin perfil huérfano, serie única en la evolución, defaults al
+   día).

@@ -1059,8 +1059,12 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   se repite y se programa desde él. Las viejas siguen igual hasta pasar
   `scripts/migrar_programaciones_a_perfiles.py --confirmar` (simulación por
   defecto), que en Lopesan deja un perfil «Sitio completo» con las tres
-  programaciones y una sola serie. **Pendiente:** ejecutarlo en producción
-  tras desplegar (antes, la simulación) y pausar la programación que sobre.
+  programaciones y una sola serie. Revisado el 26-oct: el worker resuelve la
+  config igual que la API (modo lista sin sitemap, UA y huella, defaults que
+  valen `None`; un test los compara caso a caso) y «Crear un perfil con este
+  rastreo» guarda su configuración, no solo las semillas. **Pendiente:**
+  ejecutarlo en producción tras desplegar (antes, la simulación) y pausar la
+  programación que sobre.
 - **Alta de cliente guiada** (2.14; decisión 194; en local): nombre y dominio,
   perfil «Sitio principal» creado solo y «Siguiente paso» con lanzar canario,
   lanzar censo o programar cada semana.

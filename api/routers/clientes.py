@@ -44,6 +44,7 @@ from api.schemas import (
     ProfileCreate,
     ProfileResponse,
     ProfileUpdate,
+    validar_config_parcial,
 )
 
 router = APIRouter(prefix="/api/clients", tags=["clients"])
@@ -880,15 +881,78 @@ def crear_perfil(
     cliente = _buscar(db, client_id)
     nombre = cuerpo.nombre.strip()
     _nombre_libre(db, client_id, nombre)
-    _validar_fusion(cliente, cuerpo.config)
+    config, avisos = cuerpo.config, []
+    if cuerpo.desde_job_id is not None:
+        config, avisos = _config_desde_job(db, cliente, cuerpo.desde_job_id, cuerpo.config)
+    _validar_fusion(cliente, config)
     perfil = CrawlProfile(
         cliente_id=client_id, nombre=nombre, rol=cuerpo.rol, seeds=cuerpo.seeds,
-        config=cuerpo.config, notas=cuerpo.notas, activo=cuerpo.activo,
+        config=config, notas=cuerpo.notas, activo=cuerpo.activo,
     )
     db.add(perfil)
     _commit(db)
     db.refresh(perfil)
+    perfil.avisos = avisos
     return perfil
+
+
+def _config_desde_job(db: Session, cliente: Client, job_id: uuid.UUID,
+                      encima: dict | None) -> tuple[dict, list[str]]:
+    """La config de un perfil nuevo que, sobre el cliente, reproduce la del
+    rastreo `job_id` (revision de UX del 25-oct, 2.2).
+
+    Sin esto, «Crear un perfil con esas semillas» guardaba solo las semillas:
+    el censo de Lopesan 1e7ea651 lleva `exclude_patterns` (entre ellos `%25`,
+    el que evita los 400 del F5) que su cliente no fija, y el censo semanal
+    que saliera del perfil rastrearia sin ellos.
+
+    Se guarda solo lo que difiere del cliente (como la migracion, decision
+    193), asi que los cambios del cliente siguen llegando. Lo que no se puede
+    guardar en un perfil se dice en `avisos`: la contrasena de autenticacion
+    basica (decision 83) y las claves que JobConfig ya no tiene.
+    """
+    from shared.programaciones import (
+        capa_que_reproduce, con_defaults, config_del_momento, config_por_defecto,
+    )
+
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Ese rastreo no existe")
+    if job.cliente_id is not None and job.cliente_id != cliente.id:
+        raise HTTPException(status_code=422,
+                            detail="Ese rastreo es de otro cliente")
+    avisos: list[str] = []
+    defaults = config_por_defecto()
+    tiradas: list[str] = []
+
+    def _conocidas(valor: dict, base: dict, ruta: str = "") -> dict:
+        salida = {}
+        for k, v in valor.items():
+            if k not in base:
+                tiradas.append(ruta + k)
+            elif isinstance(v, dict) and isinstance(base[k], dict) and base[k]:
+                salida[k] = _conocidas(v, base[k], f"{ruta}{k}.")
+            else:
+                salida[k] = v
+        return salida
+
+    objetivo = _conocidas(dict(job.config or {}), defaults)
+    if (objetivo.get("http") or {}).get("basic_auth_password"):
+        objetivo["http"] = {**objetivo["http"], "basic_auth_password": ""}
+        avisos.append("La contraseña de acceso de ese rastreo no se copia: un perfil no "
+                      "guarda contraseñas. Ponla al lanzar cada rastreo.")
+    if tiradas:
+        avisos.append("Ajustes de ese rastreo que ya no existen y no se copian: "
+                      + ", ".join(sorted(tiradas)) + ".")
+    capa = capa_que_reproduce(
+        lambda c: config_del_momento(cliente, None, c), con_defaults(objetivo))
+    capa = {**capa, **(encima or {})}
+    try:
+        capa = validar_config_parcial(capa)
+    except ValueError as exc:
+        raise HTTPException(status_code=422,
+                            detail=f"La configuracion de ese rastreo no cabe en un perfil: {exc}")
+    return capa, avisos
 
 
 @router.get("/{client_id}/profiles/{profile_id}", response_model=ProfileResponse)

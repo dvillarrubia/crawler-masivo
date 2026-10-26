@@ -38,7 +38,7 @@ from shared.database import get_session  # noqa: E402
 from shared.models import (  # noqa: E402
     Base, Client, CrawlProfile, Incidente, Job, Programacion,
 )
-from shared.programaciones import config_por_defecto  # noqa: E402
+from shared.programaciones import con_defaults  # noqa: E402
 
 
 @compiles(BigInteger, "sqlite")
@@ -59,6 +59,20 @@ def entorno(tmp_path, monkeypatch):
     from api.routers import clientes, programaciones
 
     engine = create_engine(f"sqlite:///{tmp_path}/p.db")
+
+    # pysqlite no abre la transaccion hasta el primer INSERT y suelta los
+    # SAVEPOINT como si fueran commits: la receta de SQLAlchemy para que los
+    # savepoints (la migracion usa uno por programacion) se porten como en
+    # PostgreSQL.
+    from sqlalchemy import event
+
+    @event.listens_for(engine, "connect")
+    def _sin_autocommit(conexion, _):
+        conexion.isolation_level = None
+
+    @event.listens_for(engine, "begin")
+    def _begin(conexion):
+        conexion.exec_driver_sql("BEGIN")
     Base.metadata.create_all(engine)
     Sesion = sessionmaker(bind=engine, expire_on_commit=False)
     monkeypatch.setattr("shared.database.SessionLocal", Sesion, raising=False)
@@ -107,13 +121,99 @@ def _disparar(cola=None):
 
 def test_la_copia_de_los_defaults_es_la_de_JobConfig():
     """El worker no lleva la API: usa `shared/config_por_defecto.json`. Si se
-    anade un campo a JobConfig sin regenerarla, este test falla."""
-    from api.schemas import JobConfig
+    anade un campo a JobConfig sin regenerarla, este test falla. Lleva tambien
+    los defaults que valen `None` y los de cada regla con nombre."""
+    from api.schemas import BusquedaAMedida, ExtractorAMedida, JobConfig, ReglaSegmento
+
+    def defaults(modelo):
+        return {n: (f.default_factory() if f.default_factory else f.default)
+                for n, f in modelo.model_fields.items() if not f.is_required()}
 
     copia = json.loads((Path(__file__).parents[1] / "shared" / "config_por_defecto.json").read_text())
-    assert copia == JobConfig().model_dump(mode="json", exclude_none=True), (
-        "Regenera shared/config_por_defecto.json con "
-        "JobConfig().model_dump(mode='json', exclude_none=True)")
+    assert copia == json.loads(json.dumps({
+        "config": JobConfig().model_dump(mode="json"),
+        "reglas": {"custom_extraction": defaults(ExtractorAMedida),
+                   "custom_search": defaults(BusquedaAMedida),
+                   "segmentos": defaults(ReglaSegmento)},
+    })), "Regenera shared/config_por_defecto.json (ver este test)"
+
+
+# Configuraciones con la forma de las de produccion (clientes que fijan tope,
+# exclusiones y sitemap; un perfil de modo lista) y las que deducen claves.
+_UA_IPHONE = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
+              "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
+_CLIENTES = [
+    {},
+    {"marcas": ["marca", "otra marca"]},
+    {"max_depth": 6, "max_urls": 5000, "robots_mode": "respect", "use_sitemap": True,
+     "exclude_patterns": [r"\.(jpe?g|png|pdf)(\?|$)", "%25"],
+     "crawl_behavior": {"request_delay": 1.0}},
+    {"max_depth": 0},
+]
+_PERFILES = [
+    None, {}, {"max_depth": 0}, {"max_depth": 0, "use_sitemap": True},
+    {"user_agent": _UA_IPHONE}, {"impersonate": "safari17_0"},
+    {"user_agent": _UA_IPHONE, "impersonate": "chrome124"},
+    {"custom_extraction": {"precio": {"tipo": "css", "expresion": ".precio"}},
+     "custom_search": {"agotado": {"patron": "Agotado"}}},
+    {"segmentos": [{"nombre": "blog", "patron": "^/blog/"}]},
+    {"crawl_behavior": {"render_wait_ms": 1500, "retry_after_max_s": 60}},
+    {"max_urls": None, "use_sitemap": None, "exclude_patterns": None, "max_depth": None},
+    {"adapters": {"wordpress": {"modo": "off"}}}, {"topes_por_carpeta": {"/blog/": 50}},
+    {"templates": [{"nombre": "ficha", "patron": "^/p/"}]},
+]
+_PROPIAS = [None, {}, {"max_depth": 0}, {"render_js": True}, {"use_sitemap": True}]
+
+
+def test_el_worker_resuelve_la_config_igual_que_la_api():
+    """Revision del 26-oct de la decision 193: el worker fundia las capas
+    sobre los defaults y se saltaba los validadores de JobConfig, asi que un
+    perfil de modo lista (`max_depth: 0`) programado sembraba el sitemap
+    entero, y un UA de iPhone salia con huella de Chrome. Se compara la
+    funcion del worker con la de la API, caso a caso."""
+    from types import SimpleNamespace as N
+
+    from api.routers.clientes import resolver_config
+    from shared.programaciones import config_del_momento
+
+    casos = 0
+    for c in _CLIENTES:
+        for p in _PERFILES:
+            for propia in _PROPIAS:
+                cli = N(config_defecto=c)
+                per = N(config=p) if p is not None else None
+                api = resolver_config(cli, per, propia)
+                worker = config_del_momento(cli, per, propia)
+                assert worker == api, (c, p, propia, {
+                    k: (api.get(k), worker.get(k))
+                    for k in set(api) | set(worker) if api.get(k) != worker.get(k)})
+                casos += 1
+    assert casos == len(_CLIENTES) * len(_PERFILES) * len(_PROPIAS)
+
+
+def test_los_defaults_de_cada_regla_son_los_de_pydantic():
+    from api.schemas import BusquedaAMedida, ExtractorAMedida, ReglaSegmento
+    from shared.programaciones import con_defaults
+
+    ext = {"tipo": "css", "expresion": ".precio", "cuantos": "todos"}
+    bus = {"patron": "Agotado"}
+    seg = {"nombre": "blog", "patron": "^/blog/"}
+    cfg = con_defaults({"custom_extraction": {"precio": ext}, "custom_search": {"agotado": bus},
+                        "segmentos": [seg]})
+    assert cfg["custom_extraction"]["precio"] == ExtractorAMedida(**ext).model_dump()
+    assert cfg["custom_search"]["agotado"] == BusquedaAMedida(**bus).model_dump()
+    assert cfg["segmentos"] == [ReglaSegmento(**seg).model_dump()]
+
+
+def test_un_perfil_de_lista_programado_no_siembra_el_sitemap():
+    from types import SimpleNamespace as N
+
+    from shared.programaciones import config_del_momento
+
+    cfg = config_del_momento(N(config_defecto={}), N(config={"max_depth": 0}), None)
+    assert cfg["use_sitemap"] is False
+    cfg = config_del_momento(N(config_defecto={}), N(config={"user_agent": _UA_IPHONE}), None)
+    assert cfg["impersonate"].startswith("safari") and "ios" in cfg["impersonate"]
 
 
 def test_diferencia_de_config_ida_y_vuelta():
@@ -220,6 +320,75 @@ def test_no_se_lanza_encima_de_un_rastreo_vivo_del_mismo_perfil(entorno):
     assert _disparar().encolados == []
     with Sesion() as s:
         assert s.query(Job).count() == 1
+        motivo = s.get(Programacion, uuid.UUID(prog["id"])).ultimo_motivo
+        assert motivo.startswith("su perfil ya tiene un rastreo"), (
+            "no dice «el anterior de esta programacion» cuando el vivo es otro")
+
+
+def test_una_de_copia_fija_con_perfil_no_mira_los_rastreos_del_perfil(entorno):
+    """Compatibilidad: antes de la decision 193 una de copia fija solo miraba
+    su propio rastreo anterior, aunque tuviera `profile_id`."""
+    api, Sesion = entorno
+    c, p = _cliente_y_perfil(api)
+    prog = api.post("/api/programaciones", json={
+        "profile_id": p["id"], "hereda_perfil": False, "nombre": "copia",
+        "seeds": ["https://www.acme.com/"], "config": {"max_depth": 1},
+        "cron": "0 3 * * 1"}).json()
+    with Sesion() as s:
+        s.add(Job(name="a mano", seeds=["https://www.acme.com/"], config={}, status="running",
+                  profile_id=uuid.UUID(p["id"]), cliente_id=uuid.UUID(c["id"])))
+        s.commit()
+    _que_toque_ya(Sesion, prog["id"])
+    assert len(_disparar().encolados) == 1
+
+
+def test_el_perfil_creado_desde_un_rastreo_conserva_su_config(entorno):
+    """«Programar» desde un rastreo con «Crear un perfil con esas semillas»
+    guardaba solo las semillas: un censo con exclusiones propias (`%25`, la que
+    evita los 400 de un F5 por triple codificacion) salia sin ellas en cuanto
+    lo lanzaba la programacion. Ahora el perfil guarda lo que el rastreo tiene
+    de distinto respecto al cliente, y lo que se lanzaria es lo mismo."""
+    from api.routers.clientes import resolver_config
+    from api.schemas import JobConfig
+
+    api, Sesion = entorno
+    c = api.post("/api/clients", json={"nombre": "Acme", "dominios": ["www.acme.com"],
+                                       "config_defecto": {"marcas": ["acme"]}}).json()
+    # La config de un job es la resuelta entera (con los defaults), como la
+    # guarda la API al lanzarlo; y una clave que JobConfig ya no tiene.
+    cfg_job = JobConfig.model_validate({
+        "marcas": ["acme"], "max_depth": 200, "render_js": True, "robots_mode": "ignore",
+        "exclude_patterns": ["_redirect=", "p_p_id=", "%25", "e-page-"],
+        "http": {"basic_auth_user": "u", "basic_auth_password": "secreta"},
+    }).model_dump(mode="json")
+    cfg_job["clave_de_otra_epoca"] = 1
+    with Sesion() as s:
+        job = Job(name="censo", seeds=["https://www.acme.com/", "https://www.acme.com/b"],
+                  config=cfg_job, status="completed", cliente_id=uuid.UUID(c["id"]))
+        s.add(job)
+        s.commit()
+        job_id = job.id
+    r = api.post(f"/api/clients/{c['id']}/profiles", json={
+        "nombre": "Sitio completo", "seeds": ["https://www.acme.com/"], "desde_job_id": str(job_id)})
+    assert r.status_code == 201, r.text
+    perfil = r.json()
+    assert perfil["config"]["exclude_patterns"] == ["_redirect=", "p_p_id=", "%25", "e-page-"]
+    assert "marcas" not in perfil["config"], "lo que ya da el cliente no se copia"
+    assert "basic_auth_password" not in (perfil["config"].get("http") or {}) or \
+        not perfil["config"]["http"]["basic_auth_password"]
+    assert any("contraseña" in a for a in perfil["avisos"])
+    assert any("clave_de_otra_epoca" in a for a in perfil["avisos"])
+
+    from types import SimpleNamespace as N
+    resuelta = resolver_config(N(config_defecto=c["config_defecto"]), N(config=perfil["config"]), {})
+    esperada = {k: v for k, v in cfg_job.items() if k != "clave_de_otra_epoca"}
+    esperada["http"] = {**esperada["http"], "basic_auth_password": ""}
+    assert json.loads(json.dumps(resuelta)) == esperada
+
+    otro = api.post("/api/clients", json={"nombre": "Otro", "dominios": ["otro.example"]}).json()
+    r = api.post(f"/api/clients/{otro['id']}/profiles", json={
+        "nombre": "x", "seeds": ["https://otro.example/"], "desde_job_id": str(job_id)})
+    assert r.status_code == 422
 
 
 def test_borrar_el_perfil_se_lleva_sus_programaciones_colgadas(entorno):
@@ -411,12 +580,58 @@ def test_la_migracion_deja_un_perfil_sitio_completo_y_no_cambia_lo_que_se_rastre
     despues = _efectiva_antes(Sesion, ids)
     for pid in ids:
         assert despues[pid]["seeds"] == antes[pid]["seeds"]
-        assert despues[pid]["config"] == fusionar_config(config_por_defecto(), antes[pid]["config"]), (
+        assert despues[pid]["config"] == con_defaults(antes[pid]["config"]), (
             "el siguiente disparo rastrea lo mismo que antes de migrar")
 
     # Idempotente: una segunda pasada no encuentra nada.
     with Sesion() as s:
         assert M.migrar(s, confirmar=True) == []
+
+
+def test_la_migracion_conserva_lo_que_el_worker_deduciria_distinto(entorno):
+    """Una copia de modo lista con sitemap pedido y un UA de iPhone con huella
+    de Chrome: colgada del perfil, el worker deduciria `use_sitemap: false` y
+    otra huella si la capa solo guardara lo que difiere. La migracion las fija
+    explicitas y el disparo sigue siendo el mismo."""
+    M = _script()
+
+    _, Sesion = entorno
+    with Sesion() as s:
+        c = Client(nombre="Lista", slug="lista-sitio", dominios=["lista.example"], config_defecto={})
+        s.add(c)
+        s.flush()
+        cfg = {"max_depth": 0, "use_sitemap": True, "user_agent": _UA_IPHONE,
+               "impersonate": "chrome124"}
+        p = Programacion(id=uuid.uuid4(), nombre="lista", client_id="lista-sitio", cliente_id=c.id,
+                         seeds=["https://lista.example/a", "https://lista.example/b"], config=cfg,
+                         cron="0 3 * * 1", zona_horaria="Europe/Madrid", activa=True)
+        s.add(p)
+        s.commit()
+        pid = p.id
+    antes = _efectiva_antes(Sesion, [pid])
+    with Sesion() as s:
+        assert [l["accion"] for l in M.migrar(s, confirmar=True)] == ["colgada"]
+    despues = _efectiva_antes(Sesion, [pid])
+    assert despues[pid]["config"] == con_defaults(antes[pid]["config"])
+    assert despues[pid]["config"]["use_sitemap"] is True
+
+
+def test_si_la_comprobacion_falla_no_queda_un_perfil_huerfano(entorno, monkeypatch):
+    M = _script()
+    import shared.programaciones as P
+
+    _, Sesion = entorno
+    cid, ids = _lopesan(Sesion)
+    real = P.config_del_momento
+    # La comprobacion final (con lo propio ya calculado) nunca cuadra.
+    monkeypatch.setattr(P, "config_del_momento",
+                        lambda cli, per, propia: {**real(cli, per, propia), "_roto": propia is not None})
+    with Sesion() as s:
+        lineas = M.migrar(s, confirmar=True)
+    assert {l["accion"] for l in lineas} == {"omitida"}
+    with Sesion() as s:
+        assert [p.nombre for p in s.query(CrawlProfile)] == ["lista"], "ningun «Sitio completo» huerfano"
+        assert all(not p.hereda_perfil for p in s.query(Programacion))
 
 
 def test_la_evolucion_enseña_una_sola_serie_tras_migrar(entorno):

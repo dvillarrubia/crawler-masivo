@@ -91,7 +91,7 @@
 | GET | `/api/jobs` | List jobs (`?status=`, `?client_id=` —UUID, slug o el texto viejo—, `?profile_id=`, `?page=`) |
 | GET/POST | `/api/clients` | Listar / crear clientes. Al crear, `perfil_principal: true` crea tambien el perfil «Sitio principal» con la home del primer dominio (alta guiada, decision 194) |
 | GET/PATCH/DELETE | `/api/clients/{id}` | Ficha, edicion y borrado (`?confirmar=<slug>`, `?con_jobs=`) |
-| GET/POST | `/api/clients/{id}/profiles` | Perfiles de rastreo del cliente |
+| GET/POST | `/api/clients/{id}/profiles` | Perfiles de rastreo del cliente. El POST acepta `desde_job_id`: el perfil guarda lo que la config de ese rastreo tiene de distinto respecto al cliente, y lo que no puede guardar lo dice en `avisos` (decisión 193) |
 | GET/PATCH/DELETE | `/api/clients/{id}/profiles/{pid}` | Un perfil |
 | GET | `/api/clients/{id}/config-resuelta` | Lo que heredaria un job (`?profile_id=`), para precargar el modal |
 | GET | `/api/clients/{id}/serie` | Los `?limite=` (30) rastreos mas recientes del cliente con sus cifras (`urls`, `paginas_html`, `indexables`, `errores`, `avisos`) y, de su comparacion automatica, `alertas`, `alertas_criticas`, `comparado_con` y `fecha_anterior` (la fecha de la referencia, aunque no este en la serie) |

@@ -175,14 +175,25 @@ def toca_lanzar(
 VIVOS = ("pending", "running", "analyzing")
 
 
-def hay_rastreo_vivo(db, programacion) -> bool:
-    """Si esta programación ya tiene un rastreo sin terminar, o lo tiene su
-    perfil (lanzado a mano o por otra programación del mismo perfil).
+# Lo que dice `ultimo_motivo` cuando no se encola por un rastreo vivo. La
+# interfaz los traduce (fmt.motivo): el segundo no puede decir «el anterior de
+# esta programacion» cuando el vivo es otro (revision del 26-oct, decision 193).
+VIVO_EL_SUYO = ("el rastreo anterior de esta programacion sigue sin terminar; "
+                "no se encola otro encima")
+VIVO_DEL_PERFIL = ("su perfil ya tiene un rastreo sin terminar (lanzado a mano o "
+                   "por otra programacion); no se encola otro encima")
 
-    Un rastreo semanal que tarda nueve dias encolaria el siguiente encima del
-    que corre. En una maquina de 2 vCPU eso no es ir mas lento: es que se caen
-    los dos. Y con el perfil como unidad (decision 193), dos rastreos vivos del
-    mismo perfil son el mismo sitio rastreado dos veces a la vez.
+
+def motivo_rastreo_vivo(db, programacion) -> str | None:
+    """Por que no se encola por un rastreo sin terminar, o None si no lo hay.
+
+    - El suyo (`ultimo_job_id`) sigue vivo: un rastreo semanal que tarda nueve
+      dias encolaria el siguiente encima del que corre, y en una maquina de 2
+      vCPU eso no es ir mas lento: es que se caen los dos.
+    - Solo si cuelga del perfil (`hereda_perfil`, decision 193): cualquier
+      rastreo vivo de su perfil, lanzado a mano o por otra programacion, es el
+      mismo sitio rastreado dos veces a la vez. Las de copia fija no lo miran
+      aunque tengan `profile_id`: siguen como antes de la decision 193.
     """
     from shared.models import Job
 
@@ -191,12 +202,18 @@ def hay_rastreo_vivo(db, programacion) -> bool:
             db.query(Job.status).filter(Job.id == programacion.ultimo_job_id).scalar()
         )
         if estado in VIVOS:
-            return True
+            return VIVO_EL_SUYO
     perfil = getattr(programacion, "profile_id", None)
-    if perfil is None:
-        return False
-    return db.query(Job.id).filter(
-        Job.profile_id == perfil, Job.status.in_(VIVOS)).first() is not None
+    if perfil is None or not getattr(programacion, "hereda_perfil", False):
+        return None
+    vivo = db.query(Job.id).filter(
+        Job.profile_id == perfil, Job.status.in_(VIVOS)).first()
+    return VIVO_DEL_PERFIL if vivo is not None else None
+
+
+def hay_rastreo_vivo(db, programacion) -> bool:
+    """Si no se encola por un rastreo sin terminar (`motivo_rastreo_vivo`)."""
+    return motivo_rastreo_vivo(db, programacion) is not None
 
 
 def job_desde_programacion(programacion) -> dict[str, Any]:
@@ -232,15 +249,7 @@ SERIE_UNIDA = "serie_unida"
 _DEFECTO: dict | None = None
 
 
-def config_por_defecto() -> dict[str, Any]:
-    """Los valores por defecto de `JobConfig`, para el worker.
-
-    La imagen del worker no lleva la API (ni Pydantic), y un job lanzado por la
-    API sale con la config entera, defaults incluidos. Para que un disparo
-    salga igual que un rastreo lanzado a mano desde el perfil, la base es esta
-    copia en `shared/config_por_defecto.json`; un test la compara con
-    `JobConfig()` y falla en cuanto se desfasen.
-    """
+def _copia_de_defaults() -> dict[str, Any]:
     global _DEFECTO
     if _DEFECTO is None:
         import json
@@ -253,21 +262,105 @@ def config_por_defecto() -> dict[str, Any]:
     return copy.deepcopy(_DEFECTO)
 
 
+def config_por_defecto() -> dict[str, Any]:
+    """Los valores por defecto de `JobConfig`, para el worker.
+
+    La imagen del worker no lleva la API (ni Pydantic), y un job lanzado por la
+    API sale con la config entera, defaults incluidos (tambien los que valen
+    `None`, como `render_wait_ms`). Para que un disparo salga igual que un
+    rastreo lanzado a mano desde el perfil, la base es esta copia en
+    `shared/config_por_defecto.json`; un test la compara con `JobConfig()` y
+    falla en cuanto se desfasen.
+    """
+    return _copia_de_defaults()["config"]
+
+
+def reglas_por_defecto() -> dict[str, dict[str, Any]]:
+    """Los defaults de cada regla con nombre o de lista (`custom_extraction`,
+    `custom_search`, `segmentos`): Pydantic los rellena en cada regla al
+    validar, y una capa guardada (`exclude_unset`) no los lleva."""
+    return _copia_de_defaults()["reglas"]
+
+
+def con_defaults(capas: dict | None) -> dict[str, Any]:
+    """Una config parcial ya fusionada, con los defaults de JobConfig debajo:
+    lo que `JobConfig.model_validate(capas).model_dump()` daria, SIN las
+    claves deducidas (eso lo anade `config_del_momento`).
+
+    No se usa `fusionar_config(defaults, capas)`: trata un `None` como «quitar
+    la clave», y se llevaria los defaults que valen `None`.
+    """
+    from shared.clientes import _fusionar_en
+
+    config = config_por_defecto()
+    _fusionar_en(config, capas or {})
+    reglas = reglas_por_defecto()
+    for campo in ("custom_extraction", "custom_search"):
+        config[campo] = {nombre: {**reglas[campo], **regla}
+                         for nombre, regla in (config.get(campo) or {}).items()
+                         if regla is not None}
+    config["segmentos"] = [{**reglas["segmentos"], **r} for r in (config.get("segmentos") or [])]
+    return config
+
+
 def config_del_momento(cliente, perfil, propia: dict | None) -> dict[str, Any]:
     """defaults <- cliente <- perfil <- lo propio de la programacion, AHORA.
 
-    Mismo orden que `api.routers.clientes.resolver_config`. Primero se funden
-    las tres capas y despues se ponen debajo los defaults: un `None` de una
-    capa quita lo heredado y deja el valor por defecto, como en la API.
+    Lo mismo que `api.routers.clientes.resolver_config` (un test los compara
+    con configuraciones reales): primero se funden las tres capas, despues se
+    ponen debajo los defaults (un `None` de una capa quita lo heredado y deja
+    el valor por defecto) y al final las claves que JobConfig deduce de otras
+    (`shared.perfiles.claves_deducidas`: modo lista sin sitemap, UA y huella).
     """
     from shared.clientes import fusionar_config
+    from shared.perfiles import claves_deducidas
 
     capas = fusionar_config(
         (getattr(cliente, "config_defecto", None) if cliente is not None else None) or {},
         (perfil.config if perfil is not None else None) or {},
         propia or {},
     )
-    return fusionar_config(config_por_defecto(), capas)
+    config = con_defaults(capas)
+    config.update(claves_deducidas(set(capas), config))
+    return config
+
+
+def capa_que_reproduce(resolver, objetivo: dict) -> dict:
+    """La capa minima que, puesta encima, deja `resolver(capa) == objetivo`.
+
+    La usan la migracion de programaciones y «Crear un perfil con las semillas
+    de este rastreo» (`POST /api/clients/<id>/profiles` con `desde_job_id`).
+    `diferencia_de_config` sola no basta: el worker DEDUCE claves de otras
+    (`shared.perfiles.claves_deducidas`) y una copia que fija `max_depth: 0` y
+    `use_sitemap: true` perderia el sitemap si la capa solo dijera
+    `max_depth: 0`. Lo que la resolucion no reproduce se fija explicito.
+    """
+    import copy
+
+    from shared.clientes import diferencia_de_config
+
+    # Sin las claves que valen `None`: la resolucion vuelve a poner debajo los
+    # defaults (que es de donde salen esos `None`), y diferenciarlas dejaria en
+    # la capa un `render_wait_ms: None` que no cambia nada.
+    capa = diferencia_de_config(sin_nones(resolver(None)), sin_nones(objetivo))
+    for _ in range(3):
+        resultado = resolver(capa)
+        distintas = {k for k in set(objetivo) | set(resultado)
+                     if resultado.get(k, _NADA) != objetivo.get(k, _NADA)}
+        if not distintas:
+            break
+        for k in distintas:
+            capa[k] = copy.deepcopy(objetivo[k]) if k in objetivo else None
+    return capa
+
+
+_NADA = object()
+
+
+def sin_nones(d):
+    if not isinstance(d, dict):
+        return d
+    return {k: sin_nones(v) for k, v in d.items() if v is not None}
 
 
 def resolver_disparo(db, programacion) -> tuple[dict[str, Any] | None, str | None]:

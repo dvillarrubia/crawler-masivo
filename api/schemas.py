@@ -13,8 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from shared.perfiles import (
     IMPERSONATE_POR_DEFECTO,
     PERFILES_IMPERSONATE,
-    huella_para_ua,
-    ua_para_huella,
+    claves_deducidas,
 )
 from shared.config import (
     DEFAULT_CONCURRENT_REQUESTS,
@@ -544,15 +543,13 @@ class JobConfig(BaseModel):
         avisa en el log. Por `__dict__`, como `_lista_sin_sitemap`, para que la
         clave deducida no cuente como fijada al fusionar capas.
         """
-        fijadas = self.model_fields_set
-        if "impersonate" not in fijadas and "user_agent" in fijadas:
-            huella = huella_para_ua(self.user_agent)
-            if huella:
-                self.__dict__["impersonate"] = huella
-        elif "impersonate" in fijadas and "user_agent" not in fijadas:
-            ua = ua_para_huella(self.impersonate)
-            if ua:
-                self.__dict__["user_agent"] = ua
+        # La regla vive en `shared.perfiles.claves_deducidas`: el worker la
+        # aplica igual al disparar una programacion colgada de un perfil.
+        deducidas = claves_deducidas(self.model_fields_set, {
+            "user_agent": self.user_agent, "impersonate": self.impersonate})
+        for clave in ("user_agent", "impersonate"):
+            if clave in deducidas:
+                self.__dict__[clave] = deducidas[clave]
         return self
 
     @field_validator("topes_por_carpeta")
@@ -577,8 +574,10 @@ class JobConfig(BaseModel):
         pisaria el `use_sitemap: true` que fijase su perfil. Asi se decide otra
         vez sobre la config FUSIONADA (`resolver_config`).
         """
-        if self.max_depth == 0 and "use_sitemap" not in self.model_fields_set:
-            self.__dict__["use_sitemap"] = False
+        # Misma regla que el worker: `shared.perfiles.claves_deducidas`.
+        deducidas = claves_deducidas(self.model_fields_set, {"max_depth": self.max_depth})
+        if "use_sitemap" in deducidas:
+            self.__dict__["use_sitemap"] = deducidas["use_sitemap"]
         return self
 
     @model_validator(mode="after")
@@ -1704,6 +1703,11 @@ class ProfileCreate(_PerfilCampos):
     config: dict[str, Any] = Field(default_factory=dict)
     notas: str | None = None
     activo: bool = True
+    # «Programar» desde un rastreo (revision de UX del 25-oct, 2.2): el perfil
+    # nuevo guarda lo que la config de ese rastreo tiene de distinto respecto
+    # al cliente (sus exclusiones, su profundidad...). `config`, si viene, va
+    # encima.
+    desde_job_id: uuid.UUID | None = None
 
 
 class ProfileUpdate(_PerfilCampos):
@@ -1729,6 +1733,8 @@ class ProfileResponse(BaseModel):
     last_job_id: uuid.UUID | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    # Lo que no se pudo copiar al crear el perfil desde un rastreo.
+    avisos: list[str] = Field(default_factory=list)
 
 
 class ConfigResueltaResponse(BaseModel):
