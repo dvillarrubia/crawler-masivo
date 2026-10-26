@@ -1297,6 +1297,11 @@
         </template>
 
         <template x-if="cliente && clienteTab === 'config'">
+          <!-- Con la clave del cliente: al pasar de un cliente a otro con la
+               pestaña abierta, las secciones se montan de nuevo y sus x-init
+               (Search Console, Slack, enlaces, configuración) piden las del
+               nuevo; antes se quedaban con las del anterior o vacías. -->
+          <template x-for="cid in [cliente.id]" :key="cid">
           <div data-testid="cliente-config">
             <!-- Secciones plegables con un indice (revision de UX del 25-oct,
                  2.4): la pestaña medía unos 4.000 px con todo abierto. Lo que es
@@ -1973,6 +1978,7 @@
                       data-tip="Borra el cliente y sus perfiles. Sus rastreos NO se borran">Borrar cliente</button>
             </div>
           </div>
+          </template>
         </template>
       </div>
     </template>
