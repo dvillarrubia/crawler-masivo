@@ -742,7 +742,7 @@ function app() {
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && this.menuAbierto) { this.menuAbierto = ''; return; }
         if (e.key === 'n' && !this.showCreate && !['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) {
-          this.openCreate();
+          this.openCreate(this._presetDelContexto());
         }
       });
 
@@ -942,10 +942,24 @@ function app() {
     },
 
     // Seccion de la barra superior que se marca como activa.
+    // Un rastreo con cliente cuelga de Clientes, no de Rastreos: se llega
+    // casi siempre desde la ficha del cliente (revision de UX del 25-oct, 1.4).
     seccion() {
       if (['clients', 'client'].includes(this.view)) return 'clientes';
       if (this.view === 'programados') return 'programados';
+      if (['detail', 'explorer', 'url-detail', 'informe'].includes(this.view) && this.job && this.job.cliente_id) return 'clientes';
       return 'rastreos';
+    },
+
+    // El cliente (y el perfil) de lo que se esta mirando, para que «Nuevo
+    // rastreo» abra ya con el: lanzado «Sin cliente» no hereda nada ni cuenta
+    // en la evolucion de nadie.
+    _presetDelContexto() {
+      if (this.view === 'client' && this.cliente) return { cliente_id: this.cliente.id };
+      if (['detail', 'explorer', 'url-detail', 'informe'].includes(this.view) && this.job && this.job.cliente_id) {
+        return { cliente_id: this.job.cliente_id, profile_id: this.job.profile_id || '' };
+      }
+      return null;
     },
 
     // Miga de pan: donde estoy y por donde vuelvo.
@@ -956,11 +970,16 @@ function app() {
         m.push({ texto: 'Clientes', href: '#/clientes' });
         m.push({ texto: this.cliente ? this.cliente.nombre : 'Nuevo cliente' });
       }
-      if (['detail', 'explorer', 'url-detail'].includes(v) && this.job) {
-        m.push({ texto: 'Rastreos', href: '#/rastreos' });
-        if (this.job.cliente_id) m.push({ texto: this.job.cliente_nombre || this.job.client_id, href: '#/clientes/' + this.job.cliente_id });
+      if (['detail', 'explorer', 'url-detail', 'informe'].includes(v) && this.job) {
+        if (this.job.cliente_id) {
+          m.push({ texto: 'Clientes', href: '#/clientes' });
+          m.push({ texto: this.job.cliente_nombre || this.job.client_id, href: '#/clientes/' + this.job.cliente_id });
+        } else {
+          m.push({ texto: 'Rastreos', href: '#/rastreos' });
+        }
         m.push({ texto: this.job.name, href: '#/rastreos/' + this.job.id });
         if (v === 'explorer') m.push({ texto: 'Explorador' });
+        if (v === 'informe') m.push({ texto: 'Informe para el cliente' });
         if (v === 'url-detail') {
           if (this.urlDetailDesde === 'explorer') m.push({ texto: 'Explorador', href: '#/rastreos/' + this.job.id + '/explorador' });
           const u = this.urlDetail && this.urlDetail.url;
