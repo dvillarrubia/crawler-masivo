@@ -309,6 +309,13 @@ Cosas que no estaban en la auditoría y aparecieron al hacerla:
 - [x] Con la API de producción de hoy (sin la 195) la pestaña dice que el
   servidor aún no filtra y enseña la lista de siempre: comprobado con
   capturas contra producción.
+- [x] Revisión independiente, arreglado: el botón atrás vuelve de «Quién la
+  enlaza» a la lista de destinos (antes saltaba a lo de antes); con la API
+  anterior, «Externas» abre la pestaña de URLs externas de siempre y no una
+  lista de Enlaces sin filtrar bajo `tipo=externo`; «Es exactamente» encuentra
+  la URL con o sin la barra final; y en un rastreo en marcha las cifras van en
+  una pasada, se guardan 30 s y, si no caben en 20 s, se dice en vez de
+  insistir.
 - Lo abierto: el CSV de enlaces sale entero, sin los filtros de la vista.
 
 ### Revisión del 25-oct · 2.10 y 2.11 Problemas

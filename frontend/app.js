@@ -751,6 +751,7 @@ function app() {
     // (revision de UX del 25-oct, 2.6).
     _expUltimo: null,
     _aplicandoRuta: false,
+    _rutaNueva: false,
     loading: false,
     error: null,
 
@@ -985,11 +986,16 @@ function app() {
       // Si solo cambia lo que va despues del «?» (un filtro, el orden, la
       // pagina) se sustituye la entrada: cada tecla en un filtro no puede ser
       // un paso del boton atras.
+      // `_rutaNueva`: un cambio tras el «?» que SI es otra vista (de un destino
+      // a «quien la enlaza», revision de UX del 25-oct, 2.8) pide su propio
+      // paso, para que el boton atras vuelva a la lista de destinos.
       this.$watch('_ruta()', h => {
         if (this.view === 'explorer' && this.job) this._expUltimo = { job: this.job.id, qs: this._estadoExplorador() };
+        const nueva = this._rutaNueva;
+        this._rutaNueva = false;
         if (!h || location.hash === h) return;
         const mismaVista = location.hash.split('?')[0] === h.split('?')[0];
-        if (this._aplicandoRuta || mismaVista) history.replaceState(null, '', h);
+        if (this._aplicandoRuta || (mismaVista && !nueva)) history.replaceState(null, '', h);
         else history.pushState(null, '', h);
       });
 
@@ -3988,6 +3994,7 @@ function app() {
 
     cambiarVistaEnlaces(v) {
       if (this.linksVista === v) return;
+      this._rutaNueva = true;
       this.linksVista = v;
       this.linksOrden = '';
       if (v === 'destinos') { this.linksFiltros.destino_hash = ''; this.linksDestinoUrl = ''; }
@@ -3997,6 +4004,7 @@ function app() {
 
     // Desde un destino: las paginas que lo enlazan.
     quienEnlaza(d) {
+      this._rutaNueva = true;
       this.linksFiltros.destino_hash = d.to_url_hash;
       this.linksDestinoUrl = d.to_url;
       this.linksVista = 'enlaces';
@@ -5175,7 +5183,13 @@ function app() {
 
     // Sin URLs externas en el censo, «Externas» son los enlaces a otros
     // sitios: se ven en Enlaces, por destino (V25).
-    externasEnEnlaces() { return !(this.stats && this.stats.external_count); },
+    // Solo si la API tiene /links/resumen (expExternasEnlazadas no es null):
+    // con la API anterior, Enlaces no filtra por tipo y llevar alli con
+    // tipo=externo enseñaria todos los enlaces bajo un filtro que no se
+    // aplica. Entonces, la pestaña de URLs externas de siempre.
+    externasEnEnlaces() {
+      return !(this.stats && this.stats.external_count) && this.expExternasEnlazadas != null;
+    },
 
     setExplorerTab(tab) {
       if (tab === 'external' && this.externasEnEnlaces()) {

@@ -1058,8 +1058,10 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   anclas y estado) con «Quién la enlaza»; los destinos rotos primero; el
   estado de la sonda externa por fin en pantalla, y «Externas» del Explorador
   con los destinos externos enlazados en vez de «0». Endpoints
-  `GET /links` (con filtros), `/links/destinos` y `/links/resumen`. Pendiente:
-  el CSV con los filtros de la vista.
+  `GET /links` (con filtros), `/links/destinos` y `/links/resumen`. En un
+  rastreo en marcha, conteos en una pasada, guardados 30 s y con tope de 20 s
+  (503 claro); «es exactamente» con o sin barra final; atrás vuelve de «Quién
+  la enlaza» a los destinos. Pendiente: el CSV con los filtros de la vista.
 - **Pestaña IA** (revisión de UX del 25-oct, 2.9; hecho en local): el análisis
   enriquecido deja la cabecera del censo y «Avanzado › Enriquecido» y pasa a
   una pestaña propia, «IA», con lo ya preguntado, la respuesta de cada vez y
