@@ -521,7 +521,7 @@ def analizar(an) -> dict[str, Any]:
     for url_id, detalles in candidatos.items():
         an._add_issue(url_id, "soft_404_candidato", "info", detalles,
                       group_key=claves_candidato.get(url_id))
-    plantillas_200 = _avisar_plantillas_que_responden_200(
+    sondas_200 = _avisar_plantillas_que_responden_200(
         an, sondas, info, alcance_plantilla, _clave_de_grupo)
     an._flush_issues()
 
@@ -538,13 +538,22 @@ def analizar(an) -> dict[str, Any]:
         "incidencias_tapadas": dict(sorted(tapadas.items())),
         "productos_agotados_no_emitidos": agotados,
         # Plantillas (o raiz) que responden 2xx a una URL que no existe, en
-        # `soft_404_plantilla` (decision 190).
-        "plantillas_responden_200": plantillas_200,
+        # `soft_404_plantilla` (decision 190), y que sondas son: el Resumen y
+        # Problemas pintan esa lista, no otra cuenta propia de las sondas con
+        # 2xx (un muro de WAF servido con 200 no cuenta).
+        "plantillas_responden_200": len(sondas_200),
+        "sondas_responden_200": sondas_200,
         "sondas": len(sondas),
         "sondas_con_huella": len(utiles),
         "detalle_sondas": resumen_sondas,
     }
     return _guardar(session, job, resumen)
+
+
+# Los tipos que se anclan en una pagina que cambia de un censo a otro y casan
+# por `group_key` en la comparacion (`shared.comparacion.ANCLADOS_POR_GRUPO`,
+# que no puede importar `analysis/`; un test comprueba que coinciden).
+TIPOS_ANCLADOS_POR_GRUPO = ("soft_404_plantilla",)
 
 
 def _sonda_responde_200(s: dict) -> bool:
@@ -556,6 +565,8 @@ def _sonda_responde_200(s: dict) -> bool:
     """
     if not isinstance(s, dict) or s.get("redirige_a") or s.get("error"):
         return False
+    # El mismo filtro, repetido, en `resumenSoft404` de frontend/app.js para
+    # los censos analizados antes de la decision 190.
     st = s.get("status")
     if not isinstance(st, int) or not (200 <= st < 300):
         return False
@@ -565,7 +576,7 @@ def _sonda_responde_200(s: dict) -> bool:
     return not any(t in titulo for t in TITULOS_DE_BLOQUEO)
 
 
-def _avisar_plantillas_que_responden_200(an, sondas, info, alcance_plantilla, clave_de_grupo) -> int:
+def _avisar_plantillas_que_responden_200(an, sondas, info, alcance_plantilla, clave_de_grupo) -> list[str]:
     """`soft_404_plantilla` (decision 190): UNA fila por host con las plantillas
     de ruta (y la raiz) que responden 2xx a una URL que no existe.
 
@@ -592,11 +603,11 @@ def _avisar_plantillas_que_responden_200(an, sondas, info, alcance_plantilla, cl
         vistas.add(clave)
         por_host[host].append(s)
     if not por_host:
-        return 0
+        return []
     paginas_por_host: dict[str, list[tuple[str, int, str]]] = defaultdict(list)
     for url_id, d in info.items():
         paginas_por_host[d["host"]].append((d["url"], url_id, d["plantilla"]))
-    emitidas = 0
+    emitidas: list[str] = []
     for host, lista in sorted(por_host.items()):
         paginas = sorted(paginas_por_host.get(host, []))
         if not paginas:
@@ -618,7 +629,7 @@ def _avisar_plantillas_que_responden_200(an, sondas, info, alcance_plantilla, cl
             "paginas_afectadas": len(afectadas),
             "paginas_ejemplo": [p[0] for p in afectadas[:MUESTRA]],
         }, group_key=clave_de_grupo("soft404_plantilla|" + host))
-        emitidas += len(filas)
+        emitidas.extend(f["sonda"] for f in filas)
     return emitidas
 
 

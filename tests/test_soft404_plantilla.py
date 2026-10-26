@@ -56,6 +56,8 @@ def test_el_caso_lopesan_categorias_que_responden_200(sesion):
     assert not _filas(issues, "soft_404"), "ninguna pagina es la pagina de error"
     resumen = sesion.get(Job, job_id).soft404["resumen"]
     assert resumen["plantillas_responden_200"] == 1
+    assert resumen["sondas_responden_200"] == ["https://x.com/blog/category/zz02/"], (
+        "el Resumen pinta esta lista, no las sondas con 2xx a secas")
     assert resumen["soft_404"] == 0
 
 
@@ -75,7 +77,9 @@ def test_lo_que_no_se_puede_afirmar_no_emite(sesion):
     _pagina(sesion, job_id, 2, "/fichas/b", NORMAL + " b")
     sesion.commit()
     assert not _filas(_analizar(sesion, job_id))
-    assert sesion.get(Job, job_id).soft404["resumen"]["plantillas_responden_200"] == 0
+    resumen = sesion.get(Job, job_id).soft404["resumen"]
+    assert resumen["plantillas_responden_200"] == 0
+    assert resumen["sondas_responden_200"] == []
 
 
 def test_la_raiz_que_responde_200_afecta_a_todo_el_host(sesion):

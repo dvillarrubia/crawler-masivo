@@ -1510,14 +1510,25 @@
    - Convive con `soft_404` y `soft_404_candidato`: aquellos son páginas del
      censo que SON la página de error; este es cómo responde el servidor a lo
      que no conoce. El resumen de `jobs.soft404` lleva
-     `plantillas_responden_200`.
+     `plantillas_responden_200` y `sondas_responden_200` (las URLs pedidas que
+     cuentan). El Resumen y la lista desplegada en Problemas pintan esa lista,
+     no las sondas con 2xx a secas: un muro de WAF servido con 200 saldría como
+     «plantilla que hay que corregir» justo donde el análisis se niega a
+     afirmarlo. Para los censos analizados antes, `resumenSoft404` repite el
+     mismo filtro (sin redirección ni error, 2xx, clase de respuesta válida,
+     sin título de bloqueo, una por host y plantilla).
+   - El tipo va también en `TIPOS_ANCLADOS_POR_GRUPO` de `analysis/soft404.py`,
+     que el test de la r9 (`test_analyzer_paginacion_db.py`) compara con
+     `ANCLADOS_POR_GRUPO`.
    - **Cuándo se calcula**: en el análisis (la sonda se hace durante el
      rastreo y se guarda en `jobs.soft404.sondas`). Los censos ya analizados
      no lo tienen hasta volver a analizarse; el Resumen lo dice igualmente
      desde las sondas («7 plantillas responden 200…») y deja de pintar «0
      páginas» en verde.
    - En Problemas la fila cuenta **plantillas** (de `plantillas_responden_200`),
-     no «1 página», y despliega la lista de plantillas con la URL pedida.
+     no «1 página», y despliega la lista de plantillas con la URL pedida. Con
+     una sección o ruta elegida no se da esa cifra (es del sitio entero, no de
+     la sección): la fila dice que el hallazgo no se reparte.
 
    Tests: `tests/test_soft404_plantilla.py` (el caso Lopesan, lo que no se
    afirma, la raíz, una fila por host y que casa entre censos con otra URL de
