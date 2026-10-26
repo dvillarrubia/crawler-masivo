@@ -1667,11 +1667,13 @@ function app() {
     // con x-html (Alpine 3 inicializa lo insertado) en un contenedor que
     // define `i`, la instancia de ese nivel.
     plantillaCfg() {
-      if (!this._tplCfg) {
+      // Fuera del estado de Alpine: guardarla en `this` dentro del efecto de
+      // x-html lo volvia a disparar y montaba el formulario dos veces.
+      if (_TPL_CFG === null) {
         const t = document.getElementById('tpl-config-niveles');
-        this._tplCfg = t ? t.innerHTML : '';
+        _TPL_CFG = t ? t.innerHTML : '';
       }
-      return this._tplCfg;
+      return _TPL_CFG;
     },
 
     // La instancia de un nivel con su base: lo de arriba ya resuelto por la
@@ -1683,7 +1685,15 @@ function app() {
         const q = nivel === 'rastreo' && ctx.profile_id ? `?profile_id=${ctx.profile_id}` : '';
         r = await api(`/clients/${ctx.cliente_id}/config-resuelta${q}`);
       } else {
-        r = await api('/clients/config-resuelta', { method: 'POST', body: JSON.stringify({ config: {} }) });
+        try {
+          r = await api('/clients/config-resuelta', { method: 'POST', body: JSON.stringify({ config: {} }) });
+        } catch (e) {
+          // Sin lo de serie (una API anterior a la decision 196) el formulario
+          // sigue sirviendo: lo cambiado aqui se manda igual.
+          const inst = cfgNuevo(nivel, { base: {}, propia, ctx });
+          inst.resueltaError = e.message;
+          return { inst, r: {} };
+        }
       }
       const serie = r.serie || r.config;
       const inst = cfgNuevo(nivel, {
@@ -6826,6 +6836,7 @@ const CAMPOS_CONFIG = [
   { ruta: 'analysis_thresholds.max_outlinks', grupo: 'umbrales', etiqueta: 'Enlaces salientes como mucho', tipo: 'entero', min: 1, max: 10000 },
   { ruta: 'analysis_thresholds.tls_dias_aviso', grupo: 'umbrales', etiqueta: 'Avisar del certificado a estos días de caducar', tipo: 'entero', min: 1, max: 90 },
 ];
+let _TPL_CFG = null;
 const CAMPO_CONFIG = Object.fromEntries(CAMPOS_CONFIG.map(c => [c.ruta, c]));
 
 // Las secciones plegables de Configuracion del cliente, en orden (revision de
@@ -7008,8 +7019,18 @@ function cfgParsear(c, texto) {
   return { valor: n };
 }
 
+// Igualdad sin depender del orden de las claves: un objeto que vuelve de la
+// API puede traerlas en otro orden que el borrador.
+function _cfgOrdenado(v) {
+  if (Array.isArray(v)) return v.map(_cfgOrdenado);
+  if (v && typeof v === 'object') {
+    return Object.fromEntries(Object.keys(v).sort().map(k => [k, _cfgOrdenado(v[k])]));
+  }
+  return v;
+}
+
 function _cfgIgual(a, b) {
-  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  return JSON.stringify(_cfgOrdenado(a ?? null)) === JSON.stringify(_cfgOrdenado(b ?? null));
 }
 
 // Cambia un campo en este nivel. Devuelve el error, o ''.

@@ -450,3 +450,13 @@ agrupada; ninguna lectura mas de `links`; y que la regla del `rel` en SQL de
 con `PAGERANK_TEST_DATABASE_URL`, y que el extractor la usa) y, en
 `test_analyzer_paginacion_db.py`, que la paginacion va antes que
 `solo_enlazada_con_nofollow`.
+Configuracion en tres niveles y Ajustes (decision 196): `test_config_niveles.py`
+(API con SQLite: `config-resuelta` dice de que capa sale cada clave y trae lo de
+serie; el borrador de `POST /api/clients/config-resuelta` se valida como al
+guardar y no guarda nada; el aviso del WAF solo con un rastreo anterior parado
+o con muros, con sus cifras, y sin ese rastro nada; `GET /api/ajustes` sin el
+valor de ninguna clave) y `test_config_niveles_frontend.py` (Chromium: los
+limites y las opciones del formulario son los de `JobConfig` —necesita tambien
+pydantic—, heredado/cambiado/«volver al heredado», una cabecera heredada no se
+quita en silencio, al lanzar solo va lo de ese rastreo y el tope del canario, y
+cambiar de cliente o quitarlo conserva lo cambiado).

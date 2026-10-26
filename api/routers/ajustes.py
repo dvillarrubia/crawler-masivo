@@ -23,10 +23,13 @@ def _puesta(nombre: str) -> bool:
 @router.get("/ajustes")
 def ajustes():
     from api.routers.enriquecido import _token_configurado
-    from shared.decisiones import decisiones_activadas, presupuesto_global_mensual
 
+    # Se leen las variables y no `shared.decisiones`: la capa de decisiones no
+    # se importa fuera de su camino (decision 84, test_decisiones_no_se_disparan).
+    # Mismas reglas que `decisiones_activadas` y `presupuesto_global_mensual`.
+    bruto = (os.getenv("ENRICHMENT_MAX_USD_MES") or "").strip()
     try:
-        tope = presupuesto_global_mensual()
+        tope = float(bruto) if bruto else None
     except ValueError:
         tope = None   # mal escrito en el .env: no se inventa una cifra
     return {
@@ -38,6 +41,6 @@ def ajustes():
             "clave_autorizacion": _token_configurado() is not None,
             "tope_mensual_usd": tope,
             # DECISIONS_ENABLED: sin esto la capa no llama aunque haya clave.
-            "activada": decisiones_activadas(),
+            "activada": os.getenv("DECISIONS_ENABLED", "0") == "1",
         },
     }
