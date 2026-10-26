@@ -8,7 +8,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 
 | Fichero | Tema | Decisiones |
 |---|---|---|
-| [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76 |
+| [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76, 193 |
 | [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga, robots.txt y sitemaps en la cola | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140, 172, 173, 174, 186 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124, 153, 154, 155, 187 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137, 156, 160, 164, 167, 170, 171 |
@@ -16,7 +16,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157, 161, 168, 190 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165, 188, 191 |
-| [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151, 189 |
+| [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151, 189, 194 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
 | [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 177, 178, 179, 180, 181, 182, 184, 185 |
 | [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34), su edición y prueba en vivo, y segmentos de negocio | 104, 125, 166 |
@@ -218,6 +218,8 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 189 | La ficha de una URL trae la última inspección de Google (`google_inspeccion`), fechada y con la canonical que elige Google comparada con `misma_url`, no solo cuando no cuadra | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d189) |
 | 190 | Una plantilla que responde 200 a una URL que no existe es UN aviso agrupado por host (`soft_404_plantilla`), aunque ninguna página del censo sea la página de error; el Resumen deja de decir «0 páginas» en verde | [`incidencias`](incidencias.md#d190) |
 | 191 | La comparación automática sella con qué versión del análisis estaban los dos censos, y Problemas solo enseña la diferencia por tipo («+12 frente al 14 oct») si los dos siguen así | [`comparacion-y-alertas`](comparacion-y-alertas.md#d191) |
+| 193 | Una programación cuelga de un perfil (`hereda_perfil`) y en cada disparo hereda la configuración del momento (cliente → perfil → lo suyo), no una copia; las viejas siguen igual hasta migrarlas con `scripts/migrar_programaciones_a_perfiles.py`, que une su serie y sus incidentes a la del perfil; se avisa de las repetidas | [`worker-y-cola`](worker-y-cola.md#d193) |
+| 194 | El alta de un cliente pide nombre y dominio, crea sola el perfil «Sitio principal» con la home (`perfil_principal`) y acaba en «Siguiente paso»: lanzar canario, lanzar censo o programar cada semana | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d194) |
 
 ## Anadir una decision
 

@@ -48,6 +48,17 @@ from api.schemas import (
 
 router = APIRouter(prefix="/api/clients", tags=["clients"])
 
+PERFIL_PRINCIPAL = "Sitio principal"
+
+
+def home_de_dominio(dominio: str) -> str:
+    """`www.cliente.com` -> `https://www.cliente.com/`. Si ya trae esquema se
+    respeta (un staging en http)."""
+    d = dominio.strip().rstrip("/")
+    if not d.startswith(("http://", "https://")):
+        d = "https://" + d
+    return d + "/"
+
 
 # ---------------------------------------------------------------------------
 # Piezas que usan tambien jobs.py y programaciones.py
@@ -153,6 +164,28 @@ def _validar_perfiles_sobre(db: Session, cliente: Client, config_defecto: dict) 
                 status_code=422,
                 detail=f"Con esta configuracion el perfil '{perfil.nombre}' dejaria de ser "
                        f"valido: {exc.detail}") from None
+        # Y lo propio de sus programaciones colgadas (decision 193).
+        _validar_programaciones(db, nuevo, perfil, perfil.config)
+
+
+def _validar_programaciones(db: Session, cliente, perfil: CrawlProfile,
+                            config_perfil: dict | None) -> None:
+    """Las programaciones que heredan de este perfil (decision 193) tienen que
+    seguir siendo validas con su nueva config: el 422 al guardar el perfil, no
+    un disparo que no se lanza el lunes."""
+    from types import SimpleNamespace
+
+    nuevo = SimpleNamespace(config=config_perfil or {})
+    for prog in (db.query(Programacion)
+                 .filter(Programacion.profile_id == perfil.id,
+                         Programacion.hereda_perfil.is_(True)).all()):
+        try:
+            resolver_config(cliente, nuevo, prog.config or {})
+        except HTTPException as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Con esta configuracion la programacion '{prog.nombre}' dejaria "
+                       f"de ser valida: {exc.detail}") from None
 
 
 def nombres_de_clientes(db: Session, ids) -> dict[uuid.UUID, str]:
@@ -695,9 +728,19 @@ def crear_cliente(cuerpo: ClientCreate, db: Session = Depends(get_session)):
         notas=cuerpo.notas,
     )
     db.add(cliente)
+    if cuerpo.perfil_principal and cuerpo.dominios:
+        # Alta guiada (revision de UX del 25-oct, 2.14; decision 194): el
+        # cliente nace con un perfil «Sitio principal» sembrado en la home del
+        # primer dominio, para que el siguiente paso sea lanzar o programar y
+        # no rellenar otro formulario. En la misma transaccion: o los dos o
+        # ninguno.
+        db.flush()
+        db.add(CrawlProfile(
+            cliente_id=cliente.id, nombre=PERFIL_PRINCIPAL, rol="propio",
+            seeds=[home_de_dominio(cuerpo.dominios[0])], config={}, activo=True))
     _commit(db)
     db.refresh(cliente)
-    return _respuesta(cliente)
+    return _respuesta(cliente, _cuentas(db, [cliente.id]).get(cliente.id))
 
 
 @router.get("/{client_id}", response_model=ClientResponse)
@@ -870,6 +913,7 @@ def editar_perfil(
         _nombre_libre(db, client_id, cambios["nombre"], salvo=perfil.id)
     if "config" in cambios:
         _validar_fusion(_buscar(db, client_id), cambios["config"])
+        _validar_programaciones(db, _buscar(db, client_id), perfil, cambios["config"])
     for campo, valor in cambios.items():
         setattr(perfil, campo, valor)
     perfil.updated_at = datetime.now(timezone.utc)
@@ -889,6 +933,12 @@ def borrar_perfil(
     cerrar_serie(db, f"perfil:{perfil.id}", SERIE_BORRADA)
     db.query(Job).filter(Job.profile_id == perfil.id).update(
         {Job.profile_id: None}, synchronize_session=False)
+    # Las que heredan del perfil (decision 193) son parte de el: sin perfil no
+    # tienen semillas que lanzar. Se borran con el; sus rastreos se quedan.
+    # Las de copia fija siguen lanzandose solas, solo pierden el enlace.
+    db.query(Programacion).filter(Programacion.profile_id == perfil.id,
+                                  Programacion.hereda_perfil.is_(True)).delete(
+        synchronize_session=False)
     db.query(Programacion).filter(Programacion.profile_id == perfil.id).update(
         {Programacion.profile_id: None}, synchronize_session=False)
     db.delete(perfil)

@@ -92,8 +92,8 @@ def crear_servidor(api: Callable[[], H.Api] = _api_local, **opciones: Any) -> MC
     @servidor.tool(annotations=LECTURA)
     def alertas(cliente: str, cerradas: bool = False) -> list[dict]:
         """Las alertas con estado de un cliente: abiertas o, con `cerradas`, las cerradas.
-        Con `motivo_cierre` (serie_pausada o serie_borrada) no se resolvieron: se dejo de
-        rastrear su serie y nadie comprobo si siguen."""
+        Con `motivo_cierre` (serie_pausada, serie_borrada o serie_unida) no se resolvieron: se dejo de
+        rastrear su serie, o se unio a la de su perfil que ya la tenia abierta, y nadie comprobo si siguen."""
         return H.alertas(api(), cliente, cerradas)
 
     @servidor.tool(annotations=LECTURA)

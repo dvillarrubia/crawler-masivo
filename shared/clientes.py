@@ -161,6 +161,41 @@ def _fusionar_en(destino: dict, capa: dict, ruta: str = "") -> None:
             destino[clave] = copy.deepcopy(valor)
 
 
+_FALTA = object()
+
+
+def diferencia_de_config(base: dict | None, objetivo: dict | None, _ruta: str = "") -> dict:
+    """Lo minimo que hay que poner encima de `base` para llegar a `objetivo`:
+    `fusionar_config(base, diferencia_de_config(base, objetivo)) == objetivo`.
+
+    Es lo que guarda la migracion de programaciones a perfiles (decision 193):
+    de una copia congelada de la config entera se queda solo lo que de verdad
+    difiere de lo heredado, para que los cambios del cliente sigan llegando.
+    Con las mismas reglas que `fusionar_config`: un dict se baja clave a clave,
+    una regla con nombre (`DICTS_DE_REGLAS`) va ENTERA, una lista se sustituye
+    y lo que `objetivo` no tiene se quita con `None`.
+    """
+    base = base or {}
+    objetivo = objetivo or {}
+    salida: dict = {}
+    en_reglas = _ruta.rstrip(".") in DICTS_DE_REGLAS
+    for clave, valor in objetivo.items():
+        antes = base.get(clave, _FALTA)
+        if valor is None:
+            if antes is not _FALTA:
+                salida[clave] = None
+        elif not en_reglas and isinstance(valor, dict) and isinstance(antes, dict):
+            sub = diferencia_de_config(antes, valor, f"{_ruta}{clave}.")
+            if sub:
+                salida[clave] = sub
+        elif valor != antes:
+            salida[clave] = copy.deepcopy(valor)
+    for clave in base:
+        if clave not in objetivo:
+            salida[clave] = None
+    return salida
+
+
 # ---------------------------------------------------------------------------
 # Cliente a partir de un texto (compatibilidad con `client_id`)
 # ---------------------------------------------------------------------------

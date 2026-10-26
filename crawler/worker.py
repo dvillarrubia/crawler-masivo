@@ -1437,7 +1437,7 @@ def _lanzar_programados(rconn) -> None:
     from shared.database import SessionLocal
     from shared.models import Job, Programacion
     from shared.programaciones import (
-        hay_rastreo_vivo, job_desde_programacion, proxima_desde, toca_lanzar,
+        hay_rastreo_vivo, proxima_desde, resolver_disparo, toca_lanzar,
     )
 
     session = None
@@ -1465,8 +1465,17 @@ def _lanzar_programados(rconn) -> None:
                     "el rastreo anterior de esta programacion sigue sin "
                     "terminar; no se encola otro encima")
 
+            datos = None
             if lanzar:
-                datos = job_desde_programacion(prog)
+                # Colgada de un perfil (decision 193): semillas y config del
+                # MOMENTO (cliente -> perfil -> lo suyo). De copia fija: lo que
+                # guardo al crearse, como siempre. Si su perfil ya no existe o
+                # esta desactivado, no se lanza y se dice por que.
+                datos, sin_lanzar = resolver_disparo(session, prog)
+                if datos is None:
+                    lanzar, motivo = False, sin_lanzar
+
+            if lanzar:
                 # El cliente y el perfil se copian tal cual de la programacion
                 # (#36). El worker NO crea clientes a partir del texto: si la
                 # programacion es anterior a la migracion, el job sale solo

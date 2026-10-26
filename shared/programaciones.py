@@ -172,21 +172,31 @@ def toca_lanzar(
                   else "toca")
 
 
+VIVOS = ("pending", "running", "analyzing")
+
+
 def hay_rastreo_vivo(db, programacion) -> bool:
-    """Si esta programación ya tiene un rastreo sin terminar.
+    """Si esta programación ya tiene un rastreo sin terminar, o lo tiene su
+    perfil (lanzado a mano o por otra programación del mismo perfil).
 
     Un rastreo semanal que tarda nueve dias encolaria el siguiente encima del
     que corre. En una maquina de 2 vCPU eso no es ir mas lento: es que se caen
-    los dos.
+    los dos. Y con el perfil como unidad (decision 193), dos rastreos vivos del
+    mismo perfil son el mismo sitio rastreado dos veces a la vez.
     """
     from shared.models import Job
 
-    if not programacion.ultimo_job_id:
+    if programacion.ultimo_job_id:
+        estado = (
+            db.query(Job.status).filter(Job.id == programacion.ultimo_job_id).scalar()
+        )
+        if estado in VIVOS:
+            return True
+    perfil = getattr(programacion, "profile_id", None)
+    if perfil is None:
         return False
-    estado = (
-        db.query(Job.status).filter(Job.id == programacion.ultimo_job_id).scalar()
-    )
-    return estado in ("pending", "running", "analyzing")
+    return db.query(Job.id).filter(
+        Job.profile_id == perfil, Job.status.in_(VIVOS)).first() is not None
 
 
 def job_desde_programacion(programacion) -> dict[str, Any]:
@@ -205,3 +215,180 @@ def job_desde_programacion(programacion) -> dict[str, Any]:
         "seeds": list(programacion.seeds or []),
         "config": dict(programacion.config or {}),
     }
+
+
+# ---------------------------------------------------------------------------
+# El perfil como unidad (decision 193, revision de UX del 25-oct, 2.2)
+# ---------------------------------------------------------------------------
+# Lo que dice el worker cuando una programacion colgada de un perfil no se
+# puede lanzar. Van a `ultimo_motivo` y la interfaz los traduce (fmt.motivo).
+SIN_PERFIL = "su perfil ya no existe"
+PERFIL_DESACTIVADO = "el perfil esta desactivado"
+PERFIL_SIN_SEMILLAS = "el perfil no tiene semillas"
+# `incidentes.motivo_cierre` de un incidente que se cerro al unir la serie de
+# una programacion a la de su perfil (ya habia uno vivo igual en el perfil).
+SERIE_UNIDA = "serie_unida"
+
+_DEFECTO: dict | None = None
+
+
+def config_por_defecto() -> dict[str, Any]:
+    """Los valores por defecto de `JobConfig`, para el worker.
+
+    La imagen del worker no lleva la API (ni Pydantic), y un job lanzado por la
+    API sale con la config entera, defaults incluidos. Para que un disparo
+    salga igual que un rastreo lanzado a mano desde el perfil, la base es esta
+    copia en `shared/config_por_defecto.json`; un test la compara con
+    `JobConfig()` y falla en cuanto se desfasen.
+    """
+    global _DEFECTO
+    if _DEFECTO is None:
+        import json
+        from pathlib import Path
+
+        _DEFECTO = json.loads(
+            (Path(__file__).with_name("config_por_defecto.json")).read_text("utf-8"))
+    import copy
+
+    return copy.deepcopy(_DEFECTO)
+
+
+def config_del_momento(cliente, perfil, propia: dict | None) -> dict[str, Any]:
+    """defaults <- cliente <- perfil <- lo propio de la programacion, AHORA.
+
+    Mismo orden que `api.routers.clientes.resolver_config`. Primero se funden
+    las tres capas y despues se ponen debajo los defaults: un `None` de una
+    capa quita lo heredado y deja el valor por defecto, como en la API.
+    """
+    from shared.clientes import fusionar_config
+
+    capas = fusionar_config(
+        (getattr(cliente, "config_defecto", None) if cliente is not None else None) or {},
+        (perfil.config if perfil is not None else None) or {},
+        propia or {},
+    )
+    return fusionar_config(config_por_defecto(), capas)
+
+
+def resolver_disparo(db, programacion) -> tuple[dict[str, Any] | None, str | None]:
+    """El job que toca crear ahora, o por que no se puede.
+
+    Devuelve `(datos, None)` o `(None, motivo)`. Una programacion de copia
+    fija sale como siempre (`job_desde_programacion`). Una colgada de un
+    perfil lee el perfil y el cliente EN ESTE MOMENTO: sus semillas y su
+    configuracion son las de hoy, no las del dia en que se programo.
+    """
+    if not getattr(programacion, "hereda_perfil", False):
+        return job_desde_programacion(programacion), None
+
+    from shared.models import Client, CrawlProfile
+
+    perfil = (db.get(CrawlProfile, programacion.profile_id)
+              if programacion.profile_id else None)
+    if perfil is None:
+        return None, SIN_PERFIL
+    if not perfil.activo:
+        return None, PERFIL_DESACTIVADO
+    semillas = [u for u in (perfil.seeds or []) if u]
+    if not semillas:
+        return None, PERFIL_SIN_SEMILLAS
+    cliente = db.get(Client, perfil.cliente_id)
+    hoy = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return {
+        "name": f"{programacion.nombre} · {hoy}",
+        "client_id": cliente.slug if cliente is not None else programacion.client_id,
+        "cliente_id": perfil.cliente_id,
+        "profile_id": perfil.id,
+        "seeds": semillas,
+        "config": config_del_momento(cliente, perfil, programacion.config),
+    }, None
+
+
+def semillas_efectivas(programacion, perfiles: dict | None = None) -> list[str]:
+    """Las semillas que lanzaria hoy: las del perfil si hereda, las suyas si no."""
+    if getattr(programacion, "hereda_perfil", False):
+        perfil = (perfiles or {}).get(programacion.profile_id)
+        return list(perfil.seeds or []) if perfil is not None else []
+    return list(programacion.seeds or [])
+
+
+def repetidas(programaciones, perfiles: dict | None = None) -> dict[Any, list[dict[str, Any]]]:
+    """Las programaciones ACTIVAS que repiten trabajo de otra activa: mismo
+    perfil o mismas semillas (V06: Lopesan tuvo dos semanales activas que
+    rastreaban lo mismo y hacian dos series iguales).
+
+    Devuelve `{id: [{"id", "nombre", "motivo"}]}` solo para las que tienen
+    alguna repetida. No bloquea nada: dos del mismo perfil pueden ser a
+    proposito (un canario diario y un censo semanal); se avisa y decide quien
+    lo ve.
+    """
+    activas = [p for p in programaciones if p.activa]
+    claves = {p.id: frozenset(semillas_efectivas(p, perfiles)) for p in activas}
+    salida: dict[Any, list[dict[str, Any]]] = {}
+    for a in activas:
+        for b in activas:
+            if a.id == b.id:
+                continue
+            motivo = None
+            if a.profile_id and a.profile_id == b.profile_id:
+                motivo = "mismo perfil"
+            elif claves[a.id] and claves[a.id] == claves[b.id]:
+                motivo = "mismas semillas"
+            if motivo:
+                salida.setdefault(a.id, []).append(
+                    {"id": b.id, "nombre": b.nombre, "motivo": motivo})
+    return salida
+
+
+def unir_serie_al_perfil(db, programacion, perfil) -> dict[str, int]:
+    """Cuelga del perfil lo que ya lanzo una programacion de copia fija: sus
+    rastreos y sus incidentes pasan a la serie «perfil:<id>».
+
+    Sin esto, migrar una programacion partiria su historia en dos: los puntos
+    viejos seguirian en «programacion:<id>» y los nuevos en «perfil:<id>», y la
+    grafica enseñaria dos series del mismo sitio (lo que ya pasaba en V06).
+
+    - Rastreos: los suyos sin perfil reciben `profile_id` (y `cliente_id` si no
+      tenian). Los que ya tenian otro perfil no se tocan.
+    - Incidentes: los de su serie pasan a la del perfil. Si el perfil ya tiene
+      vivo uno con la misma clave, el de la programacion se cierra con motivo
+      «serie_unida» (sin afirmar que el fallo se fue) para no dejar dos vivos.
+    No hace commit. Devuelve cuantos movio.
+    """
+    from shared.incidentes import CERRADO, VIVOS as INC_VIVOS
+    from shared.models import CrawlProfile, Incidente, Job
+
+    n_jobs = (db.query(Job)
+              .filter(Job.programacion_id == programacion.id, Job.profile_id.is_(None))
+              .update({Job.profile_id: perfil.id}, synchronize_session=False))
+    db.query(Job).filter(Job.programacion_id == programacion.id,
+                         Job.cliente_id.is_(None)).update(
+        {Job.cliente_id: perfil.cliente_id}, synchronize_session=False)
+
+    vieja, nueva = f"programacion:{programacion.id}", f"perfil:{perfil.id}"
+    vivas_perfil = {i.clave for i in db.query(Incidente).filter(
+        Incidente.serie == nueva, Incidente.estado.in_(INC_VIVOS))}
+    ahora = datetime.now(timezone.utc)
+    n_inc = n_cerrados = 0
+    for inc in db.query(Incidente).filter(Incidente.serie == vieja).all():
+        if inc.estado in INC_VIVOS:
+            if inc.clave in vivas_perfil:
+                inc.estado = CERRADO
+                inc.cerrado_en = ahora
+                inc.motivo_cierre = SERIE_UNIDA
+                n_cerrados += 1
+            else:
+                vivas_perfil.add(inc.clave)
+        inc.serie = nueva
+        inc.nombre_serie = perfil.nombre
+        inc.actualizado_en = ahora
+        n_inc += 1
+    db.flush()
+
+    ultimo = (db.query(Job.id).filter(Job.profile_id == perfil.id)
+              .order_by(Job.created_at.desc()).first())
+    if ultimo is not None:
+        db.query(CrawlProfile).filter(CrawlProfile.id == perfil.id).update(
+            {CrawlProfile.last_job_id: ultimo[0]}, synchronize_session=False)
+    return {"rastreos": n_jobs, "incidentes": n_inc, "incidentes_cerrados": n_cerrados}
+

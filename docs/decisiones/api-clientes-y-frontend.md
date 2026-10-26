@@ -553,3 +553,24 @@
      sin el campo, usa los detalles de los avisos y, sin ellos, «no consta».
    - Best-effort: el `try` cubre la función entera; un fallo deja la ficha
      igual, sin el campo. Test: `tests/test_ficha_url_google.py`.
+
+<a id="d194"></a>
+194. **El alta de un cliente pide nombre y dominio, crea sola un perfil «Sitio principal» y acaba en el siguiente paso**
+
+   **Problema.** Dar de alta un cliente abría el formulario entero de
+   Configuración (JSON incluido) y, al guardar, se quedaba ahí, sin perfil y
+   sin decir qué hacer después (revisión de UX del 25-oct, V37). Para el
+   primer censo hacía falta además crear un perfil a mano.
+
+   **Decisión.** `POST /api/clients` acepta `perfil_principal: true`: en la
+   misma transacción crea el perfil «Sitio principal» con la home del primer
+   dominio como semilla (`https://<dominio>/`; los dominios ya se guardan sin
+   esquema ni ruta). Sin dominio no crea nada. La interfaz pide solo nombre y
+   dominio y abre la ficha en Estado con «Siguiente paso: el primer censo»:
+   «Lanzar canario» y «Lanzar censo» abren el modal de lanzar ya con el
+   cliente y el perfil (el del canario destaca su botón y explica que son 250
+   páginas que no cuentan en la evolución; nada se lanza sin confirmarlo en el
+   modal) y «Programar cada semana» abre la programación del perfil (decisión
+   193), lunes a las 03:00 de Madrid. El bloque sale mientras el cliente no
+   tenga ningún censo ni rastreo en marcha y tenga un perfil propio activo.
+   Test: `tests/test_programaciones_perfil.py` (alta con y sin perfil).

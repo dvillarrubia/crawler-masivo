@@ -89,7 +89,7 @@
 | GET | `/health` | Health check |
 | POST | `/api/jobs` | Create crawl job |
 | GET | `/api/jobs` | List jobs (`?status=`, `?client_id=` —UUID, slug o el texto viejo—, `?profile_id=`, `?page=`) |
-| GET/POST | `/api/clients` | Listar / crear clientes |
+| GET/POST | `/api/clients` | Listar / crear clientes. Al crear, `perfil_principal: true` crea tambien el perfil «Sitio principal» con la home del primer dominio (alta guiada, decision 194) |
 | GET/PATCH/DELETE | `/api/clients/{id}` | Ficha, edicion y borrado (`?confirmar=<slug>`, `?con_jobs=`) |
 | GET/POST | `/api/clients/{id}/profiles` | Perfiles de rastreo del cliente |
 | GET/PATCH/DELETE | `/api/clients/{id}/profiles/{pid}` | Un perfil |
@@ -97,6 +97,8 @@
 | GET | `/api/clients/{id}/serie` | Los `?limite=` (30) rastreos mas recientes del cliente con sus cifras (`urls`, `paginas_html`, `indexables`, `errores`, `avisos`) y, de su comparacion automatica, `alertas`, `alertas_criticas`, `comparado_con` y `fecha_anterior` (la fecha de la referencia, aunque no este en la serie) |
 | GET | `/api/clients/{id}/evolucion` | Evolucion del cliente (decision 130): una serie por perfil (o programacion, o host) con los puntos de `profile_runs`, `comparable`/`motivo`, `cambio_version` y `tendencia_errores`; `?profile_id=`, `?limite=` (26). `sin_agregado` = terminados sin fila |
 | GET | `/api/clients/{id}/profiles/{pid}/evolucion` | Lo mismo, solo el perfil |
+| GET/POST | `/api/programaciones` | Listar (`?activa=`, `?client_id=`, `?cliente_id=`, `?profile_id=`, `?resumen=true` = solo tres semillas) / crear. Cada fila trae `hereda_perfil`, `cliente_nombre`, `perfil_nombre`, `n_semillas`, las `seeds` que lanzaria HOY y `repetida_con` (otras activas del mismo perfil o con las mismas semillas). Crear colgada de un perfil (decision 193): `profile_id`, `cron`, `zona_horaria` y opcional `nombre` y `config_propia` (parcial, validada sobre el cliente y el perfil); con `seeds` y `config` completas, copia fija como antes |
+| GET/PATCH/DELETE | `/api/programaciones/{id}` | Una programacion. PATCH: `nombre`, `cron`, `zona_horaria`, `activa` y, solo en las colgadas, `config_propia` (422 en una copia fija). Pausar o borrar cierra su serie de incidentes (decision 188) |
 | GET | `/api/clients/{id}/trafico` | Trafico de Google entre censos para la ficha del cliente (decision 165): el ultimo de cada perfil entre los `?limite=` (30) rastreos mas recientes con comparacion, con `textos` del mismo redactor que la ficha del rastreo y Slack (`trafico_entre_censos.textos`), `pendiente`, `general` y `aviso`. Sin los perfiles de la competencia |
 | GET | `/api/enrichment/modulos` | Modulos del analisis enriquecido y si lanzar esta activado (decision 85) |
 | POST | `/api/jobs/{id}/enrichment/estimate` | Llamadas tras la cache, tokens, coste, tiempo y gasto del mes del cliente. No gasta nada |

@@ -129,3 +129,78 @@
    punto, `*/15` devuelve las 12:00:00—, y como al disparar se recalcula desde
    la hora actual, un disparo que cayera justo en el minuto se quedaría con su
    propia hora y se repetiría en cada vuelta del bucle.
+
+<a id="d193"></a>
+193. **Una programación cuelga de un perfil y en cada disparo hereda la configuración del momento, no una copia congelada; la serie y los incidentes son del perfil**
+
+   **Problema.** Perfil, programación y serie de evolución eran tres cosas
+   desconectadas (revisión de UX del 25-oct, V06, V07 y V44). Una programación
+   guardaba una COPIA de las semillas y la configuración del rastreo del que se
+   creó: un cambio en el cliente o en el perfil (otro UA contra un WAF, una
+   carpeta excluida) no llegaba nunca al censo del lunes, y nada lo decía. Cada
+   programación hacía su serie («programacion:<id>»), aparte de la del perfil.
+   En Lopesan, el 26-oct: un perfil «lista» nunca lanzado, tres programaciones
+   «lopesan.com (semanal)» con las mismas 3.040 semillas (dos estuvieron
+   activas a la vez la semana anterior, gastando producción dos veces) y dos
+   series iguales en la gráfica. Programados no dejaba crear ni editar, y la
+   única forma de programar era desde la ficha de un rastreo viejo.
+
+   **Decisión.**
+   - `programaciones.hereda_perfil` (bool, por defecto falso). Verdadero = la
+     programación cuelga de su perfil: `seeds` queda vacía y `config` guarda
+     solo lo propio de la programación (p. ej. un tope de URLs). El worker
+     (`shared.programaciones.resolver_disparo`) lee en cada disparo el perfil
+     y el cliente de ESE momento: semillas del perfil y config = defaults ←
+     cliente ← perfil ← lo propio, en el mismo orden que la API
+     (`resolver_config`). Si el perfil ya no existe, está desactivado o no tiene
+     semillas, no se lanza y `ultimo_motivo` lo dice.
+   - La imagen del worker no lleva la API ni Pydantic, así que los defaults de
+     `JobConfig` van copiados en `shared/config_por_defecto.json` y un test los
+     compara con `JobConfig()`: un campo nuevo sin regenerar la copia hace
+     fallar la suite, no el censo. La validación de la mezcla se hace al
+     ESCRIBIR: crear o editar la programación (lo propio sobre cliente y
+     perfil), editar el perfil o el cliente (sus programaciones colgadas tienen
+     que seguir siendo válidas: 422 al guardar, no un disparo que no sale).
+   - No se encola si el perfil ya tiene un rastreo vivo, aunque lo lanzara otra
+     programación o una persona: es el mismo sitio dos veces a la vez.
+   - Las de copia fija (las que había) siguen funcionando igual: compatibilidad
+     hasta migrarlas. `POST /api/programaciones` con `seeds` y `config`
+     completas sigue creando una copia fija (scripts, MCP con semillas propias);
+     con `profile_id` y sin semillas crea una colgada. El MCP (`programar_rastreo`)
+     cuelga del perfil cuando se programa un perfil sin semillas propias.
+   - Repetidas: `GET /api/programaciones` dice en `repetida_con` qué otras
+     activas repiten el trabajo (mismo perfil o mismas semillas efectivas). No
+     se bloquea —un canario diario y un censo semanal del mismo perfil pueden ser
+     a propósito—: se avisa en Programados, en el perfil y antes de crear otra.
+   - Borrar un perfil borra sus programaciones colgadas (sin perfil no tienen
+     qué lanzar); las de copia fija solo pierden el enlace, como antes. Sus
+     rastreos se quedan.
+   - **Series históricas.** Lo que identifica la serie sigue siendo
+     `serie_de_job`/`clave_de_serie`: el perfil si el job lo tiene. Migrar una
+     programación sin tocar sus rastreos partiría la gráfica en dos (los puntos
+     viejos en «programacion:<id>», los nuevos en «perfil:<id>»). Por eso
+     `unir_serie_al_perfil` da `profile_id` a los rastreos que lanzó (solo a
+     los que no tenían perfil) y pasa sus incidentes a «perfil:<id>»; si el
+     perfil ya tenía vivo uno con la misma clave, el de la programación se
+     cierra con `motivo_cierre = 'serie_unida'` (sin afirmar que el fallo se
+     fue, decisiones 67 y 89), para que no haya dos vivos. Así las tres
+     programaciones de Lopesan acaban en UNA serie «Sitio completo» con sus
+     cinco censos. La comparación automática (`censo_anterior`) no cambia:
+     sigue buscando primero el anterior de la misma programación, que es lo
+     que evita comparar un censo con un canario lanzado a mano (decisión 78).
+   - `scripts/migrar_programaciones_a_perfiles.py`, en simulación por defecto
+     (`--confirmar` para aplicar): para cada programación de copia fija con
+     cliente, reutiliza el perfil del cliente con exactamente las mismas
+     semillas o crea «Sitio completo» con, como config, solo lo que la copia
+     tiene de distinto respecto al cliente (`shared.clientes.diferencia_de_config`);
+     la cuelga (lo propio = lo que difiere del perfil) y une su serie. Antes de
+     tocar nada comprueba que lo que lanzaría el siguiente disparo es lo mismo
+     que antes; si no cuadra, o si la copia lleva contraseña de autenticación
+     básica (un perfil no guarda contraseñas, decisión 83), la deja como está y
+     dice por qué. Las activas van primero, para que el perfil salga de la que
+     se lanza. Idempotente. NO se ha ejecutado en producción.
+
+   Tests: `tests/test_programaciones_perfil.py` (disparo con lo del momento,
+   copia fija igual que antes, perfil desactivado o sin semillas, rastreo vivo
+   del perfil, borrado, validaciones, repetidas, migración en simulación y de
+   verdad sobre el caso Lopesan, serie única en la evolución, defaults al día).
