@@ -1955,7 +1955,7 @@
           <div class="card mb-2">
             <div class="veredicto-titulo">
               Extracción a medida
-              <a href="#" class="text-sm" style="margin-left:auto" @click.prevent="verAMedida(resumenAMedida.reglas[0].nombre, null)">ver en el Explorador</a>
+              <a href="#" class="text-sm" style="margin-left:auto" @click.prevent="verAMedida(resumenAMedida.reglas[0].nombre, null)">ver en URLs</a>
             </div>
             <template x-if="resumenAMedida.render_js">
               <div class="text-sm text-dim">Se extrae del DOM renderizado y sin banners: una etiqueta que inyecta el JavaScript sí está; un banner que el rastreo quitó, no.</div>
@@ -3088,7 +3088,7 @@
                            exportables (docs/INVESTIGACION_EXPLORADOR.md). -->
                       <button class="btn btn-sm" @click="verProblemaEnExplorador(r.issue_type)">
                         <i data-lucide="table-2" style="width:13px;height:13px"></i>
-                        Ver las <span x-text="fmt.num(r.paginas)"></span> páginas
+                        Ver las <span x-text="fmt.num(r.paginas)"></span> páginas en URLs
                       </button>
                     </div>
                   </div>
@@ -4842,7 +4842,7 @@
                           x-text="fmt.num(urlDetail.inlinks?.length || 0) + ((urlDetail.inlinks?.length || 0) >= 200 ? ' primeras filas: hay más' : ' filas')"></span>
                   </div>
                   <div class="text-sm text-dim" style="margin-bottom:.5rem" x-show="(urlDetail.inlinks?.length || 0) >= 200"
-                       x-text="'La ficha trae como mucho 200 filas. El análisis cuenta ' + fmt.num(urlDetail.inlinks_count || 0) + ' enlaces internos que llegan aquí (por aparición). La lista entera: Explorador › CSV › Enlaces que apuntan a estas URLs.'"></div>
+                       x-text="'La ficha trae como mucho 200 filas. El análisis cuenta ' + fmt.num(urlDetail.inlinks_count || 0) + ' enlaces internos que llegan aquí (por aparición). La lista entera: pestaña URLs › CSV › Enlaces que apuntan a estas URLs.'"></div>
                   <template x-if="urlDetail.inlinks && urlDetail.inlinks.length > 0">
                     <div class="table-wrap">
                       <table>
@@ -6393,7 +6393,7 @@
         <div x-show="createForm.configTab === 'extraccion'" class="xm-pestana" data-testid="pestana-extraccion">
           <p class="text-sm text-dim xm-intro">
             Datos que se sacan de cada página HTML 2xx del rastreo (precio, SKU, autor…): salen como
-            columnas <code>x.&lt;nombre&gt;</code> en el Explorador y en el CSV. Una página sin fila es
+            columnas <code>x.&lt;nombre&gt;</code> en la pestaña URLs y en el CSV. Una página sin fila es
             «no evaluada», que no es «vacía».
           </p>
           <template x-if="!createForm.extraccion.length">
