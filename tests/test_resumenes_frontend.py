@@ -118,6 +118,44 @@ def test_tls_lee_el_estado_de_cada_host():
     assert por_host["proxy.x.com"]["nivel"] == "dim"
 
 
+def test_tls_marca_renovar_a_30_dias():
+    filas = _con_job({"config": {}, "tls": {"hosts": {
+        "a.x": {"verificado": True, "dias_restantes": 14.5},
+        "b.x": {"verificado": True, "dias_restantes": 31},
+        "c.x": {"verificado": False, "motivo": "caducado", "dias_restantes": -3}}}},
+        "return filasTls(job).map(f => [f.host, f.nivel, f.renovar]);")
+    assert filas == [["a.x", "green", True], ["b.x", "green", False], ["c.x", "red", False]]
+
+
+ROBOTS = {"bots": [{"bot": "googlebot", "token": "Googlebot", "tipo": "buscador"},
+                   {"bot": "gptbot", "token": "GPTBot", "tipo": "entrenamiento"},
+                   {"bot": "oai", "token": "OAI-SearchBot", "tipo": "busqueda_ia"}]}
+
+
+def test_robots_en_una_frase():
+    nada = _evaluar("() => resumenRobots(" + json.dumps({**ROBOTS, "hosts": [
+        {"origen": "https://a.x", "bots": {"googlebot": {"alcance": "nada"}, "gptbot": {"alcance": "nada"}}},
+        {"origen": "https://www.a.x", "bots": {"googlebot": {"alcance": "nada"}}}]}) + ")")
+    assert nada["texto"].startswith("Ningún bot bloqueado") and "2 hosts" in nada["texto"]
+    assert nada["nivel"] == "" and nada["abrir"] is False
+    algo = _evaluar("() => resumenRobots(" + json.dumps({**ROBOTS, "hosts": [
+        {"origen": "https://a.x", "bots": {"gptbot": {"alcance": "todo"}, "oai": {"alcance": "parte"}}}]}) + ")")
+    assert algo["texto"] == "Bloqueados: GPTBot (todo en https://a.x), OAI-SearchBot (una parte en https://a.x)."
+    assert algo["nivel"] == "orange" and algo["abrir"] is True
+    grave = _evaluar("() => resumenRobots(" + json.dumps({**ROBOTS, "hosts": [
+        {"origen": "https://a.x", "bots": {"oai": {"alcance": "todo"}}}, {"origen": "https://b.x", "bots": None}]}) + ")")
+    assert grave["nivel"] == "red" and grave["sin_evaluar"] == 1
+    # Un host sin evaluar (robots.txt inaccesible) no deja decir «ninguno»
+    # sin mas: se dice, en naranja, y el detalle se abre.
+    mezcla = _evaluar("() => resumenRobots(" + json.dumps({**ROBOTS, "hosts": [
+        {"origen": "https://a.x", "bots": {"googlebot": {"alcance": "nada"}}},
+        {"origen": "https://b.x", "bots": None}, {"origen": "https://c.x", "bots": None}]}) + ")")
+    assert mezcla["texto"] == ("Ningún bot bloqueado en la home ni en la muestra del host evaluado. "
+                               "2 hosts sin evaluar: mira su robots.txt en el detalle.")
+    assert mezcla["nivel"] == "orange" and mezcla["abrir"] is True
+    assert _evaluar("() => resumenRobots({hosts: []})") is None
+
+
 def test_tls_usa_el_umbral_del_job():
     filas = _con_job({"config": {"analysis_thresholds": {"tls_dias_aviso": 2}}, "tls": TLS},
                      "return filasTls(job).find(f => f.host === 'pronto.x.com').estado;")

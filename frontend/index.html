@@ -2572,6 +2572,12 @@
               <div class="card" style="grid-column:1/-1">
                 <div class="card-header"><h2>robots.txt por bot</h2>
                   <span class="text-sm text-dim">Home y una muestra por plantilla, sin pedir nada al sitio</span></div>
+                <!-- Una frase arriba y las tablas plegadas (revision de UX del
+                     25-oct, 1.16): eran doce filas por host casi siempre iguales. -->
+                <div class="text-sm" data-testid="robots-resumen" :class="resumenRobots(robotsBots).nivel"
+                     x-text="resumenRobots(robotsBots).texto"></div>
+                <details class="mt-1" :open="resumenRobots(robotsBots).abrir">
+                <summary class="text-sm text-dim" style="cursor:pointer">Detalle por bot y por host</summary>
                 <p class="text-sm text-dim">Bloquear un bot de <b>entrenamiento</b> (GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, CCBot) es una decisión legítima y no saca de ninguna búsqueda. Bloquear uno de <b>búsqueda de IA</b> (OAI-SearchBot, Claude-SearchBot, PerplexityBot) saca al sitio de esas respuestas. Los de <b>usuario</b> (ChatGPT-User, Claude-User) son descargas que pide una persona en el chat.</p>
                 <template x-for="h in robotsBots.hosts" :key="h.origen">
                   <div class="mb-2">
@@ -2601,6 +2607,7 @@
                     </template>
                   </div>
                 </template>
+                </details>
                 <!-- robots.txt de prueba (decision 171): el veredicto y la linea
                      que decide, con la logica del crawler y sin descargar nada. -->
                 <details class="mt-2" data-testid="robots-prueba">
@@ -2707,7 +2714,9 @@
                         <td :class="t.nivel === 'dim' ? 'text-dim' : t.nivel" x-text="t.estado"></td>
                         <td x-text="t.emisor || '—'"></td>
                         <td x-text="t.caduca ? fmt.dia(t.caduca) : '—'"></td>
-                        <td x-text="t.dias == null ? '—' : fmt.num(t.dias)"></td>
+                        <td :class="t.renovar && t.nivel === 'green' ? 'orange' : ''"
+                            :title="t.renovar && t.nivel === 'green' ? 'Faltan 30 días o menos: conviene renovarlo' : ''"
+                            x-text="t.dias == null ? '—' : fmt.num(t.dias) + (t.renovar && t.nivel === 'green' ? ' · renovar' : '')"></td>
                         <td x-text="t.version || '—'"></td>
                       </tr>
                     </template>
