@@ -196,6 +196,42 @@ def diferencia_de_config(base: dict | None, objetivo: dict | None, _ruta: str = 
     return salida
 
 
+# Dicts que se leen como UN valor al decir de donde viene: una cabecera, una
+# cookie, un tope o una regla con nombre no tienen «campos» que heredar por
+# separado en la interfaz (decision 196).
+DICTS_COMO_VALOR = DICTS_DE_REGLAS + (
+    "topes_por_carpeta", "http.custom_headers", "http.cookies")
+
+
+def origen_de_config(*capas: tuple[str, dict | None]) -> dict[str, str]:
+    """De que capa sale cada clave de la configuracion resuelta (decision 196).
+
+    `capas` va de la mas general a la mas concreta: `("cliente", {...})`,
+    `("perfil", {...})`, `("rastreo", {...})`. Devuelve `{"ruta.con.puntos":
+    nombre de la capa}` para cada hoja que fija alguna capa; la mas concreta
+    gana. Un `None` explicito tambien cuenta: esa capa ha QUITADO lo heredado
+    y lo que queda es el valor de serie, pero lo ha decidido ella. Lo que no
+    sale aqui es el valor de serie de `JobConfig`.
+
+    Mismas reglas que `fusionar_config`: un dict se baja clave a clave, salvo
+    los de `DICTS_COMO_VALOR`, que cuentan enteros.
+    """
+    salida: dict[str, str] = {}
+
+    def bajar(capa: dict, nombre: str, ruta: str) -> None:
+        for clave, valor in capa.items():
+            aqui = f"{ruta}{clave}"
+            if isinstance(valor, dict) and aqui not in DICTS_COMO_VALOR:
+                bajar(valor, nombre, aqui + ".")
+            else:
+                salida[aqui] = nombre
+
+    for nombre, capa in capas:
+        if capa:
+            bajar(capa, nombre, "")
+    return salida
+
+
 # ---------------------------------------------------------------------------
 # Cliente a partir de un texto (compatibilidad con `client_id`)
 # ---------------------------------------------------------------------------

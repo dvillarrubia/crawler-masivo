@@ -1737,11 +1737,25 @@ class ProfileResponse(BaseModel):
     avisos: list[str] = Field(default_factory=list)
 
 
+class AvisoDeConfig(BaseModel):
+    nivel: Literal["peligro", "aviso", "info"]
+    texto: str
+    # La clave de la configuracion a la que se refiere, si es una.
+    campo: str | None = None
+
+
+class ProgramacionPropia(BaseModel):
+    id: uuid.UUID
+    nombre: str
+    claves: list[str] = Field(default_factory=list)
+
+
 class ConfigResueltaResponse(BaseModel):
     """La configuracion que tendria un job lanzado ahora desde este cliente
     (y perfil): para precargar el modal con lo heredado."""
 
-    cliente_id: uuid.UUID
+    # None en un borrador sin cliente (decision 196).
+    cliente_id: uuid.UUID | None = None
     profile_id: uuid.UUID | None = None
     seeds: list[str] = Field(default_factory=list)
     # Completa: lo que tendria el job (defaults incluidos).
@@ -1750,6 +1764,30 @@ class ConfigResueltaResponse(BaseModel):
     # el modal: con la completa, un default de la API (el UA `SEOCrawler/1.0`)
     # pisaria el del formulario sin que nadie lo hubiera elegido.
     config_heredada: dict[str, Any] = Field(default_factory=dict)
+    # Decision 196 (revision de UX del 25-oct, 2.4): de donde sale cada clave
+    # de `config` («cliente», «perfil» o el nivel del borrador); lo que no
+    # sale es el valor de serie, que va entero en `serie`. Con `avisos`, el
+    # bloque «Así rastreará» de la interfaz.
+    origen: dict[str, str] = Field(default_factory=dict)
+    serie: dict[str, Any] = Field(default_factory=dict)
+    avisos: list[AvisoDeConfig] = Field(default_factory=list)
+    # Las programaciones del perfil que cambian algo por su cuenta
+    # (`config_propia`, decision 193): el proximo disparo lleva ademas eso.
+    programaciones: list[ProgramacionPropia] = Field(default_factory=list)
+
+
+class ConfigBorrador(BaseModel):
+    """`POST /api/clients/config-resuelta` (decision 196): la configuracion
+    con la que saldria un rastreo si `config` fuera la del `nivel` indicado,
+    sin guardar nada. Es lo que pinta el bloque «Así rastreará» mientras se
+    edita el formulario del cliente, del perfil o del rastreo."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cliente_id: uuid.UUID | None = None
+    profile_id: uuid.UUID | None = None
+    nivel: Literal["cliente", "perfil", "rastreo"] = "rastreo"
+    config: dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

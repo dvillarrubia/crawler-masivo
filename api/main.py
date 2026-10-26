@@ -19,7 +19,7 @@ from api import dependencies
 from api.auth import AutenticacionMiddleware, desactivada, token_configurado
 from api.mcp_despacho import DespachoMcp, EstadoMcp
 from api.routers import (
-    almacenamiento, cleaning, clientes, compartido, credenciales, enriquecido, extraccion, jobs, programaciones,
+    ajustes, almacenamiento, cleaning, clientes, compartido, credenciales, enriquecido, extraccion, jobs, programaciones,
     results, robots_prueba, segmentos, semantic, sesion, uso,
 )
 
@@ -123,6 +123,7 @@ app.include_router(sesion.router)
 app.include_router(credenciales.router)
 app.include_router(compartido.router)
 app.include_router(robots_prueba.router)  # decision 171
+app.include_router(ajustes.router)  # decision 196
 
 
 @app.get("/health", tags=["system"])

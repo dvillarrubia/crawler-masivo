@@ -38,6 +38,7 @@ from api.schemas import (
     ClientCreate,
     ClientResponse,
     ClientUpdate,
+    ConfigBorrador,
     ConfigResueltaResponse,
     IntegracionResponse,
     JobConfig,
@@ -339,6 +340,45 @@ def _serie(db: Session, jobs: list[Job]) -> list[CensoDeSerie]:
             **cifras[j.id],
         ))
     return salida
+
+
+@router.post("/config-resuelta", response_model=ConfigResueltaResponse)
+def config_resuelta_borrador(cuerpo: ConfigBorrador, db: Session = Depends(get_session)):
+    """La configuracion con la que saldria un rastreo si `config` fuera la del
+    `nivel` (decision 196). No guarda nada: es lo que pinta «Así rastreará»
+    mientras se edita. El borrador se valida como se validaria al guardarlo
+    (claves desconocidas, limites de `JobConfig`), asi que un 422 aqui es el
+    mismo que daria Guardar."""
+    import copy
+
+    borrador = copy.deepcopy(cuerpo.config)
+    # La contrasena del Basic solo vale en un rastreo (decision 83): fuera de
+    # la validacion parcial, que la rechaza, y de vuelta despues.
+    clave = (borrador.get("http") or {}).pop("basic_auth_password", None) \
+        if cuerpo.nivel == "rastreo" and isinstance(borrador.get("http"), dict) else None
+    try:
+        borrador = validar_config_parcial(borrador)
+    except (ValueError, ValidationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if cuerpo.nivel == "rastreo":
+        if clave:
+            borrador.setdefault("http", {})["basic_auth_password"] = clave
+        # Un rastreo se lee como JobConfig en create_job: un null que alli no
+        # cabe tampoco cabe aqui.
+        try:
+            borrador = JobConfig.model_validate(borrador).model_dump(exclude_unset=True)
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=f"La configuracion no es valida: {exc.errors()}")
+    cliente = perfil = None
+    if cuerpo.cliente_id or cuerpo.profile_id:
+        cliente, perfil = resolver_cliente_y_perfil(
+            db, cliente_id=cuerpo.cliente_id, profile_id=cuerpo.profile_id)
+    if cuerpo.nivel != "rastreo" and cliente is None:
+        raise HTTPException(status_code=422, detail="Sin cliente solo hay configuracion de rastreo")
+    if cuerpo.nivel == "perfil" and perfil is None:
+        # Un perfil nuevo, aun sin guardar: su borrador sobre el cliente.
+        perfil = CrawlProfile(cliente_id=cliente.id, config={}, seeds=[])
+    return _config_resuelta(db, cliente, perfil, cuerpo.nivel, borrador)
 
 
 @router.get("/panel", response_model=PanelResponse)
@@ -830,16 +870,61 @@ def config_resuelta(
     profile_id: uuid.UUID | None = Query(None),
     db: Session = Depends(get_session),
 ):
-    """Lo que tendria un job lanzado ahora: para precargar el modal."""
+    """Lo que tendria un job lanzado ahora: para precargar el modal y para el
+    bloque «Así rastreará» (decision 196: con `origen`, `serie` y `avisos`)."""
     cliente, perfil = resolver_cliente_y_perfil(
         db, cliente_id=client_id, profile_id=profile_id)
+    return _config_resuelta(db, cliente, perfil)
+
+
+def _config_resuelta(db: Session, cliente: Client | None, perfil: CrawlProfile | None,
+                     nivel: str | None = None, borrador: dict | None = None) -> ConfigResueltaResponse:
+    """La respuesta de `config-resuelta`, con `borrador` en lugar de la config
+    guardada del `nivel` (cliente, perfil o rastreo) si se pasa.
+
+    Sin cliente, como `create_job`: lo de serie con el borrador encima."""
+    from api.avisos_config import avisos_de_config, historial_de_bloqueos
+    from shared.clientes import origen_de_config
+
+    capas = {
+        "cliente": (cliente.config_defecto if cliente else None) or {},
+        "perfil": (perfil.config if perfil else None) or {},
+        "rastreo": {},
+    }
+    if nivel:
+        capas[nivel] = borrador or {}
+    if cliente is None:
+        try:
+            config = JobConfig.model_validate(capas["rastreo"]).model_dump()
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=f"La configuracion no es valida: {exc.errors()}")
+    else:
+        fingido_c = Client(config_defecto=capas["cliente"]) if nivel == "cliente" else cliente
+        fingido_p = (CrawlProfile(config=capas["perfil"]) if nivel == "perfil" else perfil)
+        config = resolver_config(fingido_c, fingido_p, capas["rastreo"])
+    historial = historial_de_bloqueos(db, cliente.id) if cliente else None
+    try:
+        avisos = avisos_de_config(config, historial)
+    except Exception:  # noqa: BLE001 - un aviso que falla no tapa la config
+        avisos = []
+    propias = []
+    if perfil is not None and perfil.id is not None:
+        for prog in (db.query(Programacion)
+                     .filter(Programacion.profile_id == perfil.id, Programacion.activa.is_(True),
+                             Programacion.hereda_perfil.is_(True)).all()):
+            claves = sorted(origen_de_config(("p", prog.config or {})))
+            if claves:
+                propias.append({"id": prog.id, "nombre": prog.nombre, "claves": claves})
     return ConfigResueltaResponse(
-        cliente_id=cliente.id,
+        cliente_id=cliente.id if cliente else None,
         profile_id=perfil.id if perfil else None,
         seeds=list(perfil.seeds or []) if perfil else [],
-        config=resolver_config(cliente, perfil, None),
-        config_heredada=fusionar_config(
-            cliente.config_defecto or {}, (perfil.config if perfil else None) or {}),
+        config=config,
+        config_heredada=fusionar_config(capas["cliente"], capas["perfil"]),
+        origen=origen_de_config(*((k, v) for k, v in capas.items())),
+        serie=JobConfig().model_dump(),
+        avisos=avisos,
+        programaciones=propias,
     )
 
 
