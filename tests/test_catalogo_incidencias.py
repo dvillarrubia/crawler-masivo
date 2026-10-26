@@ -44,7 +44,8 @@ FUENTES = ("analyzer.py", "avisos_de_enlaces.py", "avisos_de_paginacion.py",
            "avisos_de_html.py", "avisos_de_servidor.py", "avisos_de_sondas.py",
            "avisos_de_sitemaps.py", "avisos_de_render.py", "avisos_de_gsc.py",
            "oportunidades_gsc.py", "avisos_de_medios.py", "avisos_de_wordpress.py",
-           "avisos_de_nosnippet.py", "avisos_de_accesibilidad.py", "avisos_de_nofollow.py")
+           "avisos_de_nosnippet.py", "avisos_de_accesibilidad.py", "avisos_de_nofollow.py",
+           "soft404.py")
 
 
 def _llamadas() -> list[ast.expr]:

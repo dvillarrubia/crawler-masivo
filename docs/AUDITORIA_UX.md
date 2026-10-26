@@ -240,6 +240,40 @@ Cosas que no estaban en la auditoría y aparecieron al hacerla:
   zona de la programación y «toca» → «lanzado a su hora» (V44). En móvil la
   tabla se apila.
 
+### Revisión del 25-oct · 2.10 y 2.11 Problemas
+
+- [x] **Diferencia frente al anterior por tipo** («+12», «−5», «+3 · −1»,
+  «nuevo», «igual»), con la referencia de todo lo demás
+  (`job.comparacion.comparado_con`) y las cifras que ya guarda
+  (`incidencias.nuevas/resueltas/siguen` por tipo). Arriba, el total («+643
+  nuevas · −437 resueltas frente al 14 oct»), las que estaban en páginas no
+  visitadas y los avisos de la comparación; abajo, los tipos que ya no
+  aparecen. Si no se puede afirmar —otro alcance, truncado, bloqueado o
+  versiones del análisis distintas, también si uno de los dos se re-analizó
+  después (decisión 191)— lo dice y no hay etiquetas. Con una sección elegida
+  no se enseña (es del sitio entero).
+- [x] **Secciones del negocio** (decisión 125) como primer nivel: tarjetas con
+  URLs, páginas con errores y con avisos, que filtran; el reparto de cada tipo
+  por sección y las páginas fuera de toda sección. Sin segmentos de regla (es
+  el caso de Lopesan), nada de esto se pinta y el desplegable de formas de ruta
+  queda como estaba.
+- [x] **Soft 404 de plantilla** (V17, decisión 190): un aviso agrupado
+  `soft_404_plantilla` que cuenta plantillas y despliega cada una con la URL
+  inventada que se pidió; el Resumen dice «N plantillas responden 200 a una URL
+  que no existe» en naranja y no «0 páginas» en verde.
+- [x] Tras la revisión independiente: el Resumen y la lista desplegada pintan
+  solo las sondas que el análisis cuenta (sin muros de WAF servidos con 200;
+  `sondas_responden_200`, o el mismo filtro en los censos anteriores); con una
+  sección elegida la fila del soft 404 de plantilla no dice «7 plantillas»; la
+  etiqueta de cambio va en la fila visible con el filtro de gravedad; la
+  diferencia exige que las incidencias de hoy cuadren con las comparadas; los
+  nombres de plantilla sin «(4n)» ni «:slug»; «Ver la incidencia» en singular.
+- [x] El Resumen ya no desborda a 390 px (V41): las columnas de
+  `.overview-grid` pasan a `minmax(0,1fr)` y las tablas de Search Console van
+  en `.table-wrap` con su propio scroll.
+- Lo abierto: la fila de un hallazgo agrupado de otros tipos sigue contando «1
+  página» (la de anclaje).
+
 ### Cómo se probó
 
 Cada fase, con una API local montada sobre el worktree (`docker run … -v

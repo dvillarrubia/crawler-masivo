@@ -1039,6 +1039,17 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   con la del censo si la inspección es de sus fechas (y «ya la sigue» en vez
   de «cambiará» cuando ya coincide), y con Search Console parcial las cifras
   dicen desde cuándo son.
+- **Problemas con la diferencia frente al anterior y por secciones**
+  (revisión de UX del 25-oct, 2.10; en local, sin desplegar): cada tipo dice
+  «+12», «−5», «nuevo» o «igual» frente al censo con el que se comparó, con las
+  cifras guardadas de la comparación, y por qué no cuando no se puede afirmar
+  (otro alcance, truncado, versión del análisis distinta: decisión 191). Con
+  segmentos de negocio (125), las secciones son el primer nivel de Problemas;
+  sin ellos, queda como estaba.
+- **Soft 404 de plantilla como aviso agrupado** (2.11, decisión 190; en local):
+  `soft_404_plantilla`, una fila por host con las plantillas que responden 200
+  a una URL que no existe. El Resumen deja de decir «0 páginas» en verde junto a
+  esas plantillas. Los censos ya analizados lo tendrán al re-analizarse.
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 

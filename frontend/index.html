@@ -2255,7 +2255,9 @@
                 <details x-show="(job.gsc_resumen.oportunidades.por_plantilla || []).length">
                   <summary class="text-dim" style="cursor:pointer">Rendimiento por plantilla y por profundidad</summary>
                   <template x-for="tabla in [['Plantilla', job.gsc_resumen.oportunidades.por_plantilla], ['Clics desde la home', job.gsc_resumen.oportunidades.por_profundidad]]" :key="tabla[0]">
-                    <table class="table text-sm" style="margin-top:.4rem">
+                    <!-- En un div con su propio scroll: a 390 px desbordaba el Resumen
+                         entero (y cortaba el bloque de soft 404; revision de UX del 25-oct, 2.11). -->
+                    <div class="table-wrap"><table class="table text-sm" style="margin-top:.4rem">
                       <thead><tr><th x-text="tabla[0]"></th><th>Indexables</th><th>Con impresiones</th><th>Clics</th><th>Impresiones</th><th>CTR</th><th>Posición</th></tr></thead>
                       <tbody>
                         <template x-for="f in tabla[1] || []" :key="f.grupo">
@@ -2270,7 +2272,7 @@
                           </tr>
                         </template>
                       </tbody>
-                    </table>
+                    </table></div>
                   </template>
                 </details>
                 <details x-show="job.gsc_resumen.oportunidades.curva_ctr">
@@ -3189,10 +3191,20 @@
                 <div class="text-sm mb-1">
                   <template x-if="s4.analizado">
                     <span>
-                      <strong :class="s4.soft_404 ? 'red' : 'green'" x-text="fmt.num(s4.soft_404) + (s4.soft_404 === 1 ? ' página' : ' páginas')"></strong>
-                      son la página de error del sitio con un 200<span x-show="s4.indexables" x-text="' (' + fmt.num(s4.indexables) + ' indexables)'"></span><span x-show="s4.candidatos" x-text="' · ' + fmt.num(s4.candidatos) + ' candidatas sin afirmar'"></span>.
+                      <strong :class="s4.soft_404 ? 'red' : (s4.plantillas_200 ? '' : 'green')" x-text="fmt.num(s4.soft_404) + (s4.soft_404 === 1 ? ' página' : ' páginas')"></strong>
+                      del censo son la página de error del sitio con un 200<span x-show="s4.indexables" x-text="' (' + fmt.num(s4.indexables) + ' indexables)'"></span><span x-show="s4.candidatos" x-text="' · ' + fmt.num(s4.candidatos) + ' candidatas sin afirmar'"></span>.
                       <a href="#" @click.prevent="verTipoDeIncidencia('soft_404', ''); switchTab('issues')" x-show="s4.soft_404">Ver</a>
                     </span>
+                  </template>
+                  <!-- 2.11: que ninguna pagina del censo sea la de error no quiere
+                       decir que el sitio responda bien a lo que no existe. -->
+                  <template x-if="s4.plantillas_200">
+                    <div class="orange mt-1" data-testid="soft404-plantillas">
+                      <strong x-text="fmt.num(s4.plantillas_200) + (s4.plantillas_200 === 1 ? ' plantilla responde' : ' plantillas responden')"></strong>
+                      200 a una URL que no existe, en lugar de 404: hay que pedir al cliente que las corrija.
+                      <a href="#" x-show="s4.aviso_en_problemas" @click.prevent="verTipoDeIncidencia('soft_404_plantilla', ''); switchTab('issues')">Ver en Problemas</a>
+                      <span class="text-dim" x-show="!s4.con_aviso_190">Este censo se analizó antes de que existiera el aviso: saldrá en Problemas cuando se vuelva a analizar.</span>
+                    </div>
                   </template>
                   <template x-if="!s4.analizado">
                     <span class="text-dim">Sondas hechas, sin analizar todavía.</span>
@@ -3383,7 +3395,7 @@
              como se arregla (incidencias.js). La lista plana sigue ahi: al
              elegir un tipo, o con «Ver como lista». -->
         <template x-if="detailTab === 'issues' && !issueFilters.issue_type && issuesVista === 'tipos'">
-          <div>
+          <div x-data="{ get dp() { return diffProblemas() } }">
             <div class="flex gap-1 mb-2 items-center" style="flex-wrap:wrap">
               <template x-for="g in [['', 'Todas'], ['error', 'Errores'], ['warning', 'Avisos'], ['info', 'Info']]" :key="g[0]">
                 <button class="btn btn-sm chip" :class="issueFilters.severity === g[0] && 'chip-on'"
@@ -3399,9 +3411,9 @@
               <select class="exp-problema" :class="issuesSegmento && 'has-value'" aria-label="Segmento"
                       @focus="!segmentosJob && cargarSegmentos()" @change="elegirSegmentoProblemas($event.target.value)"
                       style="width:auto;max-width:16rem">
-                <option value="" :selected="!issuesSegmento">Todos los segmentos</option>
+                <option value="" :selected="!issuesSegmento" x-text="segmentosParaElegir().regla.length ? 'Todas las secciones' : 'Todas las rutas'"></option>
                 <template x-if="segmentosParaElegir().regla.length">
-                  <optgroup label="Segmentos de negocio">
+                  <optgroup label="Secciones del negocio">
                     <template x-for="g in segmentosParaElegir().regla" :key="g.segmento">
                       <option :value="g.segmento" :selected="issuesSegmento === g.segmento" x-text="g.segmento + ' · ' + fmt.num(g.urls) + ' URLs'"></option>
                     </template>
@@ -3426,6 +3438,55 @@
               <button class="btn btn-sm" style="margin-left:auto" @click="issuesVista = 'lista'; issues = []; loadIssues()">
                 <i data-lucide="list" style="width:13px;height:13px"></i> Ver todas como lista</button>
             </div>
+            <!-- Secciones del negocio (decision 125) como primer nivel: solo si el
+                 cliente las tiene; sin reglas, Problemas queda como estaba
+                 (revision de UX del 25-oct, 2.10). -->
+            <template x-if="seccionesNegocio()">
+              <div class="secciones-negocio mb-2" data-testid="secciones-negocio">
+                <div class="text-sm text-dim mb-1">Por sección del negocio</div>
+                <div class="secciones-lista">
+                  <button class="seccion" :class="!issuesSegmento && 'seccion-on'" @click="elegirSegmentoProblemas('')">
+                    <strong>Todo el sitio</strong>
+                  </button>
+                  <template x-for="g in seccionesNegocio().secciones" :key="g.segmento">
+                    <button class="seccion" :class="issuesSegmento === g.segmento && 'seccion-on'" @click="elegirSegmentoProblemas(g.segmento)"
+                            :title="'Ver solo los problemas de ' + g.segmento">
+                      <strong x-text="g.segmento"></strong>
+                      <span class="text-dim" x-text="fmt.num(g.urls) + ' URLs'"></span>
+                      <span class="seccion-cifras">
+                        <span :class="g.paginas_con_error ? 'red' : 'text-dim'" x-text="fmt.num(g.paginas_con_error || 0) + ' con errores'"></span>
+                        <span class="text-dim" x-text="fmt.num(g.paginas_con_aviso || 0) + ' con avisos'"></span>
+                      </span>
+                    </button>
+                  </template>
+                </div>
+                <div class="text-sm text-dim mt-1" x-show="seccionesNegocio().sinSeccion"
+                     x-text="fmt.num(seccionesNegocio().sinSeccion) + ' URLs no caen en ninguna sección: se pueden elegir por la forma de su ruta en el desplegable.'"></div>
+              </div>
+            </template>
+
+            <!-- Cuanto ha cambiado cada tipo frente al censo con el que se comparo
+                 al terminar (la misma referencia que el resto, 2.3), o por que
+                 no se puede decir (decisiones 67, 70, 89, 91 y 191). -->
+            <template x-if="dp && dp.ok === true">
+              <div class="text-sm mb-2 diff-problemas" data-testid="diff-problemas">
+                <span>Cambio en incidencias <strong x-text="dp.ref"></strong>
+                  (<a :href="'#/rastreos/' + dp.jobAnterior + '/resumen'" x-text="dp.nombre"></a>):</span>
+                <span class="cambio cambio-peor" x-text="'+' + fmt.num(dp.nuevas) + (dp.nuevas === 1 ? ' nueva' : ' nuevas')"></span>
+                <span class="cambio cambio-mejor" x-text="'−' + fmt.num(dp.resueltas) + (dp.resueltas === 1 ? ' resuelta' : ' resueltas')"></span>
+                <span class="text-dim" x-show="dp.sinPagina"
+                      x-text="fmt.num(dp.sinPagina) + ' estaban en páginas que esta vez no se rastrearon: no se cuentan como resueltas.'"></span>
+                <span class="text-dim" x-show="issuesSegmento"> · La diferencia es del sitio entero; con una sección elegida no se reparte.</span>
+                <template x-for="a in dp.avisos" :key="a"><div class="text-dim" style="font-size:.78rem" x-text="a"></div></template>
+              </div>
+            </template>
+            <template x-if="dp && dp.ok === false">
+              <div class="text-sm mb-2 diff-problemas orange" data-testid="diff-problemas-no">
+                <span>Diferencia <span x-text="dp.ref"></span>: <span x-text="dp.motivo"></span>.</span>
+                <span class="text-dim">Las cifras de abajo son las de este censo.</span>
+              </div>
+            </template>
+
             <template x-if="!issuesResumen">
               <div class="loading-overlay"><div class="spinner"></div> Agrupando incidencias…</div>
             </template>
@@ -3443,8 +3504,8 @@
                       <span class="text-dim" x-text="(ISSUE_INFO[r.issue_type] || {}).que || ''"></span>
                     </span>
                     <span class="issue-group-count">
-                      <strong x-text="fmt.num(r.paginas)"></strong> <span x-text="r.paginas === 1 ? 'página' : 'páginas'"></span>
-                      <span class="text-dim" x-show="r.incidencias !== r.paginas" x-text="'· ' + fmt.num(r.incidencias) + ' incidencias'"></span>
+                      <strong x-text="fmt.num(cuentaDeTipo(r).n)"></strong> <span x-text="cuentaDeTipo(r).unidad"></span>
+                      <span class="text-dim" x-show="r.incidencias !== r.paginas && !cuentaDeTipo(r).propia" x-text="'· ' + fmt.num(r.incidencias) + ' incidencias'"></span>
                       <span class="text-dim" x-show="r.pct_paginas != null" x-text="'· ' + fmt.num(r.pct_paginas) + ' % de ' + fmt.num(r.urls_denominador) + ' URLs del segmento'"></span>
                       <!-- Un tipo que solo tiene incidencias de un hallazgo para muchas
                            paginas no se puede repartir: sale con 0 y lo dice, no desaparece. -->
@@ -3452,6 +3513,10 @@
                       <span class="text-dim" x-show="issuesOrden === 'prioridad' && r.prioridad != null"
                             :title="'Equivale a ' + fmt.num(r.importancia) + ' páginas de máxima importancia'"
                             x-text="'· prioridad ' + fmt.num(Math.round(r.prioridad))"></span>
+                      <template x-if="cambioDeTipo(r, dp)">
+                        <span class="cambio" :class="cambioDeTipo(r, dp).clase" :title="cambioDeTipo(r, dp).title"
+                              x-text="cambioDeTipo(r, dp).texto"></span>
+                      </template>
                     </span>
                     <i data-lucide="chevron-down" style="width:14px;height:14px" class="issue-group-caret"></i>
                   </button>
@@ -3462,7 +3527,26 @@
                         <dt>Cómo se arregla</dt><dd x-text="ISSUE_INFO[r.issue_type].arreglo"></dd>
                       </dl>
                     </template>
-                    <template x-if="r.por_segmento && r.por_segmento.length && !issuesSegmento">
+                    <template x-if="seccionesNegocio() && r.por_segmento && r.por_segmento.length && !issuesSegmento">
+                      <div class="issue-segmentos">
+                        <div class="text-sm text-dim" style="margin:.5rem 0 .25rem">Por sección · páginas afectadas sobre las URLs de la sección</div>
+                        <ul>
+                          <template x-for="p in repartoNegocio(r).dentro" :key="p.segmento">
+                            <li>
+                              <button class="chip-tramo" @click="elegirSegmentoProblemas(p.segmento)" :title="'Ver solo ' + p.segmento">
+                                <span x-text="p.segmento"></span>
+                              </button>
+                              <strong x-text="fmt.num(p.pct) + ' %'"></strong>
+                              <span class="text-dim" x-text="fmt.num(p.paginas) + ' de ' + fmt.num(p.urls)"></span>
+                            </li>
+                          </template>
+                          <li x-show="repartoNegocio(r).fuera" class="text-dim"
+                              x-text="(repartoNegocio(r).cortado ? 'Al menos ' : '') + fmt.num(repartoNegocio(r).fuera) + (repartoNegocio(r).fuera === 1 ? ' página' : ' páginas') + ' fuera de toda sección'"></li>
+                          <li x-show="repartoNegocio(r).cortado" class="text-dim">El reparto se corta en los 200 grupos con más páginas: puede faltar alguna sección pequeña.</li>
+                        </ul>
+                      </div>
+                    </template>
+                    <template x-if="!seccionesNegocio() && r.por_segmento && r.por_segmento.length && !issuesSegmento">
                       <div class="issue-segmentos">
                         <div class="text-sm text-dim" style="margin:.5rem 0 .25rem">Por segmento · páginas afectadas sobre las URLs del segmento</div>
                         <ul>
@@ -3482,7 +3566,23 @@
                       <div class="text-sm text-dim" style="margin:.25rem 0"
                            x-text="fmt.num(r.agregadas) + (r.agregadas === 1 ? ' incidencia se emite' : ' incidencias se emiten') + ' una vez por hallazgo (para muchas páginas) y no se reparte por segmento' + (issuesSegmento ? ': no sale en este filtro' : '')"></div>
                     </template>
-                    <div class="text-sm text-dim" style="margin:.5rem 0 .25rem">Ejemplos</div>
+                    <!-- 2.11: las plantillas que fallan, con la URL inventada que se pidio.
+                         Es lo que hay que ensenar al cliente. -->
+                    <template x-if="r.issue_type === 'soft_404_plantilla' && !issuesSegmento && resumenSoft404(job) && resumenSoft404(job).plantillas_200">
+                      <div data-testid="soft404-plantillas-problemas" class="soft404-plantillas">
+                        <div class="text-sm text-dim" style="margin:.5rem 0 .25rem">Plantillas que responden 200 a una URL que no existe</div>
+                        <ul class="issue-ejemplos">
+                          <template x-for="(f, n) in resumenSoft404(job).responden200" :key="n">
+                            <li class="text-sm">
+                              <code x-text="nombreDePlantilla(f.plantilla)" :title="f.plantilla || ''"></code>
+                              <span class="text-dim" x-text="'· se pidió '"></span><a :href="f.url" target="_blank" rel="noopener" x-text="f.url" :title="f.url"></a>
+                              <span class="text-dim" x-show="f.alcance != null" x-text="'· ' + fmt.num(f.alcance) + (f.alcance === 1 ? ' página del censo la usa' : ' páginas del censo la usan')"></span>
+                            </li>
+                          </template>
+                        </ul>
+                      </div>
+                    </template>
+                    <div class="text-sm text-dim" style="margin:.5rem 0 .25rem" x-text="r.issue_type === 'soft_404_plantilla' ? 'Una página de ejemplo con esa plantilla' : 'Ejemplos'"></div>
                     <ul class="issue-ejemplos">
                       <template x-for="(e, n) in r.ejemplos" :key="n + '-' + e.url_id">
                         <li><a :href="'#/rastreos/' + job.id + '/url/' + e.url_id" x-text="e.url" :title="e.url"></a></li>
@@ -3490,19 +3590,28 @@
                     </ul>
                     <div class="flex gap-1 mt-1" style="flex-wrap:wrap" x-show="r.incidencias > 0">
                       <button class="btn btn-sm" @click="verTipoDeIncidencia(r.issue_type, r.severity)">
-                        Ver las <span x-text="fmt.num(r.incidencias)"></span> incidencias
+                        <span x-text="r.incidencias === 1 ? 'Ver la incidencia' : 'Ver las ' + fmt.num(r.incidencias) + ' incidencias'"></span>
                       </button>
                       <!-- Las paginas afectadas con todas sus columnas, filtrables y
                            exportables (docs/INVESTIGACION_EXPLORADOR.md). -->
-                      <button class="btn btn-sm" @click="verProblemaEnExplorador(r.issue_type)">
+                      <button class="btn btn-sm" @click="verProblemaEnExplorador(r.issue_type)" x-show="r.issue_type !== 'soft_404_plantilla' && r.paginas > 0">
                         <i data-lucide="table-2" style="width:13px;height:13px"></i>
-                        Ver las <span x-text="fmt.num(r.paginas)"></span> páginas en URLs
+                        <span x-text="r.paginas === 1 ? 'Ver la página en URLs' : 'Ver las ' + fmt.num(r.paginas) + ' páginas en URLs'"></span>
                       </button>
                     </div>
                   </div>
                 </div>
               </template>
             </div>
+            <template x-if="issuesResumen && resueltosDelTodo(dp).length">
+              <div class="text-sm mt-2 resueltos-del-todo" data-testid="resueltos-del-todo">
+                <span class="text-dim" x-text="'Ya no aparecen ' + dp.ref + ':'"></span>
+                <template x-for="d in resueltosDelTodo(dp)" :key="d.tipo">
+                  <span class="cambio cambio-mejor" :title="fmt.num(d.resueltas) + (d.resueltas === 1 ? ' incidencia resuelta' : ' incidencias resueltas')"
+                        x-text="fmt.issue(d.tipo) + ' −' + fmt.num(d.resueltas)"></span>
+                </template>
+              </div>
+            </template>
           </div>
         </template>
 

@@ -195,7 +195,10 @@ def test_pagina_con_la_huella_de_la_sonda_es_soft_404(sesion):
     assert issues[(1, "soft_404")].details["senales"][0]["metodo"] == "contenido_identico"
     assert issues[(2, "soft_404")].severity == "warning"
     assert issues[(2, "soft_404")].details["senales"][0]["metodo"] == "minhash"
-    assert not any(k[0] in (3, 4, 5) for k in issues)
+    # Las paginas sanas no llevan nada de soft 404 suyo; la raiz que responde
+    # 200 es otro hallazgo, del servidor, en una fila aparte (decision 190).
+    assert not any(k[0] in (3, 4, 5) for k in issues if k[1] != "soft_404_plantilla")
+    assert len([k for k in issues if k[1] == "soft_404_plantilla"]) == 1
     # Un aviso por hallazgo: la pagina de error no es ademas contenido escaso
     assert (1, "low_word_count") not in issues
     resumen = sesion.get(Job, job_id).soft404["resumen"]
