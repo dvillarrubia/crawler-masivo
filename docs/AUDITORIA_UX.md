@@ -192,9 +192,13 @@ Cosas que no estaban en la auditoría y aparecieron al hacerla:
 - En curso con barra y «1.374 / ~4.000 · termina hacia las 14:20». El total es lo
   rastreado + la cola del planificador (`pending_count`), sin pasar de
   `max_urls`; sin cola, solo «de N como mucho» y sin hora de fin. El ritmo se
-  mide entre refrescos de la propia vista (2 min); mientras tanto, desde
-  `started_at` con 5 min y 50 páginas como mínimo. Sin base, «calculando la hora
-  de fin…».
+  mide solo entre refrescos de la propia vista (1 min como mínimo): no se usa
+  `started_at`, porque al reanudar un rastreo el worker lo reinicia y la cuenta
+  de páginas no, y la hora de fin saldría demasiado pronto. Sin base,
+  «calculando la hora de fin…». Con la cola del planificador en 0 o el tope
+  alcanzado, «terminando»; con 2 min sin páginas nuevas, «sin páginas nuevas en
+  los últimos N min». La frase de arriba separa los que rastrean de los que ya
+  solo se analizan.
 - En cola con su puesto según el orden real de Redis (`GET /api/jobs/cola`, FIFO).
   Sin ese dato (API anterior o Redis caído) se ordena por creación y no se
   dice el puesto.

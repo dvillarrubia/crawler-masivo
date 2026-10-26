@@ -281,7 +281,12 @@ const fmt = {
     if (s < 60) return 'en un momento';
     if (s < 3600) return 'dentro de ' + Math.floor(s / 60) + ' min';
     if (s < 86400) return 'dentro de ' + Math.floor(s / 3600) + ' h';
-    const dias = Math.round(s / 86400);
+    // A partir de un dia, por dias de calendario (como fmt.hacia), no
+    // redondeando horas: 28 h desde las 23:00 de un lunes es el miercoles,
+    // no «mañana» (revision de 2.12).
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    const dia = new Date(d); dia.setHours(0, 0, 0, 0);
+    const dias = Math.round((dia - hoy) / 86400000);
     return dias === 1 ? 'mañana' : 'dentro de ' + dias + ' días';
   },
   // Una fecha en la zona horaria de la programacion, no en la del navegador:
@@ -313,6 +318,7 @@ const fmt = {
     if (m.startsWith('disparo perdido')) return 'no se lanzó: el worker llegó tarde a la hora y se espera al siguiente';
     if (m.startsWith('el rastreo anterior')) return 'no se lanzó: el rastreo anterior de esta programación seguía sin terminar';
     if (m === 'todavia no toca') return 'todavía no le toca';
+    if (m === 'sin proxima ejecucion calculada') return 'no se lanzó: no tenía calculada la próxima ejecución';
     return m;
   },
   // Una expresion cron en castellano. Solo los patrones que se usan de
@@ -2389,12 +2395,16 @@ function app() {
     //  - Total: lo rastreado + lo que el planificador tiene en cola (es una
     //    cota baja: la cola crece al descubrir enlaces, de ahi el «~»), sin
     //    pasar del tope max_urls. Sin la cola, solo el tope, como maximo.
-    //  - Ritmo: medido en esta pagina entre refrescos (2 min como minimo).
-    //    Mientras no lo hay, desde started_at si lleva 5 min y 50 paginas; no
-    //    se usa started_at en cuanto hay medida propia porque al reanudar un
-    //    job started_at vuelve a cero y la cuenta no, y el ritmo saldria
-    //    inflado.
+    //  - Ritmo: medido en esta pagina entre refrescos (1 min como minimo).
+    //    No se usa started_at: al reanudar un job el worker lo pone a la hora
+    //    de la reanudacion y la cuenta de paginas no vuelve a cero, asi que
+    //    hechas/minutos saldria inflado y la hora de fin demasiado pronto. Lo
+    //    que no se puede afirmar no se afirma: hasta tener medida propia,
+    //    «calculando…» (hallazgo de la revision de 2.12).
     //  - Hora de fin: solo con ritmo y con un total que no sea solo el tope.
+    //  - Terminando: lo hecho ya llega al total (la cola del planificador en 0,
+    //    o el tope alcanzado). Ahi no hay hora que calcular.
+    //  - Sin avance: 2 min o mas de muestras sin una pagina nueva.
     estimacion(j) {
       const p = this.prod.progreso[j.id] || {};
       const hechas = Math.max(p.crawled_count || 0, j.total_urls_crawled || 0);
@@ -2407,35 +2417,56 @@ function app() {
         total = tope; tipo = 'maximo';
       }
       const pct = total ? Math.min(100, (hechas / total) * 100) : null;
+      const terminando = total != null && hechas >= total;
 
-      let ritmo = null;  // paginas por minuto
+      let ritmo = null, sinAvanceMin = null;  // ritmo en paginas por minuto
       const m = this.prod.muestras[j.id] || [];
-      if (m.length >= 2 && m[m.length - 1].t - m[0].t >= 120000) {
+      if (m.length >= 2) {
+        const lapso = m[m.length - 1].t - m[0].t;
         const dn = m[m.length - 1].n - m[0].n;
-        if (dn > 0) ritmo = dn / ((m[m.length - 1].t - m[0].t) / 60000);
-      } else if (j.started_at) {
-        const min = (Date.now() - new Date(j.started_at).getTime()) / 60000;
-        if (min >= 5 && hechas >= 50) ritmo = hechas / min;
+        if (lapso >= 60000 && dn > 0) ritmo = dn / (lapso / 60000);
+        else if (lapso >= 120000 && dn <= 0) sinAvanceMin = Math.floor(lapso / 60000);
       }
 
       let fin = null;
-      if (ritmo && total && tipo !== 'maximo' && total > hechas) {
+      if (ritmo && total && tipo !== 'maximo' && !terminando) {
         fin = new Date(Date.now() + ((total - hechas) / ritmo) * 60000);
       }
-      return { hechas, total, tipo, pct, ritmo, fin };
+      return { hechas, total, tipo, pct, ritmo, fin, terminando, sinAvanceMin };
     },
 
     // «1.374 / ~4.000 · termina hacia las 14:20»
     textoEstimacion(j) {
       const e = this.estimacion(j);
       let t = fmt.num(e.hechas);
+      // Las filas pueden pasar del tope (cada salto de una redireccion es una
+      // fila): «5.600 / 1.000» no se entiende, se dice el tope aparte.
+      if (e.terminando && e.hechas > e.total)
+        return t + ' páginas · ' + (e.tipo === 'aprox' ? 'no queda nada en cola' : 'llegó al tope de ' + fmt.num(e.total)) + ', terminando';
       if (e.tipo === 'aprox') t += ' / ~' + fmt.num(e.total);
       else if (e.tipo === 'tope') t += ' / ' + fmt.num(e.total) + ' (el tope)';
       else if (e.tipo === 'maximo') t += ' de ' + fmt.num(e.total) + ' como mucho';
       else t += ' páginas';
-      if (e.fin) t += ' · termina ' + fmt.hacia(e.fin);
+      if (e.terminando) t += e.tipo === 'aprox' ? ' · no queda nada en cola, terminando' : ' · llegó al tope, terminando';
+      else if (e.sinAvanceMin) t += ' · sin páginas nuevas en los últimos ' + e.sinAvanceMin + ' min';
+      else if (e.fin) t += ' · termina ' + fmt.hacia(e.fin);
       else if (e.tipo !== 'maximo' && e.total) t += ' · calculando la hora de fin…';
       return t;
+    },
+
+    // La frase de arriba: los que rastrean, los que ya solo se analizan y los
+    // que esperan, por separado (un analisis no es un rastreo «en marcha»,
+    // aunque desplegar tambien lo corte).
+    get resumenProduccion() {
+      const n = (x, uno, varios) => x === 1 ? uno : fmt.num(x) + ' ' + varios;
+      const rastreando = this.prod.enCurso.filter(j => j.status === 'running').length;
+      const analizando = this.prod.enCurso.length - rastreando;
+      const partes = [];
+      if (rastreando) partes.push(n(rastreando, '1 rastreo en marcha', 'rastreos en marcha'));
+      if (analizando) partes.push(n(analizando, '1 analizándose', 'analizándose'));
+      if (this.prod.enCola.length) partes.push(n(this.prod.enCola.length, '1 esperando', 'esperando'));
+      if (partes.length < 2) return partes.join('');
+      return partes.slice(0, -1).join(', ') + ' y ' + partes[partes.length - 1];
     },
 
     // Los proximos disparos de las programaciones activas, el mas cercano primero.

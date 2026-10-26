@@ -234,8 +234,7 @@
               </template>
               <template x-if="prod.enCurso.length || prod.enCola.length">
                 <span>
-                  <strong x-text="(prod.enCurso.length === 1 ? '1 rastreo en marcha' : fmt.num(prod.enCurso.length) + ' rastreos en marcha')
-                    + (prod.enCola.length ? (prod.enCola.length === 1 ? ' y 1 esperando' : ' y ' + fmt.num(prod.enCola.length) + ' esperando') : '')"></strong>.
+                  <strong x-text="resumenProduccion"></strong>.
                   <span class="text-dim" x-show="prod.enCurso.length">Desplegar ahora los cortaría.</span>
                 </span>
               </template>
