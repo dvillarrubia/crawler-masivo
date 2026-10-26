@@ -2166,7 +2166,7 @@
             <i data-lucide="alert-triangle" style="width:14px;height:14px"></i> Problemas <span class="count" x-text="(n => n ? fmt.num(n) : '')(stats ? stats.issues_by_type.reduce((a,i) => a + i.count, 0) : 0)"></span>
           </button>
           <button class="tab" role="tab" :aria-selected="pestanaActiva('links')" :class="pestanaActiva('links') && 'active'" @click="switchTab('links')">
-            <i data-lucide="share-2" style="width:14px;height:14px"></i> Enlaces <span class="count" x-text="linksTotal ? fmt.num(linksTotal) : ''"></span>
+            <i data-lucide="share-2" style="width:14px;height:14px"></i> Enlaces<!-- Sin cifra: cambiaba con la vista y los filtros (destinos o enlaces) y no decia de que (2.8). -->
           </button>
           <button class="tab" role="tab" :aria-selected="pestanaActiva('diff')" :class="pestanaActiva('diff') && 'active'" @click="switchTab('diff')" data-tip="Que ha cambiado respecto a otro rastreo del mismo sitio">
             <i data-lucide="git-compare" style="width:14px;height:14px"></i> Comparar
@@ -3745,64 +3745,232 @@
           </div>
         </template>
 
-        <!-- ===== PESTANA: ENLACES ===== -->
+        <!-- ===== PESTANA: ENLACES =====
+             Revision de UX del 25-oct, 2.8 (decision 195): filtros en el
+             servidor, vista por destino y los destinos rotos primero. Con una
+             API anterior (linksFiltra === false) queda la lista de siempre y un
+             aviso que dice por que no hay filtros. -->
         <template x-if="detailTab === 'links'">
-          <div>
-            <div class="flex justify-between items-center mb-2">
-              <!-- Mientras carga no hay cifra: «0 enlaces» se lee como que no hay ninguno. -->
-              <span class="text-dim text-sm" x-text="loading ? 'Contando enlaces…' : fmt.num(linksTotal) + ' enlaces · agrupados por destino'"></span>
-            </div>
-
-            <template x-if="loading">
-              <div class="loading-overlay"><div class="spinner"></div> Cargando...</div>
+          <div class="enlaces" data-testid="enlaces">
+            <template x-if="linksFiltra === false">
+              <div class="card aviso-enlaces mb-2" data-testid="enlaces-api-anterior">
+                Este servidor todavía no sabe filtrar los enlaces: se muestra la lista completa, agrupada por destino.
+                Los filtros, la vista por destino y el estado de cada destino llegan con la próxima versión.
+              </div>
             </template>
 
-            <template x-if="!loading && links.length === 0">
-              <div class="empty"><h3>No se encontraron enlaces</h3></div>
-            </template>
-
-            <template x-if="links.length > 0">
+            <template x-if="linksFiltra !== false">
               <div>
+                <div class="enlaces-cabecera">
+                  <div class="flex gap-1" role="group" aria-label="Vista">
+                    <button type="button" class="btn btn-sm chip" :class="linksVista === 'destinos' && 'chip-on'"
+                            @click="cambiarVistaEnlaces('destinos')" data-testid="enlaces-vista-destinos">Por destino</button>
+                    <button type="button" class="btn btn-sm chip" :class="linksVista === 'enlaces' && 'chip-on'"
+                            @click="cambiarVistaEnlaces('enlaces')" data-testid="enlaces-vista-enlaces">Todos los enlaces</button>
+                  </div>
+                  <!-- Mientras carga no hay cifra: «0 enlaces» se lee como que no hay ninguno. -->
+                  <span class="text-dim text-sm" data-testid="enlaces-total"
+                        x-text="linksCargando && !links.length ? 'Contando…'
+                          : linksVista === 'destinos'
+                            ? fmt.num(linksTotal) + (linksTotal === 1 ? ' destino' : ' destinos') + (linksHayFiltros() ? ' con estos filtros' : '') + ' · los rotos primero'
+                            : fmt.num(linksTotal) + (linksTotal === 1 ? ' enlace' : ' enlaces') + (linksHayFiltros() ? ' con estos filtros' : '') + (linksOrden === 'destino' ? ' · por destino' : ' · los de destino roto primero')"></span>
+                </div>
+
+                <template x-if="linksVista === 'enlaces' && linksFiltros.destino_hash">
+                  <div class="enlaces-hacia" data-testid="enlaces-hacia">
+                    <span>Páginas que enlazan a</span>
+                    <strong class="truncate" :title="linksDestinoUrl" x-text="linksDestinoUrl || 'este destino'"></strong>
+                    <button type="button" class="btn btn-sm" @click="cambiarVistaEnlaces('destinos')">Volver a los destinos</button>
+                  </div>
+                </template>
+
+                <div class="enlaces-filtros" data-testid="enlaces-filtros">
+                  <label class="ef ef-destino">
+                    <span>Destino</span>
+                    <div class="ef-par">
+                      <select aria-label="Cómo se busca el destino" :disabled="!!linksFiltros.destino_hash"
+                              @change="linksFiltros.exacto = $event.target.value === '1'; linksFiltros.destino && aplicarFiltroEnlaces()">
+                        <option value="0" :selected="!linksFiltros.exacto">contiene</option>
+                        <option value="1" :selected="linksFiltros.exacto">es exactamente</option>
+                      </select>
+                      <input type="text" :placeholder="linksFiltros.exacto ? 'https://…' : '/es/hoteles/'" x-model="linksFiltros.destino"
+                             :disabled="!!linksFiltros.destino_hash" @input="aplicarFiltroEnlaces(null, null, { esperar: true })">
+                    </div>
+                  </label>
+                  <label class="ef">
+                    <span>Página que enlaza</span>
+                    <input type="text" placeholder="contiene… /blog/" x-model="linksFiltros.origen"
+                           @input="aplicarFiltroEnlaces(null, null, { esperar: true })">
+                  </label>
+                  <label class="ef">
+                    <span>Texto del enlace</span>
+                    <input type="text" placeholder="contiene… «leer más»" x-model="linksFiltros.ancla"
+                           @input="aplicarFiltroEnlaces(null, null, { esperar: true })">
+                  </label>
+                  <label class="ef ef-corto">
+                    <span>Tipo</span>
+                    <select @change="aplicarFiltroEnlaces('tipo', $event.target.value)">
+                      <option value="" :selected="!linksFiltros.tipo">Todos</option>
+                      <option value="interno" :selected="linksFiltros.tipo === 'interno'">Internos</option>
+                      <option value="externo" :selected="linksFiltros.tipo === 'externo'">Externos</option>
+                    </select>
+                  </label>
+                  <label class="ef ef-corto">
+                    <span>Follow</span>
+                    <select @change="aplicarFiltroEnlaces('follow', $event.target.value)">
+                      <option value="" :selected="!linksFiltros.follow">Todos</option>
+                      <option value="si" :selected="linksFiltros.follow === 'si'">Follow</option>
+                      <option value="no" :selected="linksFiltros.follow === 'no'">Nofollow</option>
+                    </select>
+                  </label>
+                  <label class="ef ef-corto">
+                    <span>Posición</span>
+                    <select @change="aplicarFiltroEnlaces('posicion', $event.target.value)">
+                      <option value="" :selected="!linksFiltros.posicion">Todas</option>
+                      <template x-for="p in ['nav', 'header', 'content', 'sidebar', 'footer']" :key="p">
+                        <option :value="p" :selected="linksFiltros.posicion === p" x-text="POSITION_LABEL[p]"></option>
+                      </template>
+                      <option value="sin" :selected="linksFiltros.posicion === 'sin'">Sin posición</option>
+                    </select>
+                  </label>
+                  <label class="ef ef-codigo">
+                    <span>Código</span>
+                    <input type="text" inputmode="numeric" maxlength="3" placeholder="404" x-model="linksFiltros.codigo"
+                           @input="linksFiltros.codigo = linksFiltros.codigo.replace(/\D/g, ''); aplicarFiltroEnlaces(null, null, { esperar: true })">
+                  </label>
+                </div>
+
+                <div class="enlaces-estados" role="group" aria-label="Estado del destino" data-testid="enlaces-estados">
+                  <span class="text-sm text-dim">Estado del destino:</span>
+                  <button type="button" class="btn btn-sm chip" :class="!linksFiltros.estado && 'chip-on'"
+                          @click="aplicarFiltroEnlaces('estado', '')">
+                    <span>Todos</span>
+                    <span class="text-dim" x-show="cuentaEstadoEnlaces('') != null" x-text="fmt.num(cuentaEstadoEnlaces(''))"></span>
+                  </button>
+                  <template x-for="g in ESTADOS_DESTINO" :key="g">
+                    <button type="button" class="btn btn-sm chip" :class="(linksFiltros.estado === g ? 'chip-on ' : '') + 'chip-estado-' + g"
+                            :data-tip="estadoDestino(g).tip" @click="aplicarFiltroEnlaces('estado', linksFiltros.estado === g ? '' : g)">
+                      <span x-text="estadoDestino(g).texto"></span>
+                      <span class="text-dim" x-show="cuentaEstadoEnlaces(g) != null" x-text="fmt.num(cuentaEstadoEnlaces(g))"></span>
+                    </button>
+                  </template>
+                  <button type="button" class="btn btn-sm enlaces-quitar" x-show="linksHayFiltros()" @click="quitarFiltrosEnlaces()">
+                    <i data-lucide="x" style="width:13px;height:13px"></i> Quitar filtros</button>
+                </div>
+              </div>
+            </template>
+
+            <template x-if="linksError">
+              <div class="card aviso-enlaces aviso-enlaces-error mb-2" data-testid="enlaces-error">
+                <span x-text="linksError"></span>
+                <button type="button" class="btn btn-sm" @click="loadLinks()">Reintentar</button>
+              </div>
+            </template>
+
+            <template x-if="linksCargando && links.length === 0 && !linksError">
+              <div class="loading-overlay"><div class="spinner"></div> Cargando enlaces…</div>
+            </template>
+
+            <template x-if="!linksCargando && !linksError && links.length === 0 && linksFiltra !== null">
+              <div class="empty" data-testid="enlaces-vacio">
+                <h3 x-text="linksHayFiltros() || linksFiltros.estado ? 'Ningún enlace cumple estos filtros' : 'Este censo no tiene enlaces guardados'"></h3>
+                <p class="text-sm" x-show="linksHayFiltros()">Prueba con menos filtros o con otro estado del destino.</p>
+                <button type="button" class="btn btn-sm" x-show="linksHayFiltros()" @click="quitarFiltrosEnlaces()">Quitar filtros</button>
+              </div>
+            </template>
+
+            <!-- Por destino: cuantas paginas lo enlazan, con que anclas, y su estado. -->
+            <template x-if="links.length > 0 && linksVista === 'destinos' && linksFiltra !== false">
+              <div :class="linksCargando && 'enlaces-recargando'">
                 <div class="table-wrap">
-                  <table>
+                  <table class="tabla-tarjetas tabla-destinos" data-testid="enlaces-tabla-destinos">
                     <thead>
                       <tr>
-                        <th>URL Origen</th>
-                        <th>URL Destino</th>
-                        <th>Texto ancla</th>
-                        <th>Posicion</th>
-                        <th>Interno</th>
-                        <th>Follow</th>
-                        <th data-tip="Cuantas veces aparece este mismo enlace (mismo destino, ancla y posicion) en la pagina de origen: el menu de escritorio y el de movil son dos apariciones">Veces</th>
+                        <th>Destino</th>
+                        <th>Estado</th>
+                        <th data-tip="Páginas distintas del censo que lo enlazan">Páginas</th>
+                        <th data-tip="Veces que aparece el enlace, contando cada repetición en la misma página (el menú de escritorio y el de móvil son dos)">Apariciones</th>
+                        <th>Anclas más usadas</th>
+                        <th><span class="sr-only">Acciones</span></th>
                       </tr>
                     </thead>
                     <tbody>
-                      <template x-for="l in links" :key="l.id">
+                      <template x-for="d in links" :key="d.to_url_hash">
                         <tr>
-                          <td style="max-width:300px" :title="l.from_url || ''">
-                            <div class="truncate" x-text="l.from_url || '—'"></div>
+                          <td class="td-url" data-label="Destino" :title="d.to_url">
+                            <div class="truncate">
+                              <template x-if="d.url_id">
+                                <a :href="'#/rastreos/' + job.id + '/url/' + d.url_id" x-text="d.to_url"></a>
+                              </template>
+                              <template x-if="!d.url_id">
+                                <span x-text="d.to_url"></span>
+                              </template>
+                            </div>
+                            <span class="text-dim text-xs" x-text="(d.is_internal ? 'Interno' : 'Externo') + (d.nofollow ? ' · ' + fmt.num(d.nofollow) + ' nofollow' : '')"></span>
                           </td>
-                          <td style="max-width:300px" :title="l.to_url">
-                            <div class="truncate" x-text="l.to_url"></div>
-                          </td>
-                          <td style="max-width:200px" :title="l.anchor_text || ''">
-                            <div class="truncate" x-text="l.anchor_text || '—'"></div>
-                          </td>
-                          <td x-text="fmt.position(l.link_position)"></td>
-                          <td x-text="l.is_internal ? 'Si' : 'No'"></td>
-                          <td x-text="l.follow ? 'Si' : l.follow === false ? 'No' : '—'"></td>
-                          <td x-text="l.repeticiones || 1"></td>
+                          <td data-label="Estado"><span class="badge" :class="estadoDestino(d.estado_destino).clase" :data-tip="tipEstadoDestino(d)" x-text="textoEstadoDestino(d)"></span></td>
+                          <td class="num" data-label="Páginas" x-text="fmt.num(d.paginas)"></td>
+                          <td class="num" data-label="Apariciones" x-text="fmt.num(d.apariciones)"></td>
+                          <td class="td-anclas" data-label="Anclas" :title="textoAnclas(d)"><div class="truncate" x-text="textoAnclas(d)"></div></td>
+                          <td class="td-accion"><button type="button" class="btn btn-sm" @click="quienEnlaza(d)">Quién la enlaza</button></td>
                         </tr>
                       </template>
                     </tbody>
                   </table>
                 </div>
-                <div class="pagination">
-                  <span>Página <strong x-text="linksPage"></strong> de <strong x-text="linksPages"></strong></span>
-                  <div class="pagination-buttons">
-                    <button class="btn btn-sm" :disabled="linksPage <= 1" @click="setLinksPage(linksPage - 1)">&laquo;</button>
-                    <button class="btn btn-sm" :disabled="linksPage >= linksPages" @click="setLinksPage(linksPage + 1)">&raquo;</button>
-                  </div>
+              </div>
+            </template>
+
+            <!-- Enlace a enlace. -->
+            <template x-if="links.length > 0 && (linksVista === 'enlaces' || linksFiltra === false)">
+              <div :class="linksCargando && 'enlaces-recargando'">
+                <div class="table-wrap">
+                  <table class="tabla-tarjetas tabla-enlaces" data-testid="enlaces-tabla">
+                    <thead>
+                      <tr>
+                        <th>Página que enlaza</th>
+                        <th>Destino</th>
+                        <template x-if="linksFiltra !== false"><th>Estado del destino</th></template>
+                        <th>Texto del enlace</th>
+                        <th>Posición</th>
+                        <th>Tipo</th>
+                        <th>Follow</th>
+                        <th data-tip="Cuántas veces aparece este mismo enlace (mismo destino, texto y posición) en la página de origen: el menú de escritorio y el de móvil son dos apariciones">Veces</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="l in links" :key="l.id">
+                        <tr>
+                          <td class="td-url" data-label="Página" :title="l.from_url || ''">
+                            <div class="truncate">
+                              <a x-show="l.from_url_id" :href="'#/rastreos/' + job.id + '/url/' + l.from_url_id" x-text="l.from_url || '—'"></a>
+                            </div>
+                          </td>
+                          <td class="td-url" data-label="Destino" :title="l.to_url"><div class="truncate" x-text="l.to_url"></div></td>
+                          <template x-if="linksFiltra !== false">
+                            <td data-label="Estado"><span class="badge" :class="estadoDestino(l.estado_destino).clase" :data-tip="tipEstadoDestino(l)" x-text="textoEstadoDestino(l)"></span></td>
+                          </template>
+                          <td data-label="Texto" :title="l.anchor_text || l.alt_text || ''">
+                            <div class="truncate" x-text="l.anchor_text || (l.alt_text ? 'Imagen: ' + l.alt_text : '—')"></div>
+                          </td>
+                          <td data-label="Posición" x-text="fmt.position(l.link_position)"></td>
+                          <td data-label="Tipo" x-text="l.is_internal ? 'Interno' : 'Externo'"></td>
+                          <td data-label="Follow" :class="l.follow === false ? 'severity-warning' : ''" x-text="l.follow ? 'Sí' : l.follow === false ? 'No' : '—'"></td>
+                          <td class="num" data-label="Veces" x-text="l.repeticiones || 1"></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </template>
+
+            <template x-if="links.length > 0">
+              <div class="pagination">
+                <span>Página <strong x-text="fmt.num(linksPage)"></strong> de <strong x-text="fmt.num(linksPages)"></strong></span>
+                <div class="pagination-buttons">
+                  <button class="btn btn-sm" :disabled="linksPage <= 1 || linksCargando" @click="setLinksPage(linksPage - 1)" aria-label="Página anterior">&laquo;</button>
+                  <button class="btn btn-sm" :disabled="linksPage >= linksPages || linksCargando" @click="setLinksPage(linksPage + 1)" aria-label="Página siguiente">&raquo;</button>
                 </div>
               </div>
             </template>
@@ -5155,6 +5323,9 @@
                   Este censo se analizó antes de medir los clics desde la home: hay que volver a analizarlo.</div>
                 <div class="text-sm text-dim"
                      x-text="(n => fmt.num(n) + (n === 1 ? ' página la enlaza · ' : ' páginas la enlazan · '))(urlDetail.unique_inlinks_count ?? urlDetail.inlinks_count) + fmt.num(urlDetail.inlinks_count) + (urlDetail.inlinks_count === 1 ? ' enlace entrante' : ' enlaces entrantes')"></div>
+                <!-- Quien la enlaza, con filtros y sin el tope de 200 de la ficha (revision de UX del 25-oct, 2.8). -->
+                <a href="#" class="text-sm" x-show="urlDetail.inlinks_count" data-testid="ficha-quien-enlaza"
+                   @click.prevent="irAEnlaces(urlDetail.url_hash ? { destino_hash: urlDetail.url_hash } : { destino: urlDetail.url, exacto: true }, 'enlaces')">Ver quién la enlaza</a>
                 <div class="text-sm text-dim" x-show="urlDetail.pagerank_score != null"
                      x-text="'PageRank ' + urlDetail.pagerank_score + ' de 100'"></div>
               </div>
@@ -5457,7 +5628,11 @@
                           x-text="fmt.num(urlDetail.inlinks?.length || 0) + ((urlDetail.inlinks?.length || 0) >= 200 ? ' primeras filas: hay más' : ' filas')"></span>
                   </div>
                   <div class="text-sm text-dim" style="margin-bottom:.5rem" x-show="(urlDetail.inlinks?.length || 0) >= 200"
-                       x-text="'La ficha trae como mucho 200 filas. El análisis cuenta ' + fmt.num(urlDetail.inlinks_count || 0) + ' enlaces internos que llegan aquí (por aparición). La lista entera: pestaña URLs › CSV › Enlaces que apuntan a estas URLs.'"></div>
+                       x-text="'La ficha trae como mucho 200 filas. El análisis cuenta ' + fmt.num(urlDetail.inlinks_count || 0) + ' enlaces internos que llegan aquí (por aparición). La lista entera, con filtros, en la pestaña Enlaces.'"></div>
+                  <!-- Quien la enlaza, con filtros y sin el tope de 200 (revision de UX del 25-oct, 2.8). -->
+                  <p class="text-sm" style="margin:0 0 .5rem" x-show="urlDetail.inlinks_count">
+                    <a href="#" data-testid="ficha-quien-enlaza-lista"
+                       @click.prevent="irAEnlaces(urlDetail.url_hash ? { destino_hash: urlDetail.url_hash } : { destino: urlDetail.url, exacto: true }, 'enlaces')">Ver todas las páginas que la enlazan en Enlaces</a></p>
                   <template x-if="urlDetail.inlinks && urlDetail.inlinks.length > 0">
                     <div class="table-wrap">
                       <table>
