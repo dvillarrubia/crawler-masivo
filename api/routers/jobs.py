@@ -11,7 +11,7 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Upload
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from shared.cola import encolar
+from shared.cola import en_orden, encolar
 from shared.database import get_session
 from shared.models import Job, Url, Issue, Link
 
@@ -40,6 +40,28 @@ def _reloj() -> float:
     cuelga en vez de fallar; me paso al escribir el test del presupuesto.
     """
     return time.monotonic()
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/cola  --  el orden real de salida de la cola de rastreos
+# ---------------------------------------------------------------------------
+# Antes de las rutas `/{job_id}`: con el id tipado como UUID, «cola» acabaria
+# en un 422 en vez de llegar aqui.
+@router.get("/cola")
+def get_cola():
+    """Los ids que esperan en Redis, del primero en salir al ultimo.
+
+    La vista Produccion dice «el 2.º en la cola» con este orden, que es el que
+    usa el worker (FIFO, `shared/cola.py`), y no con `created_at`: una
+    reanudacion vuelve al final aunque el job se creara hace dias (revision de
+    UX del 25-oct, 2.12). Sin Redis se dice que no se sabe (`disponible`
+    false) en vez de devolver una cola vacia, que se leeria «no espera nadie».
+    """
+    try:
+        orden = en_orden(get_redis())
+    except Exception:
+        return {"disponible": False, "orden": []}
+    return {"disponible": True, "orden": orden}
 
 
 # ---------------------------------------------------------------------------

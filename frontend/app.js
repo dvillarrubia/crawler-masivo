@@ -278,6 +278,67 @@ const fmt = {
     if (dias < 30) return 'hace ' + dias + ' días';
     return fmt.dia(d);
   },
+  // La hora estimada de fin de un rastreo, redondeada a 5 min: una
+  // estimacion con minutos exactos aparenta una precision que no tiene
+  // (revision de UX del 25-oct, 2.12).
+  hacia: d => {
+    if (!d) return '';
+    const r = new Date(Math.round(new Date(d).getTime() / 300000) * 300000);
+    const hora = r.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    const dia = new Date(r); dia.setHours(0, 0, 0, 0);
+    const dias = Math.round((dia - hoy) / 86400000);
+    if (dias <= 0) return 'hacia las ' + hora;
+    if (dias === 1) return 'mañana hacia las ' + hora;
+    return 'hacia el ' + r.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' }) + ', a las ' + hora;
+  },
+  // «dentro de 3 h», «dentro de 6 días»: lo que falta para un disparo.
+  dentroDe: d => {
+    if (!d) return '';
+    const s = Math.floor((new Date(d).getTime() - Date.now()) / 1000);
+    if (s < 60) return 'en un momento';
+    if (s < 3600) return 'dentro de ' + Math.floor(s / 60) + ' min';
+    if (s < 86400) return 'dentro de ' + Math.floor(s / 3600) + ' h';
+    // A partir de un dia, por dias de calendario (como fmt.hacia), no
+    // redondeando horas: 28 h desde las 23:00 de un lunes es el miercoles,
+    // no «mañana» (revision de 2.12).
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    const dia = new Date(d); dia.setHours(0, 0, 0, 0);
+    const dias = Math.round((dia - hoy) / 86400000);
+    return dias === 1 ? 'mañana' : 'dentro de ' + dias + ' días';
+  },
+  // Una fecha en la zona horaria de la programacion, no en la del navegador:
+  // «lun, 2 nov, 03:00». Va siempre con fmt.zona al lado (V44).
+  enZona: (d, zona) => {
+    if (!d) return '—';
+    const op = { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' };
+    try { return new Date(d).toLocaleString('es-ES', { ...op, timeZone: zona || 'Europe/Madrid' }); }
+    catch (_) { return new Date(d).toLocaleString('es-ES', op); }
+  },
+  // «hora de Madrid» para Europe/Madrid; para otra zona, su ciudad.
+  zona: z => {
+    const zona = z || 'Europe/Madrid';
+    if (zona === 'UTC' || zona === 'Etc/UTC') return 'hora UTC';
+    return 'hora de ' + zona.split('/').pop().replaceAll('_', ' ');
+  },
+  // Por que se lanzo o no la ultima vez (`programaciones.ultimo_motivo`, que
+  // escribe el worker con `toca_lanzar`). «toca» a secas no se entendia como
+  // estado (V44); lo que no se reconoce se ensena tal cual.
+  motivo: m => {
+    if (!m) return '';
+    if (m === 'toca') return 'lanzado a su hora';
+    if (m.startsWith('toca (con ')) {
+      const r = m.match(/con (?:(\d+) days?, )?(\d+):(\d+):\d+/);
+      if (!r) return 'lanzado con retraso';
+      const min = (+(r[1] || 0)) * 1440 + (+r[2]) * 60 + (+r[3]);
+      return 'lanzado con ' + (min < 60 ? min + ' min' : fmt.lapso(min * 60000)) + ' de retraso';
+    }
+    if (m.startsWith('disparo perdido')) return 'no se lanzó: el worker llegó tarde a la hora y se espera al siguiente';
+    if (m.startsWith('el rastreo anterior')) return 'no se lanzó: el rastreo anterior de esta programación seguía sin terminar';
+    if (m === 'todavia no toca') return 'todavía no le toca';
+    if (m === 'sin proxima ejecucion calculada') return 'no se lanzó: no tenía calculada la próxima ejecución';
+    return m;
+  },
   // Una expresion cron en castellano. Solo los patrones que se usan de
   // verdad (diario, semanal, quincenal, mensual, cada N horas); lo demas se
   // devuelve tal cual, que es mejor que una traduccion inventada.
@@ -536,6 +597,13 @@ function app() {
     // Navegacion
     view: 'jobs',
     programaciones: [],
+    // Produccion (revision de UX del 25-oct, 2.12): lo que corre, lo que
+    // espera y lo que va a dispararse, en una sola vista. `cola` es el orden
+    // real de Redis (GET /jobs/cola) o null si no se sabe; `muestras` guarda
+    // por job las cuentas vistas en cada refresco, para medir el ritmo.
+    prod: { estado: 'cargando', error: '', enCurso: [], enCola: [], cola: null,
+            progreso: {}, muestras: {}, sinCliente: null },
+    prodTimer: null,
     programarAbierto: false,
     programarNombre: '',
     programarCron: '0 3 * * 1',
@@ -834,6 +902,7 @@ function app() {
         return '#/clientes/' + this.cliente.id + (t && t !== 'estado' ? '/' + (CLIENTE_TAB_SLUG[t] || t) : '');
       }
       if (v === 'programados') return '#/programados';
+      if (v === 'produccion') return '#/produccion';
       if (!this.job) return '';
       const base = '#/rastreos/' + this.job.id;
       if (v === 'explorer') {
@@ -898,6 +967,8 @@ function app() {
           }
         } else if (p[0] === 'programados') {
           await this.verProgramados();
+        } else if (p[0] === 'produccion') {
+          await this.verProduccion();
         } else if (p[0] === 'rastreos') {
           if (!this.job || this.job.id !== p[1]) await this.openJob(p[1]);
           if (!this.job) return;
@@ -984,11 +1055,13 @@ function app() {
     // Seccion de la barra superior que se marca como activa.
     // Un rastreo con cliente cuelga de Clientes, no de Rastreos: se llega
     // casi siempre desde la ficha del cliente (revision de UX del 25-oct, 1.4).
+    // La barra tiene dos secciones, Clientes y Produccion; Programados y la
+    // lista de todos los rastreos son apartados de Produccion (revision de UX
+    // del 25-oct, 2.12). Un rastreo sin cliente cuelga de Produccion.
     seccion() {
       if (['clients', 'client'].includes(this.view)) return 'clientes';
-      if (this.view === 'programados') return 'programados';
       if (['detail', 'explorer', 'url-detail', 'informe'].includes(this.view) && this.job && this.job.cliente_id) return 'clientes';
-      return 'rastreos';
+      return 'produccion';
     },
 
     // El cliente (y el perfil) de lo que se esta mirando, para que «Nuevo
@@ -1020,7 +1093,7 @@ function app() {
           m.push({ texto: 'Clientes', href: '#/clientes' });
           m.push({ texto: this.job.cliente_nombre || this.job.client_id, href: '#/clientes/' + this.job.cliente_id });
         } else {
-          m.push({ texto: 'Rastreos', href: '#/rastreos' });
+          m.push({ texto: 'Todos los rastreos', href: '#/rastreos' });
         }
         m.push({ texto: this.job.name, href: '#/rastreos/' + this.job.id });
         // El Explorador es la pestana URLs de la ficha, y la ficha de una URL
@@ -2428,8 +2501,175 @@ function app() {
       }
     },
     async verProgramados() {
+      this._salirDeJob();
       this.view = 'programados';
       await this.cargarProgramaciones();
+    },
+
+    // ------- Produccion (revision de UX del 25-oct, 2.12) -------
+    // Para decidir si esperar, lanzar otro o desplegar (que corta lo que esta
+    // en marcha) y saber cuando estara el censo. Se refresca sola cada 10 s
+    // mientras se mira; el temporizador se para solo al salir de la vista.
+    async verProduccion() {
+      this._salirDeJob();
+      this.view = 'produccion';
+      await this.cargarProduccion();
+      if (this.prodTimer) clearInterval(this.prodTimer);
+      this.prodTimer = setInterval(() => {
+        if (this.view !== 'produccion') { clearInterval(this.prodTimer); this.prodTimer = null; return; }
+        if (!document.hidden) this.cargarProduccion(true);
+      }, 10000);
+    },
+
+    async cargarProduccion(refresco = false) {
+      if (!refresco) this.prod.estado = 'cargando';
+      try {
+        const lista = s => api(`/jobs?status=${s}&page_size=100`).then(d => d.items || []);
+        const [corriendo, analizando, esperando] = await Promise.all([
+          lista('running'), lista('analyzing'), lista('pending')]);
+        if (!refresco || !this.programaciones.length) this.cargarProgramaciones();
+        // Sin cliente: solo el total, para el aviso con enlace a la lista.
+        api('/jobs?sin_cliente=true&page_size=1').then(d => { this.prod.sinCliente = d.total; }).catch(() => {});
+
+        // El progreso de cada rastreo en marcha, del mismo endpoint que la
+        // ficha (crawled_count de la BD y pending_count del planificador).
+        const progreso = {};
+        await Promise.all(corriendo.map(j => api(`/jobs/${j.id}/progress`)
+          .then(p => { progreso[j.id] = p; }).catch(() => {})));
+        const ahora = Date.now();
+        const muestras = {};
+        for (const j of corriendo) {
+          const hechas = Math.max((progreso[j.id] || {}).crawled_count || 0, j.total_urls_crawled || 0);
+          // Las ultimas 10 min como mucho: el ritmo de ahora, no el de la
+          // primera hora.
+          muestras[j.id] = [...(this.prod.muestras[j.id] || []), { t: ahora, n: hechas }]
+            .filter(m => ahora - m.t <= 600000);
+        }
+
+        // La posicion solo con el orden real de la cola (Redis, FIFO). Sin
+        // el (API anterior a 2.12, Redis caido) se ordena por cuando se
+        // crearon y NO se dice el puesto: una reanudacion vuelve al final de
+        // la cola aunque el job sea de hace dias. Solo se pregunta si hay
+        // alguien esperando.
+        let cola = null;
+        if (esperando.length) {
+          try {
+            const c = await api('/jobs/cola');
+            if (c && c.disponible && Array.isArray(c.orden)) cola = c.orden;
+          } catch (_) { cola = null; }
+        }
+        esperando.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        if (cola) {
+          const pos = id => { const i = cola.indexOf(id); return i < 0 ? Infinity : i; };
+          esperando.sort((a, b) => pos(a.id) - pos(b.id));
+        }
+        this.prod = { ...this.prod, estado: 'ok', error: '', enCurso: [...corriendo, ...analizando],
+                      enCola: esperando, cola, progreso, muestras };
+      } catch (e) {
+        // En un refresco fallido se queda lo ultimo bueno: vaciar la vista
+        // diria «no hay nada en marcha», que es justo lo que no se sabe.
+        if (!refresco || this.prod.estado !== 'ok') { this.prod.estado = 'error'; this.prod.error = e.message; }
+      }
+    },
+
+    // «1.º en la cola», o null si no se puede afirmar: sin el orden de Redis,
+    // o un pendiente que no esta en la lista (arrancando en este momento, o
+    // perdido tras un reinicio hasta que el worker lo recupere).
+    puestoEnCola(j) {
+      if (!this.prod.cola) return null;
+      const i = this.prod.cola.indexOf(j.id);
+      return i < 0 ? null : i + 1;
+    },
+
+    // Lo que se puede decir de un rastreo en marcha: hechas, total estimado,
+    // porcentaje y hora de fin. Cada cifra solo si hay base para ella.
+    //  - Total: lo rastreado + lo que el planificador tiene en cola (es una
+    //    cota baja: la cola crece al descubrir enlaces, de ahi el «~»), sin
+    //    pasar del tope max_urls. Sin la cola, solo el tope, como maximo.
+    //  - Ritmo: medido en esta pagina entre refrescos (1 min como minimo).
+    //    No se usa started_at: al reanudar un job el worker lo pone a la hora
+    //    de la reanudacion y la cuenta de paginas no vuelve a cero, asi que
+    //    hechas/minutos saldria inflado y la hora de fin demasiado pronto. Lo
+    //    que no se puede afirmar no se afirma: hasta tener medida propia,
+    //    «calculando…» (hallazgo de la revision de 2.12).
+    //  - Hora de fin: solo con ritmo y con un total que no sea solo el tope.
+    //  - Terminando: lo hecho ya llega al total (la cola del planificador en 0,
+    //    o el tope alcanzado). Ahi no hay hora que calcular.
+    //  - Sin avance: 2 min o mas de muestras sin una pagina nueva.
+    estimacion(j) {
+      const p = this.prod.progreso[j.id] || {};
+      const hechas = Math.max(p.crawled_count || 0, j.total_urls_crawled || 0);
+      const tope = (j.config && j.config.max_urls) || null;
+      let total = null, tipo = null;
+      if (p.pending_exacto && p.pending_count != null) {
+        total = hechas + p.pending_count; tipo = 'aprox';
+        if (tope && total >= tope) { total = tope; tipo = 'tope'; }
+      } else if (tope) {
+        total = tope; tipo = 'maximo';
+      }
+      const pct = total ? Math.min(100, (hechas / total) * 100) : null;
+      const terminando = total != null && hechas >= total;
+
+      let ritmo = null, sinAvanceMin = null;  // ritmo en paginas por minuto
+      const m = this.prod.muestras[j.id] || [];
+      if (m.length >= 2) {
+        const lapso = m[m.length - 1].t - m[0].t;
+        const dn = m[m.length - 1].n - m[0].n;
+        if (lapso >= 60000 && dn > 0) ritmo = dn / (lapso / 60000);
+        else if (lapso >= 120000 && dn <= 0) sinAvanceMin = Math.floor(lapso / 60000);
+      }
+
+      let fin = null;
+      if (ritmo && total && tipo !== 'maximo' && !terminando) {
+        fin = new Date(Date.now() + ((total - hechas) / ritmo) * 60000);
+      }
+      return { hechas, total, tipo, pct, ritmo, fin, terminando, sinAvanceMin };
+    },
+
+    // «1.374 / ~4.000 · termina hacia las 14:20»
+    textoEstimacion(j) {
+      const e = this.estimacion(j);
+      let t = fmt.num(e.hechas);
+      // Las filas pueden pasar del tope (cada salto de una redireccion es una
+      // fila): «5.600 / 1.000» no se entiende, se dice el tope aparte.
+      if (e.terminando && e.hechas > e.total)
+        return t + ' páginas · ' + (e.tipo === 'aprox' ? 'no queda nada en cola' : 'llegó al tope de ' + fmt.num(e.total)) + ', terminando';
+      if (e.tipo === 'aprox') t += ' / ~' + fmt.num(e.total);
+      else if (e.tipo === 'tope') t += ' / ' + fmt.num(e.total) + ' (el tope)';
+      else if (e.tipo === 'maximo') t += ' de ' + fmt.num(e.total) + ' como mucho';
+      else t += ' páginas';
+      if (e.terminando) t += e.tipo === 'aprox' ? ' · no queda nada en cola, terminando' : ' · llegó al tope, terminando';
+      else if (e.sinAvanceMin) t += ' · sin páginas nuevas en los últimos ' + e.sinAvanceMin + ' min';
+      else if (e.fin) t += ' · termina ' + fmt.hacia(e.fin);
+      else if (e.tipo !== 'maximo' && e.total) t += ' · calculando la hora de fin…';
+      return t;
+    },
+
+    // La frase de arriba: los que rastrean, los que ya solo se analizan y los
+    // que esperan, por separado (un analisis no es un rastreo «en marcha»,
+    // aunque desplegar tambien lo corte).
+    get resumenProduccion() {
+      const n = (x, uno, varios) => x === 1 ? uno : fmt.num(x) + ' ' + varios;
+      const rastreando = this.prod.enCurso.filter(j => j.status === 'running').length;
+      const analizando = this.prod.enCurso.length - rastreando;
+      const partes = [];
+      if (rastreando) partes.push(n(rastreando, '1 rastreo en marcha', 'rastreos en marcha'));
+      if (analizando) partes.push(n(analizando, '1 analizándose', 'analizándose'));
+      if (this.prod.enCola.length) partes.push(n(this.prod.enCola.length, '1 esperando', 'esperando'));
+      if (partes.length < 2) return partes.join('');
+      return partes.slice(0, -1).join(', ') + ' y ' + partes[partes.length - 1];
+    },
+
+    // Los proximos disparos de las programaciones activas, el mas cercano primero.
+    get proximosDisparos() {
+      return this.programaciones.filter(p => p.activa && p.proxima_ejecucion)
+        .sort((a, b) => new Date(a.proxima_ejecucion) - new Date(b.proxima_ejecucion));
+    },
+
+    // «Fallidas» solo si alguna fila de la pagina tiene alguna: una columna
+    // de ceros no dice nada y ocupa sitio (revision de UX del 25-oct, V38).
+    get hayFallidas() {
+      return this.jobs.some(j => (j.total_urls_failed || 0) > 0);
     },
 
     async cargarProgramaciones() {

@@ -34,7 +34,7 @@
   <!-- ===== BARRA SUPERIOR =====
        La misma en todas las vistas (UX-06): antes cambiaba de botones segun
        donde estuvieras, y desde la ficha de un rastreo no habia forma de ir a
-       Clientes ni a Programados. Las secciones son enlaces de verdad (#/...),
+       Clientes ni a Programados (hoy, apartado de Produccion). Las secciones son enlaces de verdad (#/...),
        asi que se pueden abrir en otra pestana y el boton atras funciona. -->
   <header class="topbar" style="border-top: 3px solid #5BAE23;">
     <a href="#/clientes" class="topbar-brand" title="Ir al panel de clientes">
@@ -44,10 +44,11 @@
     <nav class="topnav" aria-label="Secciones">
       <a href="#/clientes" :class="seccion() === 'clientes' && 'active'" :aria-current="seccion() === 'clientes' ? 'page' : null">
         <i data-lucide="building-2" style="width:14px;height:14px"></i> Clientes</a>
-      <a href="#/rastreos" :class="seccion() === 'rastreos' && 'active'" :aria-current="seccion() === 'rastreos' ? 'page' : null">
-        <i data-lucide="list" style="width:14px;height:14px"></i> Rastreos</a>
-      <a href="#/programados" :class="seccion() === 'programados' && 'active'" :aria-current="seccion() === 'programados' ? 'page' : null">
-        <i data-lucide="calendar-clock" style="width:14px;height:14px"></i> Programados</a>
+      <!-- Produccion reune lo que antes eran Rastreos y Programados: lo que
+           corre, lo que espera, lo que va a dispararse y el historico
+           (revision de UX del 25-oct, 2.12). -->
+      <a href="#/produccion" :class="seccion() === 'produccion' && 'active'" :aria-current="seccion() === 'produccion' ? 'page' : null">
+        <i data-lucide="activity" style="width:14px;height:14px"></i> Producción</a>
     </nav>
     <div class="topbar-actions">
       <!-- En la ficha del cliente hay uno propio con el cliente puesto: dos
@@ -196,6 +197,145 @@
       </div>
     </template>
 
+    <!-- ===== PRODUCCION: apartados =====
+         Ahora (en curso, en cola, proximos disparos, sin cliente),
+         Programados y Todos los rastreos. Las rutas viejas #/rastreos y
+         #/programados siguen siendo los dos ultimos apartados (revision de
+         UX del 25-oct, 2.12). -->
+    <template x-if="['produccion', 'programados', 'jobs'].includes(view)">
+      <nav class="tabs prod-apartados" aria-label="Apartados de Producción">
+        <a class="tab" href="#/produccion" :class="view === 'produccion' && 'active'" :aria-current="view === 'produccion' ? 'page' : null">
+          <i data-lucide="activity" style="width:14px;height:14px"></i> Ahora</a>
+        <a class="tab" href="#/programados" :class="view === 'programados' && 'active'" :aria-current="view === 'programados' ? 'page' : null">
+          <i data-lucide="calendar-clock" style="width:14px;height:14px"></i> Programados</a>
+        <a class="tab" href="#/rastreos" :class="view === 'jobs' && 'active'" :aria-current="view === 'jobs' ? 'page' : null">
+          <i data-lucide="list" style="width:14px;height:14px"></i> Todos los rastreos</a>
+      </nav>
+    </template>
+
+    <!-- ===== PRODUCCION · AHORA ===== -->
+    <template x-if="view === 'produccion'">
+      <div class="prod">
+        <template x-if="prod.estado === 'cargando' && !prod.enCurso.length">
+          <div class="empty text-dim">Mirando qué hay en marcha…</div>
+        </template>
+        <template x-if="prod.estado === 'error'">
+          <div class="card mb-2" style="border-left:3px solid var(--red)">
+            <strong>No se pudo saber qué hay en marcha.</strong>
+            <span class="text-dim text-sm" x-text="prod.error"></span>
+            <button class="btn btn-sm" style="margin-left:.5rem" @click="cargarProduccion()">Reintentar</button>
+          </div>
+        </template>
+
+        <template x-if="prod.estado === 'ok'">
+          <div>
+            <!-- La respuesta a «¿puedo desplegar?» en una frase. -->
+            <p class="prod-resumen" data-testid="prod-resumen">
+              <template x-if="!prod.enCurso.length && !prod.enCola.length">
+                <span><strong>Producción libre:</strong> no hay ningún rastreo en marcha ni esperando.</span>
+              </template>
+              <template x-if="prod.enCurso.length || prod.enCola.length">
+                <span>
+                  <strong x-text="resumenProduccion"></strong>.
+                  <span class="text-dim" x-show="prod.enCurso.length">Desplegar ahora los cortaría.</span>
+                </span>
+              </template>
+              <span class="text-dim text-sm prod-refresco">Se actualiza sola cada 10 s</span>
+            </p>
+
+            <!-- En curso -->
+            <section class="prod-bloque">
+              <h3 class="prod-titulo">En curso</h3>
+              <template x-if="!prod.enCurso.length">
+                <p class="text-dim text-sm">Nada rastreando ahora mismo.</p>
+              </template>
+              <template x-for="j in prod.enCurso" :key="j.id">
+                <a class="card prod-fila" :href="'#/rastreos/' + j.id" data-testid="prod-en-curso">
+                  <div class="prod-cabeza">
+                    <div class="prod-nombre">
+                      <strong x-text="j.name"></strong>
+                      <span class="text-dim text-sm" x-text="j.cliente_nombre || 'sin cliente'"></span>
+                    </div>
+                    <span class="badge" :class="statusColor(j.status)" x-text="fmt.status(j.status)"></span>
+                  </div>
+                  <template x-if="j.status === 'running'">
+                    <div>
+                      <div class="progress-bar prod-barra" role="progressbar" aria-label="Progreso del rastreo"
+                           :aria-valuenow="estimacion(j).pct != null ? Math.round(estimacion(j).pct) : null" aria-valuemin="0" aria-valuemax="100">
+                        <div class="progress-fill" :class="estimacion(j).pct == null && 'prod-indeterminada'"
+                             :style="'width:' + (estimacion(j).pct != null ? Math.max(1, estimacion(j).pct) : 100) + '%'"></div>
+                      </div>
+                      <div class="prod-cifras">
+                        <span x-text="textoEstimacion(j)"></span>
+                        <span class="text-dim" x-show="j.started_at" x-text="'empezó ' + fmt.ago(j.started_at)" :title="fmt.date(j.started_at)"></span>
+                      </div>
+                    </div>
+                  </template>
+                  <template x-if="j.status === 'analyzing'">
+                    <div class="prod-cifras">
+                      <span x-text="fmt.num(j.total_urls_crawled) + ' páginas rastreadas · analizando los resultados'"></span>
+                    </div>
+                  </template>
+                </a>
+              </template>
+            </section>
+
+            <!-- En cola -->
+            <section class="prod-bloque">
+              <h3 class="prod-titulo">En cola</h3>
+              <template x-if="!prod.enCola.length">
+                <p class="text-dim text-sm">No espera ninguno.</p>
+              </template>
+              <template x-if="prod.enCola.length && !prod.cola">
+                <p class="text-dim text-sm">No se ha podido leer la cola del worker: van por orden de creación, que no siempre es el orden en que entrarán (una reanudación vuelve al final).</p>
+              </template>
+              <template x-for="j in prod.enCola" :key="j.id">
+                <a class="card prod-fila prod-fila-cola" :href="'#/rastreos/' + j.id" data-testid="prod-en-cola">
+                  <span class="prod-puesto" x-text="puestoEnCola(j) ? puestoEnCola(j) + '.º' : '—'"
+                        :title="puestoEnCola(j) ? 'Puesto en la cola del worker' : 'Sin puesto en la cola: o está arrancando en este momento o se quedó fuera y el worker lo recuperará'"></span>
+                  <div class="prod-nombre">
+                    <strong x-text="j.name"></strong>
+                    <span class="text-dim text-sm" x-text="(j.cliente_nombre || 'sin cliente') + ' · creado ' + fmt.ago(j.created_at)" :title="fmt.date(j.created_at)"></span>
+                  </div>
+                </a>
+              </template>
+            </section>
+
+            <!-- Proximos disparos -->
+            <section class="prod-bloque">
+              <h3 class="prod-titulo">Próximos programados
+                <a class="text-sm prod-ver" href="#/programados">Ver todos</a></h3>
+              <template x-if="!proximosDisparos.length">
+                <p class="text-dim text-sm">No hay ninguna programación activa.</p>
+              </template>
+              <template x-for="p in proximosDisparos.slice(0, 5)" :key="p.id">
+                <div class="prod-disparo">
+                  <span class="prod-cuando">
+                    <strong x-text="fmt.enZona(p.proxima_ejecucion, p.zona_horaria)"></strong>
+                    <span class="text-dim text-sm" x-text="fmt.zona(p.zona_horaria) + ' · ' + fmt.dentroDe(p.proxima_ejecucion)"></span>
+                  </span>
+                  <span class="prod-nombre">
+                    <span x-text="p.nombre"></span>
+                    <span class="text-dim text-sm" x-text="fmt.cron(p.cron) !== p.cron ? fmt.cron(p.cron) : 'calendario a medida'"></span>
+                  </span>
+                </div>
+              </template>
+            </section>
+
+            <!-- Sin cliente -->
+            <template x-if="prod.sinCliente">
+              <a class="card aviso-sin-cliente" href="#/rastreos?cliente=ninguno" data-testid="prod-sin-cliente">
+                <i data-lucide="alert-circle" style="width:16px;height:16px;color:var(--orange)"></i>
+                <span><strong x-text="fmt.num(prod.sinCliente)"></strong>
+                  <span x-text="prod.sinCliente === 1 ? 'rastreo no tiene cliente y no cuenta en la evolución de nadie.' : 'rastreos no tienen cliente y no cuentan en la evolución de nadie.'"></span>
+                  Asígnalos desde su ficha (menú ⋯).</span>
+              </a>
+            </template>
+          </div>
+        </template>
+      </div>
+    </template>
+
     <!-- ===== RASTREOS PROGRAMADOS ===== -->
     <template x-if="view === 'programados'">
       <div>
@@ -203,7 +343,7 @@
           <span class="text-dim text-sm">Rastreos que se repiten solos. Los dispara el worker;
             cada uno se compara con el censo anterior del mismo sitio al terminar.</span>
           <span class="text-dim text-sm" style="margin-left:auto"
-                x-text="programaciones.length + ' programaciones'"></span>
+                x-text="programaciones.length === 1 ? '1 programación' : fmt.num(programaciones.length) + ' programaciones'"></span>
         </div>
 
         <template x-if="!programaciones.length">
@@ -215,49 +355,57 @@
           </div>
         </template>
 
+        <!-- Sin cron crudo a la vista (V44): el calendario en castellano y la
+             zona dicha; la expresion queda en el title. Las fechas, en la
+             zona de la programacion y no en la del navegador. En movil la
+             tabla se apila (cada celda con su etiqueta). -->
         <template x-if="programaciones.length">
           <div class="card">
-            <table style="width:100%;font-size:.85rem">
+            <table class="tabla-apilable tabla-programados" style="width:100%;font-size:.85rem">
               <thead><tr>
-                <th style="text-align:left">nombre</th>
-                <th style="text-align:left">cuando</th>
-                <th style="text-align:left">próximo</th>
-                <th style="text-align:left">último</th>
-                <th style="width:7rem"></th>
+                <th style="text-align:left">Nombre</th>
+                <th style="text-align:left">Cuándo</th>
+                <th style="text-align:left">Próximo</th>
+                <th style="text-align:left">Último</th>
+                <th style="width:7rem"><span class="sr-only">Acciones</span></th>
               </tr></thead>
               <tbody>
                 <template x-for="p in programaciones" :key="p.id">
-                  <tr :style="p.activa ? '' : 'opacity:.5'">
-                    <td>
+                  <tr :class="!p.activa && 'fila-en-pausa'">
+                    <td data-etiqueta="Nombre">
                       <div x-text="p.nombre"></div>
-                      <div class="text-dim" style="font-size:.75rem"
-                           x-text="(p.seeds || []).join(', ').slice(0, 70)"></div>
+                      <div class="text-dim truncate" style="font-size:.75rem;max-width:22rem"
+                           x-text="(p.seeds || []).join(', ')" :title="(p.seeds || []).join('\n')"></div>
                     </td>
-                    <td>
-                      <div x-text="fmt.cron(p.cron)"></div>
-                      <div class="text-dim" style="font-size:.75rem">
-                        <code x-text="p.cron"></code> · <span x-text="p.zona_horaria || 'Europe/Madrid'"></span>
-                      </div>
+                    <td data-etiqueta="Cuándo" :title="'Expresión: ' + p.cron">
+                      <div x-text="fmt.cron(p.cron) !== p.cron ? fmt.cron(p.cron) : 'calendario a medida'"></div>
+                      <div class="text-dim" style="font-size:.75rem" x-text="fmt.zona(p.zona_horaria)"></div>
                     </td>
-                    <td>
-                      <span x-text="p.activa ? fmt.date(p.proxima_ejecucion) : 'en pausa'"></span>
+                    <td data-etiqueta="Próximo">
+                      <template x-if="p.activa">
+                        <div>
+                          <div x-text="fmt.enZona(p.proxima_ejecucion, p.zona_horaria)"></div>
+                          <div class="text-dim" style="font-size:.75rem" x-show="p.proxima_ejecucion" x-text="fmt.dentroDe(p.proxima_ejecucion)"></div>
+                        </div>
+                      </template>
+                      <template x-if="!p.activa"><span class="text-dim">en pausa</span></template>
                     </td>
-                    <td>
+                    <td data-etiqueta="Último">
                       <template x-if="p.ultimo_job_id">
-                        <a href="#" @click.prevent="openJob(p.ultimo_job_id)"
-                           x-text="fmt.date(p.ultima_ejecucion)"></a>
+                        <a :href="'#/rastreos/' + p.ultimo_job_id"
+                           x-text="fmt.enZona(p.ultima_ejecucion, p.zona_horaria)"></a>
                       </template>
                       <template x-if="!p.ultimo_job_id"><span class="text-dim">nunca</span></template>
                       <!-- Por que no se lanzo la ultima vez. Una programacion que
                            deja de dispararse sin decir por que es indistinguible
                            de una que nadie miro. -->
                       <div class="text-dim" style="font-size:.73rem" x-show="p.ultimo_motivo"
-                           x-text="p.ultimo_motivo"></div>
+                           x-text="fmt.motivo(p.ultimo_motivo)" :title="p.ultimo_motivo"></div>
                     </td>
-                    <td style="text-align:right;white-space:nowrap">
+                    <td class="celda-acciones" style="text-align:right;white-space:nowrap">
                       <button class="btn btn-sm" @click="alternarProgramacion(p)"
                               x-text="p.activa ? 'Pausar' : 'Reanudar'"></button>
-                      <button class="btn btn-sm" @click="borrarProgramacion(p)"
+                      <button class="btn btn-sm" @click="borrarProgramacion(p)" :aria-label="'Quitar la programación ' + p.nombre"
                               data-tip="Quita el calendario. Los rastreos que ya lanzo NO se borran">&times;</button>
                     </td>
                   </tr>
@@ -1583,7 +1731,8 @@
                     <th data-tip="Estado actual: pendiente, en curso, completado, fallido o cancelado">Estado</th>
                     <th data-tip="Número de URLs semilla desde las que empieza el rastreo">Semillas</th>
                     <th data-tip="URLs rastreadas con éxito hasta ahora">Rastreadas</th>
-                    <th data-tip="URLs que dieron error (timeout, DNS, conexión rechazada, etc.)">Fallidas</th>
+                    <!-- Solo si alguna fila tiene fallidas (V38): una columna de ceros no dice nada. -->
+                    <th x-show="hayFallidas" data-tip="URLs que dieron error (timeout, DNS, conexión rechazada, etc.)">Fallidas</th>
                     <th data-tip="Cuando se creo el trabajo">Creado</th>
                     <th data-tip="Tiempo total desde el inicio hasta la finalización del rastreo">Duración</th>
                   </tr>
@@ -1616,7 +1765,7 @@
                       <td><span class="badge" :class="statusColor(j.status)" x-text="fmt.status(j.status)"></span></td>
                       <td x-text="j.seeds?.length || 0"></td>
                       <td x-text="fmt.num(j.total_urls_crawled)"></td>
-                      <td x-text="fmt.num(j.total_urls_failed)"></td>
+                      <td x-show="hayFallidas" x-text="fmt.num(j.total_urls_failed)"></td>
                       <td x-text="fmt.ago(j.created_at)" :title="fmt.date(j.created_at)"></td>
                       <td>
                         <template x-if="j.started_at && j.completed_at">

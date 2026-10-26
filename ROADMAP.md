@@ -1019,6 +1019,12 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   botón «Volver»: la miga «URLs» y la pestaña vuelven a la última consulta con
   sus filtros y su página. Queda pendiente que el panel lateral de una fila
   sea una versión recortada de la misma ficha de URL (hoy es otro componente).
+- **Producción** (revisión de UX del 25-oct, 2.12; hecho): la barra queda en
+  Clientes · Producción, con lo que corre (barra, total estimado y hora de fin
+  cuando hay base), lo que espera con su puesto real en la cola
+  (`GET /api/jobs/cola`), los próximos disparos y los rastreos sin cliente;
+  Programados y Todos los rastreos son apartados suyos. Detalle en
+  `docs/AUDITORIA_UX.md`.
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 

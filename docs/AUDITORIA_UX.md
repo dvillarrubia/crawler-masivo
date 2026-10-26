@@ -193,6 +193,31 @@ Cosas que no estaban en la auditoría y aparecieron al hacerla:
   cada fila sin pintarlos; pasarlos a la ficha como `sitemaps` aligeraría la
   lista.
 
+### Revisión del 25-oct · 2.12 Producción
+
+- [x] La barra pasa a **Clientes · Producción**. Producción tiene tres apartados:
+  **Ahora** (`#/produccion`: en curso, en cola, próximos programados y rastreos
+  sin cliente), **Programados** (`#/programados`) y **Todos los rastreos**
+  (`#/rastreos`, el histórico con sus filtros). Las rutas viejas siguen
+  funcionando y abren su apartado.
+- En curso con barra y «1.374 / ~4.000 · termina hacia las 14:20». El total es lo
+  rastreado + la cola del planificador (`pending_count`), sin pasar de
+  `max_urls`; sin cola, solo «de N como mucho» y sin hora de fin. El ritmo se
+  mide solo entre refrescos de la propia vista (1 min como mínimo): no se usa
+  `started_at`, porque al reanudar un rastreo el worker lo reinicia y la cuenta
+  de páginas no, y la hora de fin saldría demasiado pronto. Sin base,
+  «calculando la hora de fin…». Con la cola del planificador en 0 o el tope
+  alcanzado, «terminando»; con 2 min sin páginas nuevas, «sin páginas nuevas en
+  los últimos N min». La frase de arriba separa los que rastrean de los que ya
+  solo se analizan.
+- En cola con su puesto según el orden real de Redis (`GET /api/jobs/cola`, FIFO).
+  Sin ese dato (API anterior o Redis caído) se ordena por creación y no se
+  dice el puesto.
+- La columna Fallidas solo si alguna fila tiene alguna (V38). En Programados,
+  sin cron crudo a la vista, la zona dicha («hora de Madrid»), las fechas en la
+  zona de la programación y «toca» → «lanzado a su hora» (V44). En móvil la
+  tabla se apila.
+
 ### Cómo se probó
 
 Cada fase, con una API local montada sobre el worktree (`docker run … -v
