@@ -87,17 +87,26 @@ def avisos_de_config(config: dict[str, Any], historial: dict | None = None) -> l
                      else "el sitio lo bloqueó (WAF o captcha)")
             texto = f"El rastreo {cuando} se paró porque {causa}."
         else:
+            pct = (100 * historial["no_validas"] / historial["respuestas"]) if historial["respuestas"] else None
             texto = (f"En el rastreo {cuando}, {_num(historial['no_validas'])} de "
-                     f"{_num(historial['respuestas'])} respuestas fueron un muro (WAF, captcha o 429), "
-                     "aunque no llegó a pararse.")
+                     f"{_num(historial['respuestas'])} respuestas"
+                     + (f" ({_num(round(pct, 1))} %)" if pct is not None else "")
+                     + " fueron un muro (WAF, captcha o 429), aunque no llegó a pararse.")
         if isinstance(antes, int):
-            comparado = ("las mismas o más" if por_dominio >= antes else "menos")
+            comparado = ("más que entonces" if por_dominio > antes
+                         else "las mismas" if por_dominio == antes else "menos que entonces")
             texto += (f" Aquel salió con {_num(antes)} peticiones a la vez por dominio; este saldría con "
-                      f"{_num(por_dominio)} ({comparado}).")
-            nivel = "peligro" if por_dominio >= antes else "aviso"
+                      f"{_num(por_dominio)}, {comparado}.")
+            igual_o_mas = por_dominio >= antes
         else:
             texto += f" Este saldría con {_num(por_dominio)} peticiones a la vez por dominio."
-            nivel = "aviso"
+            igual_o_mas = True
+        # Pararse por un bloqueo y salir igual o mas rapido es lo que hay que
+        # mirar antes de lanzar; unos muros sueltos que no lo pararon, no.
+        if historial["parado"]:
+            nivel = "peligro" if igual_o_mas else "aviso"
+        else:
+            nivel = "aviso" if igual_o_mas else "info"
         if historial["parado"] and not float(cb.get("request_delay") or 0):
             texto += " Bajar la concurrencia o poner una pausa entre peticiones suele bastar."
         avisos.append(_aviso(nivel, texto, "concurrent_requests_per_domain"))

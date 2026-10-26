@@ -1068,6 +1068,22 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
 - **Alta de cliente guiada** (2.14; decisión 194; en local): nombre y dominio,
   perfil «Sitio principal» creado solo y «Siguiente paso» con lanzar canario,
   lanzar censo o programar cada semana.
+- **Configuración en tres niveles** (revisión de UX del 25-oct, 2.4; decisión
+  196; en local, sin desplegar): el mismo formulario para el cliente, el perfil
+  y Nuevo rastreo, sin JSON a mano (queda en «Avanzado»). Cada campo dice si
+  viene del cliente, del perfil o es de serie, o si se ha cambiado ahí, con
+  «volver al heredado»; se valida con los límites de `JobConfig`. «Así
+  rastreará» enseña la config con la que saldría el próximo rastreo y de dónde
+  viene cada valor (`config-resuelta` con borrador), con avisos que solo
+  afirman lo que se sabe: el del WAF, si un rastreo anterior del cliente se
+  paró por un bloqueo o tuvo muros. Nuevo rastreo trae el cliente y su perfil
+  y lo avanzado plegado; sin cliente lo avisa. Configuración del cliente en
+  secciones plegables con índice.
+- **Ajustes de la agencia** (2.5; decisión 196; en local): bot de Slack,
+  llaves de Search Console, si están las claves de los modelos y su tope,
+  importar backup y tema, fuera de la ficha de cada cliente. **Pendiente:** las
+  claves de Gemini del análisis semántico siguen en la base de datos (forma
+  anterior a la decisión 141); moverlas al servidor como las llaves de GSC.
 - **Pestaña IA** (revisión de UX del 25-oct, 2.9; hecho en local): el análisis
   enriquecido deja la cabecera del censo y «Avanzado › Enriquecido» y pasa a
   una pestaña propia, «IA», con lo ya preguntado, la respuesta de cada vez y

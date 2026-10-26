@@ -54,6 +54,7 @@
 | `database.py` | Engine + SessionLocal factory |
 | `config.py` | Env vars + SEO thresholds (title/description min/max lengths) |
 | `clientes.py` | Slug, fusion profunda de configuracion (`fusionar_config`), cliente a partir del `client_id` de texto y la migracion de esos textos (decision 83) |
+| `avisos_config.py` (api/) | Avisos de «Así rastreará» (decisión 196): `historial_de_bloqueos` (el último rastreo del cliente parado por un bloqueo o con muros; best-effort) y `avisos_de_config` sobre la config resuelta |
 | `credenciales.py` | `credencial(integracion)`: el secreto de una integracion, leido del ENTORNO (nunca de la BD) y solo dentro del prefijo de su tipo (decision 83) |
 | `llm.py` | Transporte UNICO hacia OpenRouter (hoy Jev por `/systemone`): asincrono (httpx), ritmo por minuto con AIMD ante 429, reintentos, corte ante 402/401/404, circuito abierto y `usage.cost` (decision 84) |
 | `decisiones.py` | `CapaDecisiones.preguntar(estados, preguntas)`: cache (memoria, Redis, tabla `decisions`), agrupacion por estado, presupuesto (ejecucion, mensual del cliente, global), degradacion a `sin_decidir` y observabilidad por job (decision 84). Solo la dispara `enriquecido.py` |
@@ -93,7 +94,9 @@
 | GET/PATCH/DELETE | `/api/clients/{id}` | Ficha, edicion y borrado (`?confirmar=<slug>`, `?con_jobs=`) |
 | GET/POST | `/api/clients/{id}/profiles` | Perfiles de rastreo del cliente. El POST acepta `desde_job_id`: el perfil guarda lo que la config de ese rastreo tiene de distinto respecto al cliente, y lo que no puede guardar lo dice en `avisos` (decisión 193) |
 | GET/PATCH/DELETE | `/api/clients/{id}/profiles/{pid}` | Un perfil |
-| GET | `/api/clients/{id}/config-resuelta` | Lo que heredaria un job (`?profile_id=`), para precargar el modal |
+| GET | `/api/clients/{id}/config-resuelta` | Lo que heredaria un job (`?profile_id=`): `config` (completa), `config_heredada` (solo lo que fijan cliente y perfil), `origen` (ruta → «cliente»/«perfil»; lo que falta es de serie), `serie` (los valores de `JobConfig`), `avisos` (`nivel` peligro/aviso/info, `texto`, `campo`) y `programaciones` del perfil con `config_propia`. Es el bloque «Así rastreará» (decisión 196) |
+| POST | `/api/clients/config-resuelta` | Lo mismo con un **borrador** en lugar de la config guardada de un nivel: `{cliente_id?, profile_id?, nivel: cliente\|perfil\|rastreo, config}`. No guarda nada; valida como al guardar (claves desconocidas, límites, la contraseña del Basic solo en `rastreo`). Sin cliente, lo de serie con el borrador encima (decisión 196) |
+| GET | `/api/ajustes` | Ajustes de la agencia (decisión 196): `modelos.clave_modelo`, `clave_autorizacion`, `activada` (booleanos: si la variable está puesta, nunca su valor) y `tope_mensual_usd` |
 | GET | `/api/clients/{id}/serie` | Los `?limite=` (30) rastreos mas recientes del cliente con sus cifras (`urls`, `paginas_html`, `indexables`, `errores`, `avisos`) y, de su comparacion automatica, `alertas`, `alertas_criticas`, `comparado_con` y `fecha_anterior` (la fecha de la referencia, aunque no este en la serie) |
 | GET | `/api/clients/{id}/evolucion` | Evolucion del cliente (decision 130): una serie por perfil (o programacion, o host) con los puntos de `profile_runs`, `comparable`/`motivo`, `cambio_version` y `tendencia_errores`; `?profile_id=`, `?limite=` (26). `sin_agregado` = terminados sin fila |
 | GET | `/api/clients/{id}/profiles/{pid}/evolucion` | Lo mismo, solo el perfil |

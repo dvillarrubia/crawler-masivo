@@ -16,7 +16,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157, 161, 168, 190 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165, 188, 191 |
-| [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151, 189, 194 |
+| [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151, 189, 194, 196 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
 | [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 177, 178, 179, 180, 181, 182, 184, 185 |
 | [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34), su edición y prueba en vivo, y segmentos de negocio | 104, 125, 166 |
@@ -220,6 +220,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 191 | La comparación automática sella con qué versión del análisis estaban los dos censos, y Problemas solo enseña la diferencia por tipo («+12 frente al 14 oct») si los dos siguen así | [`comparacion-y-alertas`](comparacion-y-alertas.md#d191) |
 | 193 | Una programación cuelga de un perfil (`hereda_perfil`) y en cada disparo hereda la configuración del momento (cliente → perfil → lo suyo), no una copia; las viejas siguen igual hasta migrarlas con `scripts/migrar_programaciones_a_perfiles.py`, que une su serie y sus incidentes a la del perfil; se avisa de las repetidas | [`worker-y-cola`](worker-y-cola.md#d193) |
 | 194 | El alta de un cliente pide nombre y dominio, crea sola el perfil «Sitio principal» con la home (`perfil_principal`) y acaba en «Siguiente paso»: lanzar canario, lanzar censo o programar cada semana | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d194) |
+| 196 | La configuración se edita con el mismo formulario en el cliente, el perfil y el rastreo (cada campo dice de dónde viene; igual a lo heredado no se fija), con «Así rastreará» y avisos que solo afirman lo que se sabe (WAF con bloqueos anteriores); lo de la agencia (Slack, llaves de GSC, claves de modelos) va en Ajustes | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d196) |
 
 ## Anadir una decision
 
