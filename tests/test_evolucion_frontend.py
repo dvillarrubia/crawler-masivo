@@ -107,3 +107,17 @@ def test_la_tendencia_del_panel_no_cruza_un_cambio_de_version():
     assert nada is None and corta == "" and larga is True
     # Cortada en el cambio de version: dos tramos y un enlace gris discontinuo.
     assert partida.count('class="evo-linea"') == 2 and partida.count("discontinua") == 1
+
+
+def test_el_ultimo_tramo_va_en_rojo_si_empeora():
+    """Revision de UX del 25-oct, 1.13: con «mejor: baja», subir el ultimo
+    tramo es empeorar; sin `mejor` no se juzga."""
+    pts = [{"job_id": "a", "fecha": "2026-10-01", "comparable": True, "errores": 35},
+           {"job_id": "b", "fecha": "2026-10-08", "comparable": True, "errores": 41}]
+    peor = _evaluar("() => modeloGrafica(" + json.dumps(pts) + ", 'errores', {mejor: 'baja'}).tramos.map(t => t.sentido)")
+    assert peor == ["empeora"]
+    mejor = _evaluar("() => modeloGrafica(" + json.dumps(pts) + ", 'errores', {mejor: 'sube'}).tramos.map(t => t.sentido)")
+    assert mejor == ["mejora"]
+    assert _evaluar("() => modeloGrafica(" + json.dumps(pts) + ", 'errores').tramos[0].sentido") is None
+    svg = _evaluar("() => svgGrafica(modeloGrafica(" + json.dumps(pts) + ", 'errores', {mejor: 'baja'}))")
+    assert 'class="evo-linea empeora"' in svg
