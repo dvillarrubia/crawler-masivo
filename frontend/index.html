@@ -2019,7 +2019,8 @@
                 <template x-for="[preg, r] in Object.entries(enriqRun.resultados || {})" :key="preg">
                   <div class="card" style="margin-bottom:1rem">
                     <div style="display:flex;justify-content:space-between;gap:1rem;align-items:baseline">
-                      <strong><code x-text="preg"></code></strong>
+                      <span><strong x-text="tituloPreguntaEnriq(preg)"></strong>
+                        <code class="text-dim" style="font-size:.72rem;margin-left:.3rem" x-text="preg"></code></span>
                       <span class="text-dim" style="font-size:.8rem" x-text="fmt.num(r.total) + ' ' + fmt.unidadEnriq(r) + ' · ' + fmt.usd(r.coste_usd)"></span>
                     </div>
                     <div style="display:flex;gap:1.2rem;flex-wrap:wrap;margin-top:.5rem;font-size:.82rem">
@@ -2031,7 +2032,7 @@
                         </a>
                       </template>
                       <template x-for="[est, n] in Object.entries(r.por_estado)" :key="est">
-                        <span class="text-dim" x-text="est + ': ' + fmt.num(n)"></span>
+                        <span class="text-dim" x-text="estadoEnriq(est, n)"></span>
                       </template>
                     </div>
                     <!-- solo_si (decision 175): la recomendacion de una canibalizacion solo cuenta donde las paginas son sustitutas -->
@@ -2040,7 +2041,7 @@
                       en las otras <span x-text="fmt.num(r.no_aplica || 0)"></span> no aplica y no se cuenta.
                     </div>
                     <div class="text-dim" style="font-size:.75rem;margin-top:.35rem" x-show="r.umbral == null">
-                      Sin umbral calibrado (#8) ninguna respuesta sale «decidido»: son orientativas.
+                      Esta pregunta aún no está calibrada: ninguna respuesta se da por decidida. Son orientativas; revísalas antes de actuar.
                     </div>
                     <div style="font-size:.8rem;margin-top:.35rem" x-show="['tipo_pagina', 'categoria_cliente'].includes(preg)">
                       <a href="#" @click.prevent="cargarPlantillasEnriq(preg)">Ver la respuesta por plantilla</a>
@@ -2055,13 +2056,13 @@
                 <template x-if="enriqPlantillas">
                   <div class="card" style="margin-bottom:1rem">
                     <div style="display:flex;justify-content:space-between;gap:1rem;align-items:baseline;flex-wrap:wrap">
-                      <strong>Por plantilla: <code x-text="enriqPlantillas.pregunta"></code></strong>
+                      <strong>Por plantilla: <span x-text="tituloPreguntaEnriq(enriqPlantillas.pregunta)"></span></strong>
                       <span class="text-dim" style="font-size:.8rem"
                             x-text="fmt.num(enriqPlantillas.total_plantillas) + ' plantillas · ' + fmt.num(enriqPlantillas.urls_cubiertas) + ' URLs con propuesta'"></span>
                     </div>
                     <div class="text-dim" style="font-size:.75rem;margin:.3rem 0 .5rem">
                       «Mixta»: sus muestras no coinciden y no se propone nada (habrá que decidirla URL a URL).
-                      <span x-show="enriqPlantillas.umbral == null">Sin umbral calibrado (#8) ninguna es «propagable»: todo es orientativo y no se escribe en ninguna URL.</span>
+                      <span x-show="enriqPlantillas.umbral == null">La pregunta aún no está calibrada: ninguna plantilla se da por buena, todo es orientativo y no se escribe en ninguna URL.</span>
                     </div>
                     <div style="overflow-x:auto">
                       <table>
@@ -2090,7 +2091,7 @@
                     <strong>Intención: página frente a búsquedas</strong>
                     <div class="text-dim" style="font-size:.75rem;margin:.25rem 0 .5rem"
                          x-show="(enriqIntencion.resumen && enriqIntencion.resumen.orientativo) || (enriqIntencion.embudo && enriqIntencion.embudo.orientativo)">
-                      Orientativo: las preguntas no tienen umbral calibrado (#8). Las búsquedas de marca o de otras
+                      Orientativo: las preguntas aún no están calibradas. Las búsquedas de marca o de otras
                       marcas (navegacionales) y las que no están claras no cuentan para el desajuste, y una página de
                       marca, o una con más clics de marca que de cualquier otra intención, no se da por desalineada.
                     </div>
@@ -2172,7 +2173,7 @@
                                 <div class="text-dim" style="font-size:.72rem" x-show="d.rutas" x-text="(d.rutas || []).join(' · ')"></div>
                               </td>
                               <td x-text="textoDecisionEnriq(d)"></td>
-                              <td x-text="d.estado"></td>
+                              <td x-text="estadoUnaEnriq(d.estado)"></td>
                               <td x-text="d.confianza == null ? '—' : (100 * d.confianza).toFixed(0) + '%'"></td>
                               <td x-text="d.origen"></td>
                               <td style="text-align:right" x-text="fmt.usd(d.coste_usd)"></td>
@@ -6659,7 +6660,7 @@
                        @change="alternarModuloEnriq(m.nombre, $el.checked)">
                 <span x-text="m.titulo"></span>
               </label>
-              <div class="form-hint" x-text="m.descripcion"></div>
+              <div class="form-hint" x-text="descripcionEnriq(m.descripcion)"></div>
               <div class="form-hint" x-show="m.depende_de.length" x-text="'Necesita: ' + m.depende_de.join(', ') + ' (se añade solo)'"></div>
             </div>
           </template>

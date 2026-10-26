@@ -3280,6 +3280,45 @@ function app() {
     // Un score llega agrupado por nivel («0»...«3», en orden en `opciones`) y
     // se escribe con el nombre corto de cada nivel (`etiquetas`, decision 177);
     // lo demas, con el diccionario unico de `fmt.respuestaEnriq`.
+    // El nombre de cada pregunta en castellano llano (revision de UX del
+    // 25-oct, 1.14): la pestana pintaba «es_soft_404» tal cual.
+    tituloPreguntaEnriq(preg) {
+      return ({
+        es_soft_404: '¿Es una página de error que responde 200 (soft 404)?',
+        es_pagina_legal: '¿Es una página legal?',
+        es_pagina_de_utilidad: '¿Es una página de utilidad (carrito, login, buscador)?',
+        tipo_pagina: 'Tipo de página',
+        categoria_cliente: 'Categoría del cliente',
+        intencion_pagina: 'Intención de la página',
+        intencion_busqueda: 'Intención de sus búsquedas',
+        etapa_embudo: 'Etapa del embudo',
+        paginas_sustitutas: '¿Las dos páginas compiten por la misma búsqueda?',
+        recomendacion_canibalizacion: 'Qué hacer con la canibalización',
+        title_describe_contenido: '¿El title describe el contenido?',
+        title_es_generico: '¿El title es genérico?',
+        schema_contradice_contenido: '¿El marcado contradice lo visible?',
+      })[preg] || preg;
+    },
+
+    // Las descripciones de los modulos (shared/enriquecido.py) hablan de
+    // «Sin evaluar (#8)» y «salen inciertas»: en pantalla, en llano.
+    descripcionEnriq(t) {
+      return String(t || '').replace(/Sin evaluar \(#8\)/g, 'Sin calibrar').replace(/Sin umbral \(#8[^)]*\)/g, 'Sin calibrar')
+        .replace(/salen inciertas/g, 'son orientativas').replace(/todo incierto/g, 'todo orientativo');
+    },
+
+    // Una respuesta suelta: su estado en palabras.
+    estadoUnaEnriq(est) {
+      return ({ decidido: 'decidida', incierto: 'orientativa', sin_decidir: 'sin decidir' })[est] || est;
+    },
+
+    // Los estados de las respuestas, en palabras: «incierto» era jerga.
+    estadoEnriq(est, n) {
+      const t = ({ decidido: ['decidida', 'decididas'], incierto: ['orientativa', 'orientativas'],
+                   sin_decidir: ['sin decidir', 'sin decidir'] })[est];
+      return t ? fmt.num(n) + ' ' + t[n === 1 ? 0 : 1] : est + ': ' + fmt.num(n);
+    },
+
     etiquetaEnriq(pregunta, resp) {
       const r = ((this.enriqRun && this.enriqRun.resultados) || {})[pregunta] || {};
       return (r.etiquetas || {})[resp] || fmt.respuestaEnriq(resp);
