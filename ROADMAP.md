@@ -1121,6 +1121,12 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   calcula el detalle después (V21; las incidencias guardadas, solo si los dos
   censos siguen con la versión del análisis con la que se compararon), y el
   desplegable va por tipo (V22). Solo frontend.
+- **Una escala de color** (revisión de UX del 25-oct, 3.1; en local, sin
+  desplegar): rojo = error, naranja = aviso, azul = info, gris = neutro y verde
+  solo para «bien»; enlaces, botón principal, texto gris y avisos pasan 4,5:1
+  en los dos temas (comprobado en Chromium). Las alertas de la pestaña no salen
+  en verde, cancelado es gris y las gráficas de evolución pintan cada tramo
+  según mejore o empeore, con un eje que no exagera. Solo frontend.
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 

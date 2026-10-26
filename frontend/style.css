@@ -1,25 +1,45 @@
 /* ===== CSS Reset & Variables ===== */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
+  /* Escala de color (revision de UX del 25-oct, 3.1): rojo = error, naranja =
+     aviso, azul = info, gris = neutro y verde solo para «bien». El verde de
+     marca #5BAE23 (2,79:1 sobre blanco) queda para el logo y el filete de la
+     barra; enlaces y boton principal van en un verde oscuro que pasa 4,5:1.
+     Contrastes calculados (WCAG 2.x) sobre blanco / --bg / #e8eaed (cabeceras
+     de tabla y pestanas); los comprueba tests/test_contraste_frontend.py:
+       --text-dim #5b6270  6,13 / 5,42 / 5,09   (antes #6b7280: 4,83 / 4,28)
+       --accent   #37731a  5,79 / 5,12 / 4,80   (blanco sobre el: 5,79)
+       --green    #1e7045  6,07 / 5,37 / 5,04
+       --red      #b3261e  6,54 / 5,78 / 5,42
+       --orange   #a84d06  5,63 / 4,98 / 4,67   (antes #e67e22: 2,85 / 2,52)
+       --blue     #2a6fb0  5,25 / 4,65 / 4,36   (4,36 solo en cabeceras, sin texto azul ahi)
+     El tema terminal (theme-terminal.css) pasa de 5:1 en todos sus pares. */
   --bg:       #f0f1f3;
   --bg-card:  #ffffff;
   --bg-hover: #f5f6f8;
   --bg-input: #f7f8fa;
   --border:   #d4d7dd;
   --text:     #1a1d23;
-  --text-dim: #6b7280;
-  --accent:   #5BAE23;
-  --accent-h: #4EA51C;
-  --accent-glow: rgba(91,174,35,.15);
-  --accent-subtle: rgba(91,174,35,.08);
-  --green:    #2e8b57;
-  --green-bg: rgba(46,139,87,.08);
-  --red:      #d32f2f;
-  --red-bg:   rgba(211,47,47,.07);
-  --orange:   #e67e22;
-  --orange-bg:rgba(230,126,34,.07);
-  --blue:     #2979b5;
-  --blue-bg:  rgba(41,121,181,.07);
+  --text-dim: #5b6270;
+  --brand:    #5BAE23;
+  --accent:   #37731a;
+  --accent-h: #2d5f15;
+  --accent-glow: rgba(55,115,26,.15);
+  --accent-subtle: rgba(55,115,26,.08);
+  --green:    #1e7045;
+  --green-bg: rgba(30,112,69,.08);
+  --red:      #b3261e;
+  --red-bg:   rgba(179,38,30,.07);
+  --orange:   #a84d06;
+  --orange-bg:rgba(168,77,6,.08);
+  --blue:     #2a6fb0;
+  --blue-bg:  rgba(42,111,176,.07);
+  --neutral:  #8a909c;
+  /* Alias que ya usaban estilos en linea con un color fijo de reserva: asi
+     siguen la escala (y el tema terminal) sin tocar cada bloque. */
+  --warning:  var(--orange);
+  --error:    var(--red);
+  --muted:    var(--text-dim);
   --radius:   4px;
   --radius-lg: 4px;
   --shadow:   0 1px 3px rgba(0,0,0,.08);
@@ -231,7 +251,7 @@ tr[data-tip]:hover::after{display:none}
   letter-spacing:.01em;
   transition:all .15s;
 }
-.badge::before{content:'';width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.badge::before{content:'';width:6px;height:6px;border-radius:50%;flex-shrink:0;background:currentColor}
 .badge-pending{color:var(--text-dim);background:rgba(107,114,128,.1);border:1px solid rgba(107,114,128,.2)}.badge-pending::before{background:var(--text-dim)}
 .badge-running{color:var(--blue);background:var(--blue-bg);border:1px solid rgba(41,121,181,.2)}.badge-running::before{background:var(--blue);animation:pulse 1.5s infinite}
 .badge-completed{color:var(--green);background:var(--green-bg);border:1px solid rgba(46,139,87,.2)}.badge-completed::before{background:var(--green)}
@@ -239,6 +259,10 @@ tr[data-tip]:hover::after{display:none}
 .badge-cancelled{color:var(--orange);background:var(--orange-bg);border:1px solid rgba(230,126,34,.2)}.badge-cancelled::before{background:var(--orange)}
 /* Datos estructurados `info` (decision 97): nada que arreglar, en el azul de la gravedad info y sin la animacion de badge-running. */
 .badge-info{color:var(--blue);background:var(--blue-bg);border:1px solid rgba(41,121,181,.2)}.badge-info::before{background:var(--blue)}
+/* Cancelado o borrandose (revision de UX del 25-oct, 3.1): neutro, en gris. Iba
+   en el naranja de badge-cancelled, que es el de los avisos (redirige, titulo
+   largo). En curso azul, terminado verde, fallido rojo, en cola gris relleno. */
+.badge-neutral{color:var(--text-dim);background:transparent;border:1px solid var(--border)}.badge-neutral::before{background:var(--neutral)}
 .severity-error{color:var(--red)}.severity-warning{color:var(--orange)}.severity-info{color:var(--blue)}
 
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.3;transform:scale(.8)}}
@@ -312,6 +336,10 @@ input[type="checkbox"]{accent-color:var(--accent);width:15px;height:15px;border-
   font-weight:600;
 }
 .tab.active .count{background:var(--accent-subtle);color:var(--accent)}
+/* Alertas abiertas en la pestana (3.1): «3» no puede salir del verde de la
+   pestana activa, que es el mismo de «sin alertas». */
+.tab .count.count-aviso,.tab.active .count.count-aviso{background:var(--orange-bg);color:var(--orange)}
+.tab .count.count-critica,.tab.active .count.count-critica{background:var(--red-bg);color:var(--red)}
 
 /* ===== Modal ===== */
 .modal-backdrop{
@@ -942,7 +970,7 @@ th[data-tip]{overflow:visible}
   border-radius:2px;font-size:.74rem;color:var(--text);font-family:inherit;
   height:1.55rem;
 }
-.exp-filter-input::placeholder{color:#9aa0a6;font-style:italic}
+.exp-filter-input::placeholder{color:var(--text-dim);font-style:italic}
 .exp-filter-input:focus,.exp-filter-op:focus{
   outline:none;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent-glow);
 }
@@ -985,10 +1013,10 @@ th[data-tip]{overflow:visible}
   font-size:.72rem;
   font-weight:600;
 }
-.exp-status-2xx{color:#2e7d32;background:rgba(46,125,50,.08)}
-.exp-status-3xx{color:#1565c0;background:rgba(21,101,192,.08)}
-.exp-status-4xx{color:#e65100;background:rgba(230,81,0,.08)}
-.exp-status-5xx{color:#c62828;background:rgba(198,40,40,.08)}
+.exp-status-2xx{color:var(--green);background:var(--green-bg)}
+.exp-status-3xx{color:var(--blue);background:var(--blue-bg)}
+.exp-status-4xx{color:var(--orange);background:var(--orange-bg)}
+.exp-status-5xx{color:var(--red);background:var(--red-bg)}
 
 /* Detail panel */
 .exp-detail{
@@ -1395,22 +1423,31 @@ tr.fila-marcada td{background:var(--accent-subtle)}
 
 /* Evolucion por perfil (decision 130): graficas SVG propias */
 .text-orange{color:var(--orange)}
+/* Al pasar el raton, un enlace con color de significado no vuelve al verde (3.1). */
+a.text-orange:hover{color:var(--orange)}a.text-red:hover{color:var(--red)}
 .evo-rejilla{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:.75rem}
 .evo-grafica{border:1px solid var(--border);border-radius:var(--radius);padding:.4rem .5rem .2rem}
 .evo-cab{display:flex;justify-content:space-between;align-items:baseline;gap:.5rem}
 .evo-valor{font-weight:700;white-space:nowrap}
 .evo-svg{width:100%;height:auto;display:block;overflow:visible}
 .evo-eje{font-size:9px;fill:var(--text-dim)}
-.evo-linea{stroke:var(--accent);stroke-width:1.8;fill:none}
+/* Graficas de evolucion (revision de UX del 25-oct, 3.1): la linea es neutra
+   y cada tramo toma el color de lo que significa para esa metrica: verde si
+   mejora, rojo si empeora, gris si no cambia. El verde de marca la pintaba
+   siempre, tambien cuando las URLs en 4xx subian. */
+.evo-linea{stroke:var(--neutral);stroke-width:1.8;fill:none}
+.evo-linea.mejora{stroke:var(--green)}
 .evo-linea.discontinua{stroke-dasharray:4 3;stroke:var(--text-dim)}
 .evo-linea.empeora{stroke:var(--red)}
-.evo-punto{fill:var(--accent);stroke:var(--bg-card);stroke-width:1}
+.evo-punto{fill:var(--text-dim);stroke:var(--bg-card);stroke-width:1}
 .evo-fuera{font-size:11px;fill:var(--text-dim);cursor:pointer}
 .evo-corte{stroke:var(--orange);stroke-width:1;stroke-dasharray:2 2}
 .evo-corte-rastreo{stroke:var(--border);stroke-width:1;stroke-dasharray:1 3}
 .evo-corte-txt{font-size:9px;font-weight:700;fill:var(--orange);cursor:help}
 .evo-leyenda{margin-top:.5rem;line-height:1.6}
-.evo-ley-punto{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);vertical-align:middle}
+.evo-ley-punto{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--text-dim);vertical-align:middle}
+.evo-ley-tramo{display:inline-block;width:14px;height:0;border-top:2px solid;vertical-align:middle}
+.evo-ley-tramo.mejora{border-color:var(--green)}.evo-ley-tramo.empeora{border-color:var(--red)}
 .evo-fuera-txt{color:var(--text-dim);font-weight:700}
 .evo-ley-corte{color:var(--orange);font-weight:700}
 .evo-tendencia{display:inline-flex;align-items:center;gap:.35rem}
@@ -1440,7 +1477,7 @@ tr.fila-marcada td{background:var(--accent-subtle)}
 .informe-nota{display:flex;gap:1.25rem;align-items:flex-start}
 .informe-nota-global{min-width:6rem;text-align:center;border-radius:8px;padding:.75rem;border:2px solid currentColor}
 .informe-nota-num{font-size:2.4rem;font-weight:700;line-height:1}
-.nota-buena{color:#2e7d32}.nota-media{color:#b26a00}.nota-mala{color:#c62828}
+.nota-buena{color:var(--green)}.nota-media{color:var(--orange)}.nota-mala{color:var(--red)}
 .informe-categorias{display:grid;grid-template-columns:repeat(auto-fill,minmax(12rem,1fr));gap:.25rem .75rem;font-size:.9rem}
 .informe-categorias>div{display:flex;justify-content:space-between;border-bottom:1px dotted var(--border)}
 .informe-cifras{display:grid;grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr));gap:.5rem}

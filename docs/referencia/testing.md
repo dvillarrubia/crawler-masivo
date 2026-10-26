@@ -371,7 +371,10 @@ SQLite y Postgres, que no lee `links` capturando el SQL, que lo escriben
 `run_analysis` y el worker sin lanzar nunca, la serie con sus motivos y cortes
 de version, y el relleno simulado que no deja nada), `test_evolucion_api.py`
 (los endpoints, el panel y el backup; trabajo de la API) y
-`test_evolucion_frontend.py` (graficas y tendencia en Chromium),
+`test_evolucion_frontend.py` (graficas y tendencia en Chromium, con el
+color de cada tramo y el rango minimo del eje, UX 3.1),
+`test_contraste_frontend.py` (la escala de color pasa 4,5:1 en el tema claro
+y en el terminal, midiendo en Chromium el color que resulta; UX 3.1),
 `test_ficha_cliente_frontend.py` (rutas de las pestanas del cliente y la
 referencia de «frente al anterior», en Chromium) y `test_ia_frontend.py`
 (pestana IA, UX 2.9: el aviso de consulta repetida, la linea «Revisado con IA»

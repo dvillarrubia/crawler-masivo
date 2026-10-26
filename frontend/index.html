@@ -714,7 +714,7 @@
                       <template x-if="!p.evolucion || !p.evolucion.tendencia"><span class="text-dim text-sm">—</span></template>
                       <template x-if="p.evolucion && p.evolucion.tendencia">
                         <span class="evo-tendencia" :title="'Serie «' + p.evolucion.serie + '». ' + ((textoTendencia(p.evolucion.tendencia) || {}).titulo || '')">
-                          <span x-html="sparkline(p.evolucion.valores, p.evolucion.cortes)"></span>
+                          <span x-html="sparkline(p.evolucion.valores, p.evolucion.cortes, { mejor: 'baja' })"></span>
                           <span class="delta" :class="(textoTendencia(p.evolucion.tendencia) || {}).clase"
                                 x-text="(textoTendencia(p.evolucion.tendencia) || {}).texto"></span>
                         </span>
@@ -782,6 +782,7 @@
               <i :data-lucide="t[1]" style="width:14px;height:14px"></i>
               <span x-text="t[2]"></span>
               <span class="count" x-show="t[0] === 'alertas' && alertasAbiertas && alertasAbiertas.length"
+                    :class="(alertasAbiertas || []).some(a => a.severidad === 'critical') ? 'count-critica' : 'count-aviso'"
                     x-text="alertasAbiertas ? alertasAbiertas.length : ''"></span>
             </button>
           </template>
@@ -1108,8 +1109,11 @@
                     </div>
                     <p class="text-dim text-sm evo-leyenda">
                       <span class="evo-ley-punto"></span> censo comparable ·
+                      <span class="evo-ley-tramo mejora"></span> mejora ·
+                      <span class="evo-ley-tramo empeora"></span> empeora ·
                       <span class="evo-fuera-txt">×</span> no comparable (fallido, truncado, canario, prueba o lista; pasa el ratón para el motivo) ·
                       <span class="evo-ley-corte">v</span> cambió la versión del análisis: el salto puede ser nuestro, no del sitio.
+                      <br>El eje vertical no empieza en 0, pero abarca al menos un 20 % del valor más alto: una variación pequeña se ve pequeña.
                     </p>
                   </div>
                 </template>
@@ -3836,7 +3840,7 @@
                   <div class="bar-row">
                     <div class="bar-label" :title="h.host" x-text="h.host"></div>
                     <div class="bar-track">
-                      <div class="bar-fill" :style="'width:' + (h.count / (stats.top_hosts[0]?.count || 1) * 100) + '%;background:var(--accent)'"></div>
+                      <div class="bar-fill" :style="'width:' + (h.count / (stats.top_hosts[0]?.count || 1) * 100) + '%;background:var(--neutral)'"></div>
                     </div>
                     <div class="bar-count" x-text="fmt.num(h.count)"></div>
                   </div>
