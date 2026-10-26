@@ -162,12 +162,17 @@ de URL; hoy repite los datos con otros bloques y otro orden.
   sigue abriéndola), entre Puntuación y «Más». Propia y no dentro del menú: es
   lo único que se paga y nadie sabía si ya se había preguntado; con un nombre
   de dos letras cabe en la fila de escritorio, y en móvil la fila queda en dos
-  líneas quitando los iconos. Sin botón en la cabecera del censo.
+  líneas quitando los iconos; ahí «Más» cae a media fila, y su menú se abre a
+  lo ancho de la fila de pestañas para no salirse de la pantalla. Sin botón en
+  la cabecera del censo.
 - [x] Dentro: «Nueva consulta…», **Lo ya preguntado** (fecha, módulos con nombre
   en castellano, sobre qué y a cuántas URLs, estado y gasto) y la respuesta de
   la ejecución elegida. El progreso solo mientras corre.
-- [x] Lanzador: módulos con nombre llano, la explicación solo de lo marcado y
-  sin «(decisión 105)» ni «#8»; por defecto **las candidatas de cada módulo**,
+- [x] Lanzador: módulos con nombre llano y, solo de lo marcado, una explicación
+  propia en castellano llano de qué pregunta y a qué páginas (el catálogo la
+  da sin tildes y con jerga: «score de 4 niveles», «TOFU, MOFU, BOFU»); no se
+  dice «solo a las sospechosas» por el título del catálogo, porque 10 de los
+  11 módulos eligen sus páginas; por defecto **las candidatas de cada módulo**,
   con cuántas páginas pregunta cada uno («17 de 3.216»). **Clave de
   autorización** en lugar de ENRICHMENT_TOKEN (también en los errores de la
   API). Llamadas, memoria, tokens, presupuesto y «gasto del mes en todos los

@@ -12,6 +12,9 @@ en Chromium con la API simulada (ninguna llamada sale de la pagina).
 - La clave de autorizacion y el gasto «de todos los clientes» en los mensajes.
 - Las parejas pregunta -> problema existen de verdad en el catalogo y en el
   analizador: una errata dejaria la linea muda sin que nadie lo notase.
+- Cada modulo del catalogo tiene su explicacion en llano en el lanzador, y la
+  etiqueta ya no dice «solo a las sospechosas» por el titulo del catalogo
+  (10 de los 11 modulos eligen sus paginas, no solo los «candidatos»).
 
 Necesita Chromium: se salta si no esta.
 """
@@ -38,6 +41,15 @@ def test_las_parejas_pregunta_problema_existen():
     for tipo, pregunta in parejas:
         assert pregunta in CATALOGO, pregunta
         assert f'"{tipo}"' in analizador, tipo
+
+
+def test_cada_modulo_tiene_su_explicacion():
+    fuente = (RAIZ / "frontend" / "app.js").read_text(encoding="utf-8")
+    bloque = fuente.split("const EXPLICACION_MODULO_IA = {", 1)[1].split("\n};", 1)[0]
+    claves = set(re.findall(r"^\s*(\w+): '", bloque, re.M))
+    from shared.enriquecido import describir_modulos
+
+    assert claves == {m["nombre"] for m in describir_modulos()}
 
 
 pytest.importorskip("playwright")
@@ -167,3 +179,13 @@ def test_textos_de_clave_y_gasto():
     assert usd == "0,06 $" and usd_peq == "0,00012 $"
     assert alcance == "las candidatas de cada módulo"
     assert titulo == "Canibalización por búsqueda"
+
+
+def test_explicacion_y_etiqueta_del_lanzador():
+    r = _evaluar(_app("""
+        return [a.etiquetaModuloEnriq(a.enriqCatalogo[0]), a.explicacionModuloEnriq(a.enriqCatalogo[2]),
+                a.explicacionModuloEnriq({ nombre: 'nuevo', descripcion: 'Algo (decision 200). Sin evaluar (#8).' })];"""))
+    etiqueta, explicacion, nuevo = r
+    assert etiqueta == "Soft 404"
+    assert "Solo pregunta por titles muy cortos" in explicacion
+    assert nuevo == "Algo. Sin calibrar."

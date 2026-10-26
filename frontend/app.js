@@ -219,6 +219,23 @@ const SLUG_TAB = { ...Object.fromEntries(Object.entries(TAB_SLUG).map(([k, v]) =
 // texto que no estan en el aviso: por eso `porUrl` cruza URL a URL y cuenta
 // solo las paginas del problema. Lo que no esta aqui no se relaciona: seria
 // inventar que una respuesta habla de un problema que no pregunta.
+// Que pregunta cada modulo del analisis enriquecido y a que paginas, para el
+// lanzador (revision de UX del 25-oct, 2.9). Las claves son los nombres de
+// shared/enriquecido.py; tests/test_ia_frontend.py comprueba que estan todos.
+const EXPLICACION_MODULO_IA = {
+  pagina_legal: 'Si la página es un aviso legal, de privacidad, de cookies o de condiciones. Es una pregunta de prueba, para comprobar que todo funciona, no para decidir nada. Pregunta a todas las indexables.',
+  soft_404: 'Si la página dice que algo no existe (un error, un producto retirado, una búsqueda sin resultados, un «próximamente») aunque responda bien. Solo pregunta a las sospechosas: las que ya marcó el crawler y las de muy poco texto. Las respuestas son orientativas y no entran en ningún informe.',
+  pagina_de_utilidad: 'Si la página es un paso de un proceso que nadie busca en Google: acceso, registro, «gracias», confirmación, baja, carrito. Pregunta a las mismas sospechosas que el soft 404. Orientativo: no entra en ningún informe.',
+  canibalizacion: 'En las búsquedas para las que Search Console muestra varias páginas del sitio, compara esas páginas de dos en dos: si a quien busca le vale cualquiera y, si es así, qué hacer (unirlas, diferenciarlas, quedarse con una o dejarlas). Solo las búsquedas con más clics. Orientativo.',
+  intencion_pagina: 'Qué resuelve cada página (informarse, comparar, comprar, llegar a una marca o a un local) y en qué momento de la compra está quien llega (descubriendo, comparando, decidiendo o ya cliente). Pregunta a las páginas con título, encabezado o texto. Orientativo.',
+  intencion_busquedas: 'Qué buscaba la gente que llegó desde Google a cada página (sus búsquedas con más clics) y, junto con la anterior, si la página encaja con lo que buscan. Una búsqueda ya preguntada no se vuelve a pagar. Solo clientes con Search Console. Orientativo.',
+  tipo_pagina: 'Qué es cada plantilla: portada, listado, ficha de producto o servicio, página comercial, artículo, contacto, ayuda, legal… Pregunta por unas pocas páginas de cada plantilla y propone la respuesta para toda ella. Orientativo: no se aplica a nada.',
+  categoria_cliente: 'A cuál de las categorías de negocio del cliente pertenece cada plantilla, con unas pocas páginas de cada una. Si el cliente no tiene sus categorías en la configuración, no pregunta nada. Orientativo.',
+  title_contenido: 'Si el title dice de qué va la página, en cuatro niveles. No pregunta por lo que ya resuelve una regla (sin title, title de relleno o repetido) ni por las páginas con muy poco texto, y tiene un tope por plantilla. Orientativo.',
+  title_generico: 'Si el title, quitado el nombre de la marca, no dice qué página es («Detalle noticia», «SAT»). Solo pregunta por titles muy cortos, sin la portada ni los de relleno que ya detecta una regla, y con un tope por plantilla. Orientativo.',
+  schema_visible: 'Si lo que se ve en la página contradice el precio, la valoración, la fecha o la disponibilidad de sus datos estructurados. Solo páginas con algo visible con lo que comparar, con un tope por plantilla. Que un dato no se vea no cuenta como contradicción. Orientativo.',
+};
+
 const PROBLEMA_PREGUNTA_IA = {
   canibalizacion_por_consulta: { pregunta: 'paginas_sustitutas', porUrl: false, unidad: ['par', 'pares'],
                                  si: 'compiten por la misma búsqueda', no: 'no compiten' },
@@ -3867,9 +3884,23 @@ function app() {
       const m = this.enriqCatalogo.find(x => x.nombre === nombre);
       return m ? m.titulo.replace(/\s*\([^)]*\)\s*$/, '') : nombre;
     },
-    // En el lanzador, ademas, si solo pregunta a sus candidatas.
+    // En el lanzador, el nombre a secas. Antes llevaba «· solo a las
+    // sospechosas» cuando el titulo del catalogo decia «candidatos», pero 10
+    // de los 11 modulos eligen sus paginas (filtrar_urls), no solo esos dos:
+    // a quien pregunta cada uno lo dice su explicacion (revision de UX del
+    // 25-oct, 2.9).
     etiquetaModuloEnriq(m) {
-      return this.tituloModuloEnriq(m.nombre) + (/candidatos/i.test(m.titulo) ? ' · solo a las sospechosas' : '');
+      return this.tituloModuloEnriq(m.nombre);
+    },
+    // Lo que pregunta cada modulo y a que paginas, en castellano llano: el
+    // catalogo (shared/enriquecido.py) lo dice sin tildes y con jerga
+    // («score de 4 niveles», «placeholders», «TOFU, MOFU, BOFU»). Sin cifras
+    // de topes, que viven en el modulo y cambiarian aqui sin avisar. Uno nuevo
+    // sale con la descripcion del catalogo, limpia de referencias
+    // (revision de UX del 25-oct, 2.9). Un test comprueba que no falta ninguno.
+    explicacionModuloEnriq(m) {
+      const t = EXPLICACION_MODULO_IA[m && m.nombre];
+      return t || this.descripcionEnriq(m && m.descripcion);
     },
     // A cuantas URLs (o pares) pregunto de verdad, segun su estimacion: sin
     // recorte, «las candidatas» de un modulo pueden ser 17 de 3.216.

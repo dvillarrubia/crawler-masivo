@@ -1029,7 +1029,8 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   enriquecido deja la cabecera del censo y «Avanzado › Enriquecido» y pasa a
   una pestaña propia, «IA», con lo ya preguntado, la respuesta de cada vez y
   «Nueva consulta…». El lanzador avisa si ya se preguntó lo mismo en ese censo,
-  pregunta por defecto a las candidatas de cada módulo (y dice a cuántas),
+  pregunta por defecto a las candidatas de cada módulo (explica en llano a
+  cuáles y dice a cuántas),
   pide la «clave de autorización», habla del gasto del mes «en todos los
   clientes» y pliega llamadas, memoria, tokens, presupuesto y tope global en
   «Opciones avanzadas». Problemas enseña «Revisado con IA» en la canibalización

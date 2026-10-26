@@ -2187,14 +2187,17 @@
           </button>
           <!-- «Más» con nombre fijo y la opcion activa marcada dentro (V34,
                3.7): antes el boton cambiaba de nombre segun lo elegido. -->
-          <div class="menu-wrap" @click.outside="menuAbierto === 'avanzado' && (menuAbierto = '')">
+          <div class="menu-wrap menu-wrap-mas" @click.outside="menuAbierto === 'avanzado' && (menuAbierto = '')">
             <button class="tab" role="tab" :aria-selected="['semantic','cleaning'].some(t => pestanaActiva(t))"
                     :class="['semantic','cleaning'].some(t => pestanaActiva(t)) && 'active'"
                     @click="menuAbierto = menuAbierto === 'avanzado' ? '' : 'avanzado'" aria-haspopup="menu">
               <i data-lucide="flask-conical" style="width:14px;height:14px"></i> Más
               <i data-lucide="chevron-down" style="width:12px;height:12px"></i>
             </button>
-            <div class="menu" x-show="menuAbierto === 'avanzado'" x-transition.opacity role="menu" style="left:0;right:auto;min-width:20rem">
+            <!-- menu-mas: en movil se abre a lo ancho de la fila de pestañas,
+                 no pegado al boton, que con la pestaña IA cae a media fila
+                 y sacaba el menu de la pantalla (revision de UX del 25-oct, 2.9). -->
+            <div class="menu menu-mas" x-show="menuAbierto === 'avanzado'" x-transition.opacity role="menu">
               <button role="menuitem" @click="menuAbierto = ''; switchTab('semantic')" :aria-current="pestanaActiva('semantic') ? 'page' : null"
                       :class="pestanaActiva('semantic') && 'menu-activa'">
                 <i data-lucide="orbit" style="width:14px;height:14px"></i>
@@ -7148,11 +7151,11 @@
               <label class="checkbox-label">
                 <input type="checkbox" :checked="enriqForm.modulos.includes(m.nombre)"
                        @change="alternarModuloEnriq(m.nombre, $el.checked)">
-                <span x-text="etiquetaModuloEnriq(m)" :title="descripcionEnriq(m.descripcion)"></span>
+                <span x-text="etiquetaModuloEnriq(m)" :title="explicacionModuloEnriq(m)"></span>
               </label>
               <!-- La explicacion, solo de lo marcado: once parrafos tapaban
                    el coste, que es lo que hay que ver antes de lanzar. -->
-              <div class="form-hint" x-show="enriqForm.modulos.includes(m.nombre)" x-text="descripcionEnriq(m.descripcion)"></div>
+              <div class="form-hint" x-show="enriqForm.modulos.includes(m.nombre)" x-text="explicacionModuloEnriq(m)"></div>
               <div class="form-hint" x-show="m.depende_de.length && enriqForm.modulos.includes(m.nombre)" x-text="'Necesita: ' + m.depende_de.map(n => tituloModuloEnriq(n)).join(', ') + ' (se añade solo)'"></div>
             </div>
           </template>
@@ -7172,7 +7175,7 @@
             <option value="muestra">Una muestra repartida por todo el sitio</option>
           </select>
           <div class="form-hint" x-show="enriqForm.tipo === 'todas'">
-            Cada módulo elige sus páginas entre las indexables: los marcados como «candidatos», solo las sospechosas; los demás, todas.
+            Cada módulo pregunta solo a las páginas indexables que le tocan (lo dice bajo cada uno, al marcarlo); abajo ves a cuántas.
           </div>
           <template x-if="enriqForm.tipo === 'carpeta'">
             <input type="text" x-model="enriqForm.carpeta" placeholder="/blog/" @change="estimarEnriquecido()" style="margin-top:.4rem">
