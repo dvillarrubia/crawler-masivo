@@ -211,6 +211,25 @@ def motivo_rastreo_vivo(db, programacion) -> str | None:
     return VIVO_DEL_PERFIL if vivo is not None else None
 
 
+def bloquear_perfil(db, programacion) -> None:
+    """Coge la fila del perfil hasta el commit, antes de `motivo_rastreo_vivo`.
+
+    Solo las colgadas (`hereda_perfil`), que no se lanzan encima de NINGUN
+    rastreo vivo de su perfil. El candado de la programacion (decision 209)
+    no basta: dos programaciones del mismo perfil son dos filas, y con dos
+    replicas las dos comprobaban «nada vivo» antes de que la otra guardara su
+    job. Con la fila del perfil cogida, la segunda espera, y su consulta, que
+    lee lo ya guardado, ve el job de la primera. Siempre programacion antes
+    que perfil: el mismo orden en el worker y en «Lanzar ahora», sin cruces.
+    """
+    from shared.models import CrawlProfile
+
+    perfil = getattr(programacion, "profile_id", None)
+    if perfil is None or not getattr(programacion, "hereda_perfil", False):
+        return
+    db.query(CrawlProfile.id).filter(CrawlProfile.id == perfil).with_for_update().first()
+
+
 def hay_rastreo_vivo(db, programacion) -> bool:
     """Si no se encola por un rastreo sin terminar (`motivo_rastreo_vivo`)."""
     return motivo_rastreo_vivo(db, programacion) is not None

@@ -348,20 +348,31 @@ def _run_job(job_id: str) -> None:
 
     session = SessionLocal()
     try:
-        job = session.query(Job).filter(Job.id == job_id).one_or_none()
-        if job is None:
-            logger.error("Job %s not found in database, skipping", job_id)
+        # Solo arranca un job «pending», y se marca en la MISMA sentencia que
+        # lo comprueba (decision 209). Un id puede estar dos veces en las
+        # colas (reanudado mientras esperaba en la de programados, o
+        # reencolado por la recuperacion de huerfanos de las dos replicas): la
+        # segunda copia encontraba el job «completed» o corriendo en la otra
+        # replica y lo rastreaba otra vez encima.
+        cogido = (
+            session.query(Job)
+            .filter(Job.id == job_id, Job.status == "pending")
+            .update({Job.status: "running",
+                     Job.started_at: datetime.now(timezone.utc),
+                     Job.crawler_version: CRAWLER_VERSION},
+                    synchronize_session=False)
+        )
+        if not cogido:
+            estado = session.query(Job.status).filter(Job.id == job_id).scalar()
+            session.rollback()
+            if estado is None:
+                logger.error("Job %s not found in database, skipping", job_id)
+            else:
+                logger.info("Job %s esta «%s», no «pending»: no se arranca", job_id, estado)
             return
-        if job.status == "cancelled":
-            logger.info("Job %s already cancelled, skipping", job_id)
-            return
-
-        # Mark running
-        job.status = "running"
-        job.started_at = datetime.now(timezone.utc)
-        job.crawler_version = CRAWLER_VERSION
-        job_config = job.config if job.config else {}  # save before closing session
         session.commit()
+        job = session.query(Job).filter(Job.id == job_id).one()
+        job_config = job.config if job.config else {}  # save before closing session
         logger.info("Job %s marked as running", job_id)
     except Exception:
         session.rollback()
@@ -1494,8 +1505,8 @@ def _disparar(session, rconn, prog, ahora) -> None:
     from shared.cola import encolar
     from shared.models import Job
     from shared.programaciones import (
-        crear_job_de_disparo, motivo_rastreo_vivo, proxima_desde,
-        resolver_disparo, toca_lanzar,
+        bloquear_perfil, crear_job_de_disparo, motivo_rastreo_vivo,
+        proxima_desde, resolver_disparo, toca_lanzar,
     )
 
     proxima = prog.proxima_ejecucion
@@ -1506,6 +1517,8 @@ def _disparar(session, rconn, prog, ahora) -> None:
         proxima = proxima.replace(tzinfo=timezone.utc)
 
     lanzar, motivo = toca_lanzar(proxima, ahora)
+    if lanzar:
+        bloquear_perfil(session, prog)
     vivo = motivo_rastreo_vivo(session, prog) if lanzar else None
     if vivo:
         lanzar, motivo = False, vivo
@@ -1875,11 +1888,46 @@ def _recover_stale_jobs(rconn: redis_lib.Redis) -> None:
 
         if stale:
             logger.info("Recovered %d stale job(s)", len(stale))
+
+        _reencolar_huerfanos(rconn, session, cutoff_ts)
     except Exception:
         session.rollback()
         logger.exception("Failed to recover stale jobs")
     finally:
         session.close()
+
+
+def _reencolar_huerfanos(rconn, session, cutoff_ts: float) -> None:
+    """Jobs «pending» que no estan en ninguna cola (decision 209).
+
+    Se encola despues del commit, asi que un proceso que muere justo entre
+    los dos deja un job «pending» que nadie va a sacar: no se rastrea nunca y,
+    si viene de una programacion, bloquea sus disparos siguientes («el
+    rastreo anterior sigue sin terminar»). Solo los creados hace mas de
+    `STALE_JOB_MINUTES` y sin latido reciente: un job reanudado mientras su
+    proceso anterior se cierra esta «pending» fuera de la cola a proposito, y
+    su latido lo delata. Repetir uno que si estaba (lo saco la otra replica
+    entre la lectura y el reencolado) no rastrea dos veces: `_run_job` solo
+    arranca lo que sigue «pending».
+    """
+    from shared.cola import en_orden
+    from shared.models import Job
+
+    en_cola = set(en_orden(rconn))
+    cutoff = datetime.fromtimestamp(cutoff_ts, tz=timezone.utc)
+    pendientes = (session.query(Job.id)
+                  .filter(Job.status == "pending", Job.created_at < cutoff).all())
+    for (jid,) in pendientes:
+        if str(jid) in en_cola:
+            continue
+        try:
+            hb = rconn.get(f"job:{jid}:heartbeat")
+            if hb is not None and float(hb) >= cutoff_ts:
+                continue
+        except Exception:
+            continue
+        logger.warning("Job %s «pending» y fuera de las colas: se reencola", jid)
+        encolar(rconn, jid)
 
 
 # ---------------------------------------------------------------------------

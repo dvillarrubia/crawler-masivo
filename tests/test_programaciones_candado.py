@@ -241,6 +241,79 @@ def test_el_planificador_respeta_lo_lanzado_a_mano(Sesion, api):
         assert "sin terminar" in s.get(Programacion, pid).ultimo_motivo
 
 
+def test_lanzar_ahora_sin_redis_no_deja_la_programacion_bloqueada(Sesion, api, monkeypatch):
+    import api.dependencies as dependencias
+
+    cliente, _cola = api
+    pid = _programacion(Sesion, hace=-timedelta(days=1))
+    monkeypatch.setattr(dependencias, "get_redis", lambda: Cola(rota=True))
+    r = cliente.post(f"/api/programaciones/{pid}/ejecutar")
+    assert r.status_code == 503
+    with Sesion() as s:
+        assert s.query(Job).one().status == "failed"
+        assert s.get(Programacion, pid).ultimo_motivo.startswith("no se pudo encolar")
+    cola = Cola()
+    monkeypatch.setattr(dependencias, "get_redis", lambda: cola)
+    assert cliente.post(f"/api/programaciones/{pid}/ejecutar").status_code == 201, \
+        "el fallido no cuenta como vivo"
+
+
+def test_un_job_que_no_esta_pending_no_se_arranca(Sesion, monkeypatch):
+    """Una copia vieja del id en la cola (decision 209) no vuelve a rastrear un
+    censo terminado ni uno que ya corre en la otra replica."""
+    import worker
+
+    monkeypatch.setattr(worker, "_ejecutar_con_vigilancia",
+                        lambda *a, **k: pytest.fail("no se tenia que lanzar Scrapy"))
+    with Sesion() as s:
+        for estado in ("completed", "running", "cancelled", "failed"):
+            s.add(Job(id=uuid.uuid4(), name=estado, seeds=["https://acme.com/"],
+                      status=estado, config={}))
+        s.commit()
+        jobs = [(j.id, j.status) for j in s.query(Job)]
+    for jid, _ in jobs:
+        worker._run_job(str(jid))
+    with Sesion() as s:
+        assert sorted((j.id, j.status) for j in s.query(Job)) == sorted(jobs)
+
+
+class RedisConLatidos(Cola):
+    def __init__(self, en_cola=(), latidos=None):
+        super().__init__()
+        self._en_cola = [str(x) for x in en_cola]
+        self._latidos = latidos or {}
+
+    def lrange(self, clave, _i, _f):
+        return self._en_cola if clave == "jobs:pending" else []
+
+    def get(self, clave):
+        return self._latidos.get(clave)
+
+
+def test_un_pending_fuera_de_las_colas_se_reencola(Sesion):
+    """El proceso murio entre el commit y el encolado: nadie lo sacaria nunca."""
+    import time
+
+    import worker
+
+    viejo = datetime.now(timezone.utc) - timedelta(hours=2)
+    ids = {}
+    with Sesion() as s:
+        for nombre, creado in (("huerfano", viejo), ("en_cola", viejo), ("con_latido", viejo),
+                               ("recien_creado", datetime.now(timezone.utc))):
+            j = Job(id=uuid.uuid4(), name=nombre, seeds=["https://acme.com/"], status="pending",
+                    config={}, created_at=creado)
+            s.add(j)
+            ids[nombre] = j.id
+        s.commit()
+    r = RedisConLatidos(en_cola=[ids["en_cola"]],
+                        latidos={f"job:{ids['con_latido']}:heartbeat": str(time.time())})
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).timestamp()
+    with Sesion() as s:
+        worker._reencolar_huerfanos(r, s, cutoff)
+    assert r.encolados == [("jobs:pending", str(ids["huerfano"]))]
+
+
 # ---------------------------------------------------------------------------
 # Dos replicas a la vez, contra Postgres de verdad
 # ---------------------------------------------------------------------------
@@ -304,4 +377,78 @@ def test_dos_replicas_a_la_vez_crean_un_solo_job(monkeypatch):
         with S() as s:
             s.query(Job).filter(Job.programacion_id == pid).delete()
             s.query(Programacion).filter(Programacion.id == pid).delete()
+            s.commit()
+
+
+@pytest.mark.skipif(not URL_PG, reason="sin PAGERANK_TEST_DATABASE_URL")
+def test_dos_programaciones_del_mismo_perfil_en_dos_replicas_lanzan_una(monkeypatch):
+    """El candado de la programacion no basta: son dos filas. Sin el del
+    perfil, las dos replicas veian «nada vivo» y salian dos rastreos del
+    mismo sitio (decision 193)."""
+    import shared.programaciones as P
+    from shared.models import Client, CrawlProfile
+
+    engine = create_engine(URL_PG)
+    Base.metadata.create_all(engine)
+    S = sessionmaker(bind=engine, expire_on_commit=False)
+    monkeypatch.setattr("shared.database.SessionLocal", S, raising=False)
+    marca = f"perfil-{uuid.uuid4().hex[:8]}"
+    ahora = datetime.now(timezone.utc)
+    with S() as s:
+        c = Client(id=uuid.uuid4(), nombre=marca, slug=marca, dominios=["acme.com"],
+                   config_defecto={}, integraciones=[])
+        s.add(c)
+        s.flush()
+        perfil = CrawlProfile(id=uuid.uuid4(), cliente_id=c.id, nombre="Sitio completo",
+                              seeds=["https://acme.com/"], config={}, activo=True)
+        s.add(perfil)
+        s.flush()
+        progs = []
+        for n, hace in (("p1", 2), ("p2", 1)):
+            p = Programacion(id=uuid.uuid4(), nombre=f"{marca}-{n}", client_id=marca,
+                             cliente_id=c.id, profile_id=perfil.id, hereda_perfil=True,
+                             seeds=[], config={}, cron="0 3 * * 1", zona_horaria="Europe/Madrid",
+                             activa=True, proxima_ejecucion=ahora - timedelta(minutes=hace))
+            s.add(p)
+            progs.append(p.id)
+        s.commit()
+        perfil_id, cliente_id = perfil.id, c.id
+
+    dentro, sigue = threading.Event(), threading.Event()
+    original = P.resolver_disparo
+
+    def _lento(db, prog):
+        if threading.current_thread().name == "primera" and prog.id == progs[0]:
+            dentro.set()
+            sigue.wait(10)
+        return original(db, prog)
+
+    monkeypatch.setattr(P, "resolver_disparo", _lento)
+
+    def _replica():
+        import worker
+
+        worker._lanzar_programados(Cola())
+
+    t1 = threading.Thread(target=_replica, name="primera")
+    t1.start()
+    assert dentro.wait(10)
+    t2 = threading.Thread(target=_replica, name="segunda")
+    t2.start()
+    t2.join(1.5)
+    sigue.set()
+    t1.join(10)
+    t2.join(10)
+    try:
+        with S() as s:
+            n = s.query(Job).filter(Job.profile_id == perfil_id).count()
+            motivo = s.get(Programacion, progs[1]).ultimo_motivo
+        assert n == 1, f"un rastreo del perfil a la vez (salieron {n})"
+        assert motivo and motivo.startswith("su perfil ya tiene un rastreo")
+    finally:
+        with S() as s:
+            s.query(Job).filter(Job.profile_id == perfil_id).delete()
+            s.query(Programacion).filter(Programacion.id.in_(progs)).delete()
+            s.query(CrawlProfile).filter(CrawlProfile.id == perfil_id).delete()
+            s.query(Client).filter(Client.id == cliente_id).delete()
             s.commit()

@@ -3883,7 +3883,9 @@ function app() {
         if (this.view === 'client') await this.cargarProgramacionesCliente();
         else await this.cargarProgramaciones();
       } catch (e) {
-        this.error = 'No se pudo lanzar: ' + fmt.motivo(e.message).replace(/^no se lanzó: /, '');
+        // El 409 dice por que con el texto de `ultimo_motivo`, que esta en
+        // pasado («seguía»): aqui el rastreo sigue vivo AHORA.
+        this.error = 'No se pudo lanzar: ' + fmt.motivo(e.message).replace(/^no se lanzó: /, '').replace('seguía sin terminar', 'sigue sin terminar').replace('ya tenía otro', 'ya tiene otro');
       }
     },
 

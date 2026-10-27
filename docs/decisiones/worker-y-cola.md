@@ -295,6 +295,25 @@
      lance sola», no «que no se pueda lanzar». `ultimo_motivo` queda en
      «lanzada a mano».
 
+   - **Un rastreo vivo por perfil, también entre réplicas.** El candado de la
+     programación no basta: dos programaciones colgadas del mismo perfil son
+     dos filas, y las dos réplicas veían «nada vivo» a la vez.
+     `bloquear_perfil` coge la fila del perfil antes de `motivo_rastreo_vivo`,
+     con el mismo orden (programación, luego perfil) en el worker y en «Lanzar
+     ahora».
+   - **Un job solo arranca si está `pending`**: `_run_job` lo marca `running`
+     con un `UPDATE … WHERE status = 'pending'`. Un id repetido en las colas
+     ya no rastrea otra vez un censo terminado, ni uno que corre en la otra
+     réplica. Con dos colas, una copia vieja puede esperar días en la de
+     programados.
+   - **Huérfanos.** Encolar después del commit tiene su propio hueco: un
+     proceso que muere entre los dos deja un job `pending` fuera de las colas.
+     La recuperación periódica (`_reencolar_huerfanos`) lo vuelve a encolar si
+     se creó hace más de `STALE_JOB_MINUTES` y no tiene latido reciente. Un
+     job reanudado mientras su proceso anterior se cierra está fuera de la cola
+     a propósito, y su latido lo delata. «Lanzar ahora» sin Redis da 503 y deja
+     el job `failed`, como el worker.
+
    **Fuera.** Lo demás de #36 F2: `ignore_patterns`, confirmar una alerta en
    dos ejecuciones y el criterio de dos semanas sobre un cliente real.
 
@@ -307,7 +326,9 @@
      da 409 con un rastreo vivo y 404 si no existe, y el planificador respeta
      lo lanzado a mano.
    - **Dos réplicas contra Postgres de verdad**: sin el candado salen 2 jobs
-     y con él sale 1.
+     y con él sale 1. Lo mismo con dos programaciones del mismo perfil.
+   - Un job que no está `pending` no arranca, los huérfanos se reencolan y
+     «Lanzar ahora» sin Redis no deja la programación bloqueada.
 
    `tests/test_cola.py` añade la prioridad entre las dos colas, también contra
    Redis de verdad.

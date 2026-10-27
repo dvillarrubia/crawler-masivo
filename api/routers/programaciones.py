@@ -221,8 +221,10 @@ def ejecutar_ahora(prog_id: uuid.UUID, db: Session = Depends(get_session)):
     sola», no «que no se pueda lanzar».
     """
     from shared.cola import encolar
-    from shared.programaciones import (LANZADA_A_MANO, crear_job_de_disparo,
-                                       motivo_rastreo_vivo, resolver_disparo)
+    from shared.models import Job
+    from shared.programaciones import (LANZADA_A_MANO, bloquear_perfil,
+                                       crear_job_de_disparo, motivo_rastreo_vivo,
+                                       resolver_disparo)
 
     from api.dependencies import get_redis
 
@@ -230,6 +232,7 @@ def ejecutar_ahora(prog_id: uuid.UUID, db: Session = Depends(get_session)):
             .with_for_update().one_or_none())
     if prog is None:
         raise HTTPException(status_code=404, detail="Programacion no encontrada")
+    bloquear_perfil(db, prog)
     vivo = motivo_rastreo_vivo(db, prog)
     if vivo:
         raise HTTPException(status_code=409, detail=vivo)
@@ -239,7 +242,17 @@ def ejecutar_ahora(prog_id: uuid.UUID, db: Session = Depends(get_session)):
     job = crear_job_de_disparo(db, prog, datos, datetime.now(timezone.utc))
     prog.ultimo_motivo = LANZADA_A_MANO
     db.commit()
-    encolar(get_redis(), job.id)
+    try:
+        encolar(get_redis(), job.id)
+    except Exception:
+        # Como en el worker: un job «pending» fuera de la cola no se rastrea
+        # nunca y bloquearia esta programacion («sigue sin terminar»).
+        db.query(Job).filter(Job.id == job.id).update({Job.status: "failed"},
+                                                      synchronize_session=False)
+        prog.ultimo_motivo = "no se pudo encolar: la cola no responde"
+        db.commit()
+        raise HTTPException(status_code=503,
+                            detail="La cola de rastreos no responde: no se ha lanzado")
     return {"job_id": str(job.id), "nombre": job.name}
 
 
