@@ -1698,3 +1698,58 @@
      - el log que no ve a Googlebot, el de otro host y el de otra época;
      - sin logs a NULL.
    - `tests/test_logs_frontend.py`: el bloque del Resumen.
+
+<a id="d214"></a>
+214. **Las trampas de rastreo se detectan sobre lo ya rastreado, una por plantilla, con cuántas URLs genera y qué parte del rastreo se lleva** (#14, parte determinista)
+
+   **Problema.** Un calendario con «mes siguiente», un identificador de sesión
+   en la URL, filtros que se combinan entre sí, la búsqueda interna enlazada o
+   un enlace relativo que se resuelve contra sí mismo generan URLs sin fin. El
+   rastreo las sigue hasta el tope y se come el cupo antes de llegar a lo que
+   importa. Solo había avisos por URL suelta (`url_non_seo_friendly` con
+   `;jsessionid=`, `url_cms_faceted`) que no decían que es UNA trampa ni
+   cuánto gasta. Detectarlas y acotarlas DURANTE el rastreo es lo delicado de
+   #14, porque toca el rastreo en caliente. Esto es lo determinista y
+   re-analizable.
+
+   **Decisión** (`analysis/avisos_de_trampas.py`): `trampa_de_rastreo`, una
+   fila por (host, plantilla, tipo) anclada en un ejemplo, con
+   `paginas_afectadas`, `parte_del_censo` y cinco ejemplos (36 y 53).
+   - **Tipos y umbrales.** Son juicios, medidos sobre tres censos reales (ver
+     abajo):
+     - `calendario_infinito`: la misma plantilla con fechas (con separadores
+       en la ruta, o en un parámetro con nombre de fecha) que van a más de dos
+       años hacia delante o antes de 2000, o con 60 fechas distintas o más; 20
+       URLs como mínimo. **Sin separador solo en un parámetro con nombre de
+       fecha**: en la ruta, `/192401-daniel-brieba` (el id de un autor en
+       Penguin) se leía como enero de 1924 y salían 339 «calendarios» falsos.
+     - `parametro_de_sesion`: `sid`, `PHPSESSID`, `jsessionid` y similares.
+     - `facetas_combinatorias`: la misma ruta con 50 combinaciones de
+       parámetros de filtro o más, o con los mismos filtros en distinto orden.
+       La paginación y el seguimiento (`utm_`) no son filtros.
+     - `busqueda_interna_rastreable`: `?s=`, `?q=`, `/buscar`...
+     - `segmento_repetido`: el mismo tramo tres veces o una secuencia repetida
+       (`/a/b/a/b/`).
+   - **Severidad.** `warning` si se lleva el 5 % del rastreo o 500 URLs;
+     `info` si no.
+   - **Lo que mide es lo que el rastreo ya gastó.** Que el sitio tenga más
+     no se afirma: lo dice la ficha.
+   - Casa entre censos por la plantilla (`ANCLADOS_POR_GRUPO`), no por el
+     ejemplo.
+
+   **Medido** en tres censos de producción, solo lectura:
+   - Lopesan (5.621 URLs): ninguna.
+   - La Salle (20.889): las cinco que tiene, `facetas_combinatorias` sobre los
+     listados de noticias y el buscador de estudios con `sort_by` y filtros
+     (974 URLs, el 4,7 %, en `/es/noticias`).
+   - Penguin (87.570): ninguna, después de arreglar la fecha sin separador.
+
+   **Fuera** (lo demás de #14):
+   - Acotar la trampa mientras se rastrea, con un cupo por firma como los
+     topes por carpeta (172).
+   - La prioridad de la cola por valor previsto.
+   - El render JS por plantilla.
+
+   Tests: `tests/test_trampas.py`. Cada tipo; un blog con fechas normales y un
+   id de seis cifras que no son calendarios; la paginación, que no es filtrar;
+   la severidad; y el aviso agrupado con su clave, contra SQLite.
