@@ -73,6 +73,11 @@ TIPOS = ("parametro_de_sesion", "entidad_html_en_url", "calendario_infinito",
          "busqueda_interna_rastreable", "facetas_combinatorias", "segmento_repetido")
 
 
+# `shared.comparacion.ANCLADOS_POR_GRUPO` repite la lista (la API no importa
+# `analysis/`); un test comprueba que coinciden.
+TIPOS_ANCLADOS_POR_GRUPO = ("trampa_de_rastreo",)
+
+
 def avisar_sin_tumbar(an) -> None:
     pendientes = list(getattr(an, "_pending_issues", []) or [])
     try:
