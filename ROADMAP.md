@@ -688,7 +688,7 @@ Hoy solo hay un módulo de ejemplo («¿es una página legal?»). Los que dan va
 —tipo de página, soft 404, intención— salen del catálogo de preguntas
 ([#9](https://github.com/dvillarrubia/crawler-masivo/issues/9)) y ninguno se
 usa para decidir nada sin pasar antes por el juego de evaluación
-([#8](https://github.com/dvillarrubia/crawler-masivo/issues/8)).
+([#8](https://github.com/dvillarrubia/crawler-masivo/issues/8)). La revisión humana se hace en la interfaz, a ciegas («Revisar a Jev», decisión 211), y sus etiquetas amplían el juego.
 
 ### Clientes como entidad (13 de octubre)
 

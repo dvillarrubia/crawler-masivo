@@ -1663,3 +1663,98 @@
      - El estado es más largo: de media, un 7-10 % más de tokens.
    - Fuera: añadir el nombre o la talla de la variante a su línea (el precio
      ya basta para emparejarla con lo visible en los casos medidos).
+
+<a id="d211"></a>
+211. **La revisión humana de Jev se hace en la interfaz y a ciegas, y sus etiquetas, una por estado, amplían el juego de evaluación** (#8)
+
+   **Problema.** Ninguna pregunta del catálogo tiene umbral (84), así que todo
+   sale `incierto` y nada de Jev llega a un informe. Para poner un umbral hace
+   falta medir contra una etiqueta HUMANA (159). Hasta ahora se etiquetaba a
+   mano en ficheros JSONL que salían de `extraer`. Las respuestas que ya había
+   dado Jev en producción (con su `estado_enviado`) no las podía confirmar
+   nadie desde la herramienta. Era lo que quedaba de #8: la vista de revisión
+   y `decision_labels`.
+
+   **Decisión.**
+   - **Tabla `decision_labels`.** Una etiqueta por (clave del estado,
+     pregunta, versión, variante de opciones), con el autor y una nota. La
+     misma página en dos URLs o dos censos es la misma entrada para Jev
+     (169): se etiqueta una vez y vale para todas sus copias. Una versión
+     nueva de la pregunta se etiqueta otra vez (180). La fila **copia** lo
+     que se juzgó (`estado_enviado`, las opciones del cliente) y lo que dijo
+     Jev, y `decision_id` es `SET NULL`: la etiqueta sobrevive a que se borre
+     el censo, que es lo normal con los viejos (96).
+   - **A ciegas.** «Revisar a Jev» (menú «⋯», `#/revision`) enseña lo que VIO
+     el modelo y las respuestas posibles, nunca lo que dijo Jev. Eso sale
+     DESPUÉS de guardar («Jev decía Sí (confianza 0,62). Coincide»). Verlo
+     antes empuja la etiqueta hacia su respuesta (179).
+   - **Lo que se ofrece.**
+     - Las decisiones `incierto` que respondió el modelo (o su caché), de la
+       versión del catálogo y sin etiquetar. Con `estado=todas`, también las
+       decididas, para medir un umbral ya puesto.
+     - Una pregunta con `solo_si` (la recomendación de una canibalización,
+       175) solo donde la otra respondió lo que pide.
+     - Las de regla, arrastre o humano no son de Jev y no salen.
+   - **Solo lo que mide la pregunta de hoy**: su versión y su **modelo** del
+     catálogo. Con las opciones del cliente (178), además, las mismas que vio
+     Jev: si el cliente cambió su taxonomía, la respuesta vieja se eligió
+     entre otras opciones y no se ofrece ni se puede etiquetar (409). Es el
+     mismo filtro que la caché. La etiqueta humana vale para cualquier modelo,
+     pero su `respuesta_jev` no: se guarda con `modelo_jev` y al exportar solo
+     va la del modelo de hoy. Sin ella la fila cuenta como no evaluable y
+     `responder` la vuelve a preguntar.
+   - **Un juego por taxonomía.** `evaluar` normaliza todas las filas con las
+     opciones de la primera, así que dos clientes en un juego contarían unas
+     contra el vocabulario del otro. Con las opciones del cliente se exporta
+     con `?variante=` (409 si hay varias y no se elige).
+   - **Sin sesgo de orden.** Se ofrece por la clave del estado (un hash, así
+     que el orden es pseudoaleatorio y estable), con cursor y no con OFFSET.
+     Por `id` salían primero los censos viejos, agrupados por sitio, y
+     `evaluar` trata el juego como una muestra.
+   - Un índice parcial `ix_decisions_revision (pregunta, version_pregunta,
+     estado) WHERE origen IN ('modelo', 'cache')`, porque ninguno de
+     `decisions` empezaba por la pregunta. Dos personas que guardan el mismo
+     estado a la vez no dan un 500: la segunda reintenta y corrige. En la
+     pantalla, dos pulsaciones seguidas mandan un solo PUT. Cmd/Ctrl+número,
+     un diálogo abierto o una tanda cargando no etiquetan.
+   - **La etiqueta se valida** con `normalizar_etiqueta`, la misma de
+     `evaluar`: «sí» es `true` en un noul, y en un score se elige el nivel.
+     Lo que no es del vocabulario da 422.
+   - **Amplían el juego.**
+     - `GET /api/decisiones/etiquetas/{pregunta}/juego.jsonl` y
+       `respuestas.jsonl` (y `evaluar_decisiones.py etiquetas` dentro del
+       contenedor) dan un juego y sus respuestas con la forma de `extraer` y
+       `responder`, que `evaluar` lee tal cual.
+     - El resumen de la pantalla dice, por pregunta, cuánto falta, cuánto hay
+       etiquetado y en cuánto coincide Jev.
+   - **No llama a nadie.** `shared/revision_decisiones.py` solo lee
+     `decisions` y el registro de módulos (para las opciones de un cliente,
+     178). Un test fija que no importa nada más de la capa.
+
+   **Fuera.**
+   - Elegir el umbral desde la pantalla: sale de `evaluar`, con sus
+     condiciones (cota de Wilson, 30 cubiertas; 159), y se pone en el
+     catálogo con su versión.
+   - La vigilancia de cambios de modelo (#8, punto 5).
+
+   Tests:
+   - `tests/test_revision_decisiones.py`, la API sobre SQLite:
+     - un juego por taxonomía y la taxonomía cambiada;
+     - solo el modelo de hoy, también al exportar;
+     - a ciegas;
+     - un estado y una etiqueta;
+     - el vocabulario y los scores;
+     - corregir sin duplicar;
+     - lo que no se ofrece y `solo_si`;
+     - sobrevivir al borrado;
+     - el resumen;
+     - la exportación pasada por `evaluar` de verdad;
+     - la orden `etiquetas`.
+   - `tests/test_revision_frontend.py`, en Chromium:
+     - etiquetar con clic o con número;
+     - la respuesta de Jev solo después;
+     - saltar sin guardar;
+     - la tanda siguiente;
+     - un solo PUT por doble pulsación, y los modificadores y los diálogos
+       no etiquetan.
+   - `tests/test_decisiones_no_se_disparan.py`: lo que importa el módulo.

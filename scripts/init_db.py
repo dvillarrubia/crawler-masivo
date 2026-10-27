@@ -300,6 +300,11 @@ def migrar_enriquecido() -> None:
             conn.execute(text(
                 "ALTER TABLE decisions ADD CONSTRAINT decisions_run_id_fkey FOREIGN KEY "
                 "(run_id) REFERENCES enrichment_runs(id) ON DELETE SET NULL"))
+        # La revision humana (decision 211) busca por pregunta: ningun indice
+        # de `decisions` empieza por ella. Parcial: solo lo que respondio Jev.
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_decisions_revision ON decisions "
+            "(pregunta, version_pregunta, estado) WHERE origen IN ('modelo', 'cache')"))
     print("Enriquecido: tabla enrichment_runs y FK de decisions.run_id al dia.")
 
 

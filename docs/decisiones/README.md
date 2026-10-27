@@ -18,7 +18,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165, 188, 191, 192, 197 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151, 189, 194, 196, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
-| [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 177, 178, 179, 180, 181, 182, 184, 185 |
+| [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 177, 178, 179, 180, 181, 182, 184, 185, 211 |
 | [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34), su edición y prueba en vivo, y segmentos de negocio | 104, 125, 166 |
 
 ## Por numero
@@ -237,6 +237,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 208 | La API manda cabeceras de seguridad (CSP de contención, X-Frame-Options, nosniff, Referrer-Policy) en todas las respuestas | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d208) |
 | 209 | Un disparo programado se toma con candado (`FOR UPDATE SKIP LOCKED`, por si hay varias réplicas) y se encola después del commit; lo programado espera en `jobs:programados`, detrás de lo lanzado a mano; y «Lanzar ahora» (`POST /api/programaciones/{id}/ejecutar`) | [`worker-y-cola`](worker-y-cola.md#d209) |
 | 210 | Lo que Search Console no cuenta (IA sin separar, búsquedas anonimizadas, impresiones infladas de 2025-26, fin de `num=100`) se dice junto a sus cifras, y la parte de clics sin búsqueda se mide en el sitio (`sin_busqueda`) | [`incidencias`](incidencias.md#d210) |
+| 211 | La revisión humana de Jev, en la interfaz y a ciegas («Revisar a Jev»): una etiqueta por estado en `decision_labels`, que sobrevive al censo y amplía el juego de `evaluar` | [`llm-y-enriquecido`](llm-y-enriquecido.md#d211) |
 
 ## Anadir una decision
 

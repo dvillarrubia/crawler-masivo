@@ -941,6 +941,8 @@ function app() {
     asiPerfiles: {},          // perfil -> { nivel: 'vista', resuelta } de «Así rastreará»
     // Ajustes de la agencia (revision de UX del 25-oct, 2.5)
     ajustes: null,
+    // «Revisar a Jev» (#8, decision 211): a ciegas, lo de Jev se ve al guardar.
+    revision: { resumen: [], pregunta: '', items: [], resultado: null, nota: '', autor: '', cargando: false, enviando: false },
 
     // Detalle del trabajo
     job: null,
@@ -1269,6 +1271,8 @@ function app() {
           await this.verProduccion();
         } else if (p[0] === 'ajustes') {
           await this.verAjustes();
+        } else if (p[0] === 'revision') {
+          await this.verRevision(q.get('pregunta') || '');
         } else if (p[0] === 'rastreos') {
           if (!this.job || this.job.id !== p[1]) await this.openJob(p[1]);
           if (!this.job) return;
@@ -1389,6 +1393,7 @@ function app() {
     // del 25-oct, 2.12). Un rastreo sin cliente cuelga de Produccion.
     seccion() {
       if (this.view === 'ajustes') return 'ajustes';
+      if (this.view === 'revision') return 'revision';
       if (['clients', 'client'].includes(this.view)) return 'clientes';
       if (['detail', 'explorer', 'url-detail', 'informe'].includes(this.view) && this.job && this.job.cliente_id) return 'clientes';
       return 'produccion';
@@ -1415,6 +1420,9 @@ function app() {
       const m = [];
       const v = this.view;
       if (v === 'ajustes') return [{ texto: 'Ajustes de la agencia' }];
+      if (v === 'revision') return this.revision.pregunta
+        ? [{ texto: 'Revisar a Jev', href: '#/revision' }, { texto: this.revision.pregunta }]
+        : [{ texto: 'Revisar a Jev' }];
       if (v === 'client') {
         m.push({ texto: 'Clientes', href: '#/clientes' });
         if (this.cliente) {
@@ -3595,6 +3603,107 @@ function app() {
         this.programarError = e.message;
       }
     },
+    // ------- Revisar a Jev (#8, decision 211) -------
+    // Lo que Jev respondio sin seguridad («incierto»), para etiquetarlo a mano.
+    // A CIEGAS: la fila no trae lo que dijo Jev; se ensena al guardar, porque
+    // verlo antes empuja la etiqueta (decision 179). Con estas etiquetas se
+    // calcula el umbral de cada pregunta (`evaluar_decisiones.py etiquetas`).
+    async verRevision(pregunta) {
+      this._salirDeJob();
+      this.view = 'revision';
+      if (!this.revision.autor) {
+        try { this.revision.autor = localStorage.getItem('seo-crawler-revisor') || ''; } catch (_) { /* sin storage */ }
+      }
+      this.revision.pregunta = pregunta;
+      this.revision.resultado = null;
+      this.revision.nota = '';
+      await this.cargarResumenRevision();
+      if (pregunta) await this.cargarPendientesRevision();
+    },
+
+    async cargarResumenRevision() {
+      try {
+        this.revision.resumen = await api('/decisiones/revision/resumen');
+      } catch (e) {
+        this.revision.resumen = [];
+        this.error = 'No se pudo cargar la revisión: ' + e.message;
+      }
+    },
+
+    async cargarPendientesRevision() {
+      this.revision.cargando = true;
+      this.revision.items = [];
+      try {
+        this.revision.items = await api('/decisiones/revision?limite=20&pregunta=' + encodeURIComponent(this.revision.pregunta));
+      } catch (e) {
+        this.revision.items = [];
+        this.error = 'No se pudieron cargar las respuestas: ' + e.message;
+      } finally {
+        this.revision.cargando = false;
+      }
+    },
+
+    get revisionActual() {
+      return this.revision.resultado ? this.revision.resultado.item : (this.revision.items[0] || null);
+    },
+
+    async etiquetarRevision(valor) {
+      const item = this.revision.items[0];
+      // Dos pulsaciones seguidas mandaban dos PUT: la guardada era la segunda
+      // y la pantalla ensenaba la primera.
+      if (!item || this.revision.resultado || this.revision.enviando || this.revision.cargando) return;
+      this.revision.enviando = true;
+      try {
+        try { localStorage.setItem('seo-crawler-revisor', this.revision.autor || ''); } catch (_) { /* sin storage */ }
+        const r = await api('/decisiones/' + item.decision_id + '/etiqueta', {
+          method: 'PUT',
+          body: JSON.stringify({ etiqueta: valor, nota: this.revision.nota || null, autor: this.revision.autor || null }),
+        });
+        this.revision.resultado = { ...r, item };
+      } catch (e) {
+        this.error = 'No se pudo guardar la etiqueta: ' + e.message;
+      } finally {
+        this.revision.enviando = false;
+      }
+    },
+
+    async siguienteRevision() {
+      this.revision.resultado = null;
+      this.revision.nota = '';
+      this.revision.items = this.revision.items.slice(1);
+      if (!this.revision.items.length) {
+        await this.cargarPendientesRevision();
+        await this.cargarResumenRevision();
+      }
+    },
+
+    // Saltar no guarda nada: la fila vuelve a salir otro dia.
+    saltarRevision() {
+      if (this.revision.resultado) return this.siguienteRevision();
+      this.revision.items = this.revision.items.slice(1).concat(this.revision.items.slice(0, 1));
+      this.revision.nota = '';
+    },
+
+    teclaRevision(ev) {
+      if (this.view !== 'revision' || !this.revision.pregunta || this.dialogo || this.revision.cargando) return;
+      // Cmd/Ctrl+1 es cambiar de pestana, no etiquetar.
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      const t = ev.target && ev.target.tagName;
+      if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT' || (ev.target && ev.target.isContentEditable)) return;
+      if (this.revision.resultado && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); this.siguienteRevision(); return; }
+      const item = this.revision.items[0];
+      const n = Number(ev.key);
+      if (item && !this.revision.resultado && n >= 1 && n <= item.opciones.length) {
+        ev.preventDefault();
+        this.etiquetarRevision(item.opciones[n - 1].valor);
+      }
+    },
+
+    textoOpcionRevision(item, valor) {
+      const o = (item && item.opciones || []).find(x => x.valor === valor);
+      return o ? o.texto : (valor == null ? '—' : String(valor));
+    },
+
     async verProgramados() {
       this._salirDeJob();
       this.view = 'programados';
@@ -7645,6 +7754,17 @@ function paginasDeFraseTrafico(texto, t) {
     : g.texto && !['trasvase', 'sin_cambio', 'sin_dato_anterior'].includes(g.cambio) && texto.includes(g.texto)));
   if (candidatos.length !== 1) return [];
   return (candidatos[0].ejemplos || []).map(e => e.url).filter(Boolean).slice(0, 3);
+}
+
+// Los campos del estado que vio Jev, para la revision (#8): el texto tal
+// cual y lo demas (listas, objetos) en JSON legible.
+function camposDeEstado(estado) {
+  if (!estado || typeof estado !== 'object') return [];
+  return Object.entries(estado).map(([k, v]) => ({
+    clave: k,
+    valor: typeof v === 'string' ? v : JSON.stringify(v, null, 1),
+    largo: typeof v !== 'string' || v.length > 160,
+  }));
 }
 
 // Lo que lee la plantilla mientras el x-if que la envuelve aun no ha

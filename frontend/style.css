@@ -2271,3 +2271,11 @@ td.celda-acciones{overflow:visible}
 .fila-extremos{display:flex;justify-content:space-between!important;gap:1rem!important;align-items:baseline!important}
 .rotulo-accent{font-weight:600!important;font-size:var(--fs-sm)!important;color:var(--accent)!important;margin-bottom:.35rem!important}
 .marco-grafica{width:100%!important;height:600px!important;border-radius:8px!important;overflow:hidden!important}
+
+/* Revisar a Jev (#8, decision 211) */
+.revision-estado { margin: 0 0 1rem; display: grid; gap: .5rem; }
+.revision-campo { display: grid; grid-template-columns: minmax(6rem, 10rem) 1fr; gap: .75rem; }
+.revision-campo dd { margin: 0; overflow-wrap: anywhere; }
+.revision-largo { white-space: pre-wrap; max-height: 16rem; overflow: auto; font-size: var(--fs-base); }
+.revision-opciones { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+@media (max-width: 600px) { .revision-campo { grid-template-columns: 1fr; gap: .1rem; } }
