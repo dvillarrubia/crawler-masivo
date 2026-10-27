@@ -1564,6 +1564,49 @@ class Decision(Base):
     )
 
 
+class DecisionLabel(Base):
+    """La etiqueta HUMANA de una respuesta de Jev (#8, decision 211).
+
+    Lo que cuenta en un juego de evaluacion: nunca la etiqueta de Jev. Una por
+    (estado, pregunta, version, variante): el mismo estado en dos URLs o dos
+    censos es la misma entrada para Jev y se etiqueta una vez; una version
+    nueva de la pregunta se etiqueta otra vez (decision 180).
+
+    Copia lo que se juzgo (`estado_enviado`, las opciones) y lo que dijo Jev:
+    la etiqueta vale aunque se borre el censo del que salio, que es cuando
+    `decision_id` pasa a NULL. Es contenido que ya esta en nuestra BD.
+    """
+
+    __tablename__ = "decision_labels"
+    __table_args__ = (
+        UniqueConstraint("clave", "pregunta", "version_pregunta", "variante",
+                         name="uq_decision_label"),
+        Index("ix_decision_labels_pregunta", "pregunta", "version_pregunta"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    decision_id = Column(BigInteger, ForeignKey("decisions.id", ondelete="SET NULL"),
+                         nullable=True, index=True)
+    clave = Column(String(64), nullable=False)
+    pregunta = Column(String(64), nullable=False)
+    version_pregunta = Column(Integer, nullable=False)
+    # La huella de las opciones del cliente (`Pregunta.variante`, decision
+    # 178); "" en las del catalogo.
+    variante = Column(String(16), nullable=False, default="")
+    ambito = Column(String(10), nullable=False, default="url")
+    estado_enviado = Column(JSON, nullable=True)
+    opciones = Column(JSON, nullable=True)
+    respuesta_jev = Column(Text, nullable=True)
+    confianza_jev = Column(Float, nullable=True)
+    # En el vocabulario de la pregunta (`normalizar_etiqueta`): "true"/"false",
+    # la opcion o el indice del nivel.
+    etiqueta = Column(Text, nullable=False)
+    nota = Column(Text, nullable=True)
+    autor = Column(String(128), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
 # ---------------------------------------------------------------------------
 # Ejecuciones del analisis enriquecido (#40, decision 85)
 # ---------------------------------------------------------------------------

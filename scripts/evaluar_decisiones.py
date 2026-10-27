@@ -32,6 +32,10 @@ Cinco ordenes, en el orden en que se usan:
               El mismo juego para la version del catalogo, sin etiquetas ni
               notas, para etiquetarlo a ciegas con el criterio nuevo
               (decision 180). No llama a nadie.
+    etiquetas <pregunta> --juego <juego.jsonl> --respuestas <respuestas.jsonl>
+              Lo etiquetado en la pantalla «Revisar a Jev» (`decision_labels`,
+              decision 211) como un juego y sus respuestas, listos para
+              `evaluar`. Solo la version del catalogo. No llama a nadie.
     huellas   <juego.jsonl> [<juego.jsonl> ...] --salida <huellas.txt> [--campo titulo]
               Huellas de los fragmentos de `estado[campo]` de los juegos, para
               que un test vigile que ningun ejemplo de las instrucciones sale
@@ -490,6 +494,10 @@ def main(argv: list[str] | None = None) -> int:
     f = sub.add_parser("reetiquetar")
     f.add_argument("juego")
     f.add_argument("--salida", required=True)
+    h = sub.add_parser("etiquetas")
+    h.add_argument("pregunta")
+    h.add_argument("--juego", required=True)
+    h.add_argument("--respuestas", required=True)
     g = sub.add_parser("huellas")
     g.add_argument("juegos", nargs="+")
     g.add_argument("--salida", required=True)
@@ -544,6 +552,21 @@ def main(argv: list[str] | None = None) -> int:
         _escribir(args.salida, para_reetiquetar(juego, p.version))
         print(f"{len(juego)} ejemplos de {p.nombre} en {args.salida}, version {p.version} y sin "
               "etiquetar: etiquetarlos a ciegas con el criterio de esa version.")
+    elif args.orden == "etiquetas":
+        from shared.database import SessionLocal
+        from shared.revision_decisiones import exportar
+
+        s = SessionLocal()
+        try:
+            juego, respuestas = exportar(s, args.pregunta)
+        except LookupError as exc:
+            raise SystemExit(str(exc)) from exc
+        finally:
+            s.close()
+        _escribir(args.juego, juego)
+        _escribir(args.respuestas, respuestas)
+        print(f"{len(juego)} etiquetas humanas de {args.pregunta} en {args.juego} y lo que dijo Jev en "
+              f"{args.respuestas}: `evaluar {args.juego} {args.respuestas}`.")
     elif args.orden == "huellas":
         from shared.evaluacion_decisiones import huellas_de_juego
 

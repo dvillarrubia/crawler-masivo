@@ -18,7 +18,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165, 188, 191, 192, 197 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151, 189, 194, 196, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
-| [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 177, 178, 179, 180, 181, 182, 184, 185 |
+| [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 177, 178, 179, 180, 181, 182, 184, 185, 211 |
 | [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34), su edición y prueba en vivo, y segmentos de negocio | 104, 125, 166 |
 
 ## Por numero
@@ -235,6 +235,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 206 | El markdown de una página rastreada se sanea con DOMPurify antes de pintarlo (x-html), porque marked@15 ya no sanea | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d206) |
 | 207 | Una celda de CSV/XLSX que empieza por `=`/`+`/`-`/`@` se escapa (inyección de fórmula desde el sitio rastreado) | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d207) |
 | 208 | La API manda cabeceras de seguridad (CSP de contención, X-Frame-Options, nosniff, Referrer-Policy) en todas las respuestas | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d208) |
+| 211 | La revisión humana de Jev, en la interfaz y a ciegas («Revisar a Jev»): una etiqueta por estado en `decision_labels`, que sobrevive al censo y amplía el juego de `evaluar` | [`llm-y-enriquecido`](llm-y-enriquecido.md#d211) |
 
 ## Anadir una decision
 
