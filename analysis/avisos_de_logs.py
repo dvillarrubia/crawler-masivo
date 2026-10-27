@@ -1,7 +1,8 @@
 """Lo que Googlebot visita de verdad, cruzado con el censo (#35, decision 213).
 
-Con el log mas reciente, ya leido, del cliente y del MISMO host que el censo
-(con o sin `www.`; un log del blog no habla de la web):
+Con el log mas reciente, ya leido, del cliente, del MISMO host que el censo
+(con o sin `www.`; un log del blog no habla de la web) y de su EPOCA (se
+solapa con el o le queda a `MAX_DIAS_ENTRE` dias); sin uno asi, nada:
 
 - ``urls.googlebot_visitas`` y ``urls.googlebot_ultima`` de cada URL interna:
   las visitas de Googlebot VERIFICADO (su IP es de Google) en el periodo del
@@ -69,17 +70,28 @@ def _sin_www(h: str | None) -> str:
     return (h or "").lower().removeprefix("www.")
 
 
+def _de_su_epoca(imp, censo: datetime) -> bool:
+    if not imp.desde or not imp.hasta:
+        return False
+    desde = imp.desde if imp.desde.tzinfo else imp.desde.replace(tzinfo=timezone.utc)
+    hasta = imp.hasta if imp.hasta.tzinfo else imp.hasta.replace(tzinfo=timezone.utc)
+    return desde - timedelta(days=MAX_DIAS_ENTRE) <= censo <= hasta + timedelta(days=MAX_DIAS_ENTRE)
+
+
 def importacion_para(session, job):
-    """El log mas reciente ya leido del cliente del job y de su host."""
+    """El log ya leido del cliente del job, de su host y de la epoca del censo
+    (el mas reciente que lo cumpla). Un log de octubre no dice nada de un censo
+    de marzo: ni avisos ni columnas."""
     from shared.models import LogImport
 
     if not getattr(job, "cliente_id", None):
         return None
     hosts = {_sin_www(urlsplit(s).hostname) for s in (job.seeds or []) if s}
+    censo = _dia_del_censo(job)
     for imp in (session.query(LogImport)
                 .filter(LogImport.cliente_id == job.cliente_id, LogImport.estado == "hecho")
                 .order_by(LogImport.created_at.desc(), LogImport.id.desc())):
-        if not hosts or _sin_www(imp.host) in hosts:
+        if (not hosts or _sin_www(imp.host) in hosts) and _de_su_epoca(imp, censo):
             return imp
     return None
 
@@ -180,13 +192,15 @@ def avisar(an) -> dict[str, Any] | None:
     censo = _dia_del_censo(job)
     desde = imp.desde.replace(tzinfo=imp.desde.tzinfo or timezone.utc) if imp.desde else None
     hasta = imp.hasta.replace(tzinfo=imp.hasta.tzinfo or timezone.utc) if imp.hasta else None
-    de_su_epoca = bool(desde and hasta and desde - timedelta(days=MAX_DIAS_ENTRE) <= censo
-                       <= hasta + timedelta(days=MAX_DIAS_ENTRE))
-    afirmable = (de_su_epoca and dias >= MIN_DIAS_AUSENCIA and total >= MIN_VISITAS_VERIFICADAS
-                 and cobertura >= MIN_COBERTURA)
+    de_su_epoca = _de_su_epoca(imp, censo)
+    cortado = int((imp.resumen or {}).get("fuera_del_tope_googlebot") or 0) > 0
+    afirmable = (de_su_epoca and not cortado and dias >= MIN_DIAS_AUSENCIA
+                 and total >= MIN_VISITAS_VERIFICADAS and cobertura >= MIN_COBERTURA)
     motivo_no = None
     if not de_su_epoca:
         motivo_no = "el log no es de la época del rastreo"
+    elif cortado:
+        motivo_no = "el log tenía más rutas de Googlebot de las que se guardan"
     elif dias < MIN_DIAS_AUSENCIA:
         motivo_no = f"el log cubre menos de {MIN_DIAS_AUSENCIA} días"
     elif total < MIN_VISITAS_VERIFICADAS or cobertura < MIN_COBERTURA:

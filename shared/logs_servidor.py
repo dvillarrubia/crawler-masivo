@@ -49,8 +49,11 @@ FORMATOS = {"combined": _COMBINED}
 FORMATO_FECHA = "%d/%b/%Y:%H:%M:%S %z"
 GRUPOS_OBLIGATORIOS = {"ip", "url", "codigo", "ua"}
 MAX_ERRORES_GUARDADOS = 50
-# Rutas distintas por (bot, verificado) que se guardan. ~400 bytes cada una.
+# Rutas distintas que se guardan, ~400 bytes cada una. El Googlebot verificado
+# tiene su propio cupo: un escaner que se hace pasar por el no puede llenar el
+# comun y dejar fuera las visitas de verdad (que luego saldrian «sin visitas»).
 MAX_CLAVES = 400_000
+MAX_CLAVES_GOOGLEBOT = 600_000
 # Bots, del mas especifico al menos: «Googlebot-Image» antes que «Googlebot».
 BOTS_UA: list[tuple[str, str, str]] = [
     ("googlebot-imagen", "Googlebot-Image", "google"),
@@ -94,7 +97,8 @@ RANGOS = {
                    "https://www.perplexity.ai/perplexity-user.json"),
 }
 _IPV4 = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
-_IPV6 = re.compile(r"\b(?:[0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}\b")
+# Con `::` o con sus ocho grupos: una hora (`10:00:00`) no es una IPv6.
+_IPV6 = re.compile(r"\b(?:[0-9a-fA-F]{0,4}:){1,6}:[0-9a-fA-F]{0,4}\b|\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b")
 
 
 class FormatoNoValido(ValueError):
@@ -274,6 +278,8 @@ class Agregado:
     otros_bots: int = 0
     otro_host: int = 0
     fuera_del_tope: int = 0
+    fuera_del_tope_googlebot: int = 0
+    claves_googlebot: int = 0
     errores: list[str] = field(default_factory=list)
     desde: datetime | None = None
     hasta: datetime | None = None
@@ -283,7 +289,8 @@ class Agregado:
 
 def agregar(lineas_: Iterable[str], regex: re.Pattern, *, verificar: Callable[[str, str], bool | None],
             host: str | None = None, formato_fecha: str = FORMATO_FECHA, cada: int = 0,
-            progreso: Callable[[int], None] | None = None, max_claves: int = MAX_CLAVES) -> Agregado:
+            progreso: Callable[[int], None] | None = None, max_claves: int = MAX_CLAVES,
+            max_claves_googlebot: int = MAX_CLAVES_GOOGLEBOT) -> Agregado:
     a = Agregado()
     for n, linea in enumerate(lineas_, 1):
         if progreso is not None and cada and n % cada == 0:
@@ -319,7 +326,12 @@ def agregar(lineas_: Iterable[str], regex: re.Pattern, *, verificar: Callable[[s
         k = (ruta[:2000], bot, v)
         d = a.por_ruta.get(k)
         if d is None:
-            if len(a.por_ruta) >= max_claves:
+            if bot == "googlebot" and v is True:
+                if a.claves_googlebot >= max_claves_googlebot:
+                    a.fuera_del_tope_googlebot += 1
+                    continue
+                a.claves_googlebot += 1
+            elif len(a.por_ruta) - a.claves_googlebot >= max_claves:
                 a.fuera_del_tope += 1
                 continue
             d = a.por_ruta[k] = {"visitas": 0, "codigos": {}, "primero": cuando, "ultimo": cuando, "movil": 0}
@@ -425,6 +437,7 @@ def procesar(import_id: int, *, sesion_factory, verificador: Verificador | None 
             extra = {"lineas_ok": a.lineas_ok, "lineas_error": a.lineas_error, "personas": a.personas,
                      "desde": a.desde, "hasta": a.hasta, "bots": bots,
                      "resumen": {"otro_host": a.otro_host, "fuera_del_tope": a.fuera_del_tope,
+                                 "fuera_del_tope_googlebot": a.fuera_del_tope_googlebot,
                                  "otros_metodos": a.otros_bots}}
         except Exception as exc:  # noqa: BLE001 -- sin esto se quedaria «procesando» para siempre
             s.rollback()
