@@ -950,3 +950,30 @@
    frontend, el informe y el aviso con SQLite) y
    `tests/test_revision_final_frontend.py` (Estado con Alpine en Chromium,
    Problemas con el anterior dudoso, informe con una API anterior).
+
+<a id="d206"></a>
+206. **El markdown de una página rastreada se sanea con DOMPurify antes de pintarlo (x-html), porque marked@15 ya no sanea**
+
+   **Problema.** La pestaña «Contenido» de la ficha de URL pinta
+   `page_content.content_markdown` con `renderMarkdown()` (que devolvía
+   `marked.parse(md)`) inyectado por `x-html`. marked v15 quitó la opción de
+   saneo y no había DOMPurify en el frontend, así que el HTML embebido en el
+   markdown se ejecutaba en el navegador del analista (XSS almacenado): el
+   markdown lo controla el sitio que el crawler visita, no nosotros. Un
+   `<img onerror=...>` disparaba, y Alpine 3 además llama a `initTree()` sobre
+   lo inyectado por `x-html`, así que también correrían directivas
+   `x-data`/`x-init` incrustadas.
+
+   **Decisión.** `renderMarkdown()` pasa la salida de `marked.parse()` por
+   `DOMPurify.sanitize(html, { USE_PROFILES: { html: true } })` antes de
+   devolverla; DOMPurify quita los manejadores de evento, los esquemas
+   peligrosos (`javascript:`) y los atributos que no son HTML estándar (entre
+   ellos las directivas `x-*` de Alpine). DOMPurify se carga desde cdnjs con
+   versión fijada (`dompurify@3.2.4`). Si DOMPurify no está disponible (CDN
+   caído) o `marked.parse` lanza, se devuelve el markdown como texto escapado
+   dentro de `<pre>`, nunca HTML crudo. El markdown de una página rastreada es
+   dato no confiable como cualquier otro campo venido del sitio.
+
+   Tests: `tests/test_xss_markdown_frontend.py` (saneo de `renderMarkdown` en
+   Chromium: `<img onerror>` no dispara y el `javascript:` no sobrevive en el
+   href).

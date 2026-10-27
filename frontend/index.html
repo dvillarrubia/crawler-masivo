@@ -19,6 +19,10 @@
   <link rel="stylesheet" href="/static/theme-terminal.css">
   <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
+  <!-- DOMPurify: marked@15 ya no sanea, y el markdown de una pagina rastreada lo
+       controla el sitio visitado. Sin esto, su HTML se ejecuta al pintarlo
+       (x-html) en la ficha de URL. Decision 206. -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.4/purify.min.js"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
   <script src="/static/incidencias.js"></script>
