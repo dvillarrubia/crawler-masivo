@@ -256,20 +256,45 @@ def _exacta(url: str) -> str:
     return url.strip().split("#", 1)[0]
 
 
-def cruzar(filas: Iterable[tuple[str, str, str, float]], urls: Iterable[tuple],
-           *, max_no_rastreadas: int = 50, max_origenes: int = 5) -> Cruce:
-    """`filas`: (url_to, url_from, dominio_from, aportacion). `urls`: (id, url)
-    o (id, url, rango) de las internas del censo.
+def rango_de(status: int | None, indexable: bool | None, redirect: str | None) -> int:
+    """Para desempatar dos URLs del censo con la misma clave: 200 indexable,
+    200, redireccion, error."""
+    if status == 200 and indexable:
+        return 0
+    if status == 200:
+        return 1
+    if redirect or (status is not None and 300 <= status < 400):
+        return 2
+    return 3
 
-    Primero la URL exacta (sin el fragmento). Si no esta, la clave suelta
-    (esquema, `www.`, barra final), y si varias URLs del censo comparten clave
-    (`/a` 404 y `/a/` 200 en un WordPress) gana la de menor `rango` (200
-    indexable, luego 200, redireccion, error) y, a igualdad, la de menor id:
-    siempre la misma, y nunca un 404 si esta su version buena.
-    """
-    exactas: dict[str, int] = {}
-    por_clave: dict[str, tuple[int, int]] = {}
-    por_ruta: dict[str, tuple[int, int]] = {}
+
+@dataclass
+class IndiceCenso:
+    """Las URLs internas de un censo, para cruzar con lo que llega de fuera
+    (backlinks, logs del servidor): exactas, por clave suelta y por clave sin
+    query. Lo comparten los dos cruces para que la regla de desempate sea una."""
+    exactas: dict[str, int] = field(default_factory=dict)
+    por_clave: dict[str, tuple[int, int]] = field(default_factory=dict)
+    por_ruta: dict[str, tuple[int, int]] = field(default_factory=dict)
+
+    def por_clave_suelta(self, k: str | None) -> int | None:
+        if k is None:
+            return None
+        hit = self.por_clave.get(k) or (self.por_ruta.get(sin_query(k)) if "?" in k else None)
+        return hit[1] if hit else None
+
+    def buscar(self, url: str) -> int | None:
+        uid = self.exactas.get(_exacta(url))
+        return uid if uid is not None else self.por_clave_suelta(clave_backlink(url))
+
+
+def indice_de_censo(urls: Iterable[tuple]) -> IndiceCenso:
+    """`urls`: (id, url) o (id, url, rango). Primero la URL exacta (sin el
+    fragmento); si no esta, la clave suelta (esquema, `www.`, barra final), y
+    si varias URLs comparten clave (`/a` 404 y `/a/` 200 en un WordPress) gana
+    la de menor `rango` (`rango_de`) y, a igualdad, la de menor id: siempre la
+    misma, y nunca un 404 si esta su version buena."""
+    ind = IndiceCenso()
 
     def _mejor(d, k, rango, uid):
         actual = d.get(k)
@@ -279,13 +304,21 @@ def cruzar(filas: Iterable[tuple[str, str, str, float]], urls: Iterable[tuple],
     for u in urls:
         uid, url = u[0], u[1]
         rango = u[2] if len(u) > 2 else 0
-        exactas.setdefault(_exacta(url), uid)
+        ind.exactas.setdefault(_exacta(url), uid)
         k = clave_backlink(url)
         if k is None:
             continue
-        _mejor(por_clave, k, rango, uid)
+        _mejor(ind.por_clave, k, rango, uid)
         if "?" not in k:
-            _mejor(por_ruta, k, rango, uid)
+            _mejor(ind.por_ruta, k, rango, uid)
+    return ind
+
+
+def cruzar(filas: Iterable[tuple[str, str, str, float]], urls: Iterable[tuple],
+           *, max_no_rastreadas: int = 50, max_origenes: int = 5) -> Cruce:
+    """`filas`: (url_to, url_from, dominio_from, aportacion). `urls`: (id, url)
+    o (id, url, rango) de las internas del censo (`indice_de_censo`)."""
+    indice = urls if isinstance(urls, IndiceCenso) else indice_de_censo(urls)
     por_url: dict[int, dict[str, Any]] = {}
     fuera: dict[str, dict[str, Any]] = {}
     n = casadas = 0
@@ -294,11 +327,7 @@ def cruzar(filas: Iterable[tuple[str, str, str, float]], urls: Iterable[tuple],
         n += 1
         aporte = float(aporte or 0)
         total += aporte
-        uid = exactas.get(_exacta(url_to))
-        k = clave_backlink(url_to) if uid is None else None
-        if k is not None:
-            hit = por_clave.get(k) or (por_ruta.get(sin_query(k)) if "?" in k else None)
-            uid = hit[1] if hit else None
+        uid = indice.buscar(url_to)
         if uid is None:
             f = fuera.setdefault(url_to, {"url": url_to, "backlinks": 0, "aportacion": 0.0, "dominios": set()})
             f["backlinks"] += 1

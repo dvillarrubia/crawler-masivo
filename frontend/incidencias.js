@@ -174,6 +174,18 @@ const ISSUE_INFO = {
     google: 'Aún la muestra en los resultados: todavía no ha consolidado la señal en la nueva. Es normal justo después de una migración; si dura meses, algo (enlaces internos, sitemap, hreflang) sigue apuntando a la vieja.',
     arreglo: 'Que los enlaces internos, el sitemap y el hreflang apunten a la URL final. Informativo.',
   },
+  // ----- Logs del servidor (decision 213) -----
+  'indexable_sin_visitas_googlebot': {
+    que: 'Página indexable de las más importantes del sitio (el cuarto con más PageRank) a la que Googlebot no ha ido en todo el periodo del log subido. Solo se afirma con 7 días de log o más.',
+    google: 'Si no la visita, tarda en ver sus cambios y puede dejar de tenerla al día en el índice. Suele ser señal de que llega poco enlazado de verdad, de que está lejos o de que el presupuesto de rastreo se va en otras URLs.',
+    arreglo: 'Enlazarla desde páginas que Googlebot sí visita, incluirla en el sitemap y mirar en «Logs» en qué se va el presupuesto (parámetros, redirecciones, errores).',
+  },
+  'googlebot_recibe_error': {
+    que: 'El rastreo vio esta página con 200, pero en el log la mayoría de las visitas de Googlebot recibieron un error (4xx o 5xx).',
+    google: 'Lo que cuenta es lo que le responde a él: si recibe errores, acaba sacándola del índice aunque a una persona le cargue bien.',
+    arreglo: 'Mirar en el servidor por qué responde distinto a Googlebot: un WAF o un límite de peticiones que lo frena, o fallos a ciertas horas.',
+  },
+
   // ----- Backlinks del cliente (decision 212) -----
   'backlinks_a_error': {
     que: 'Una página que da error (4xx o 5xx) o no responde y a la que enlazan otros sitios. El detalle dice cuántos backlinks tiene, de cuántos dominios y cuánta autoridad aportan, según el CSV de backlinks subido.',
@@ -982,6 +994,8 @@ const ISSUE_LABEL_EXTRA = {
   google_tiene_canonical_antiguo: 'Google tiene un canonical antiguo',
   trafico_en_redireccion: 'Tráfico en una URL que redirige',
   huerfana_con_trafico: 'Huérfana con tráfico de Google',
+  indexable_sin_visitas_googlebot: 'Importante y sin visitas de Googlebot',
+  googlebot_recibe_error: 'Googlebot recibe errores',
   backlinks_a_error: 'Backlinks a una página con error',
   backlinks_a_noindex: 'Backlinks a una página noindex',
   backlinks_a_bloqueada_robots: 'Backlinks a una página bloqueada en robots.txt',
@@ -1112,6 +1126,7 @@ const DETALLE_LABEL = {
   origenes: 'páginas que la enlazan', con_ancla_generica: 'con ancla genérica', anclas: 'anclas',
   cobertura: 'según Google', canonical_hoy: 'declarada en el censo', canonical_visto_por_google: 'visto por Google', canonical_declarado: 'declarado', canonical_de_google: 'de Google', inspeccionada: 'inspeccionada el', en: 'en', ultimo_rastreo_google: 'última visita de Google',
   // Backlinks del cliente (decision 212); tambien en el detalle de una huerfana.
+  dias_de_log: 'días de log', con_error: 'con error', codigos: 'códigos',
   backlinks: 'backlinks', dominios: 'dominios que enlazan', autoridad: 'autoridad que aporta', origenes: 'enlazada desde',
   clics: 'clics', impresiones: 'impresiones', ventana_dias: 'días', clics_variantes: 'clics en variantes', clics_pagina: 'clics en la página', variantes: 'variantes',
   campos: 'campos',

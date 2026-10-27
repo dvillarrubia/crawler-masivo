@@ -515,6 +515,9 @@ class Job(Base):
     # cada tipo de URL (indexable, redireccion, error...) y cuanta se
     # desperdicia en errores. NULL = analisis anterior a este modelo.
     pagerank_resumen = Column(JSON, nullable=True)
+    # Lo que Googlebot visito segun los logs del cliente (decision 213): de
+    # que importacion, el periodo, cobertura y reparto. NULL sin logs.
+    logs_resumen = Column(JSON, nullable=True)
     # Salud del rastreo (decision 103): respuestas por clase de
     # `urls.response_class`, cuantas no eran la pagina y la causa si el rastreo
     # se paro o se dio por bloqueado. NULL = rastreo anterior a la columna.
@@ -708,6 +711,10 @@ class Url(Base):
     # Backlinks dofollow del CSV que caen en esta URL, y lo que aportan.
     backlinks_externos = Column(Integer, nullable=True, default=None)
     autoridad_externa = Column(Float, nullable=True, default=None)
+    # Visitas de Googlebot VERIFICADO segun los logs del cliente (decision
+    # 213); NULL sin logs, 0 = el periodo del log no la vio.
+    googlebot_visitas = Column(Integer, nullable=True, default=None)
+    googlebot_ultima = Column(DateTime(timezone=True), nullable=True, default=None)
     # Casi duplicados (MinHash). NULL = no se midio (sin contenido, o texto
     # por debajo del minimo de palabras); 0 = se midio y no tiene ninguna.
     near_duplicate_count = Column(Integer, nullable=True, default=None)
@@ -1324,6 +1331,65 @@ class SitemapEntry(Base):
     __table_args__ = (
         Index("ix_sment_job_hash", "job_id", "url_hash"),
     )
+
+
+class LogImport(Base):
+    """Un log del servidor subido para un cliente (#35, decision 213).
+
+    Por cliente, como los backlinks y Search Console. El fichero va al
+    volumen de archivo, lo lee el worker en streaming y se borra al acabar: de
+    el solo queda lo agregado de los bots en `log_urls`.
+    """
+
+    __tablename__ = "log_imports"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    cliente_id = Column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    fichero = Column(String(255), nullable=True)
+    ruta_disco = Column(Text, nullable=True)
+    bytes = Column(BigInteger, nullable=True)
+    formato = Column(String(16), nullable=False, default="combined")
+    regex = Column(Text, nullable=True)
+    formato_fecha = Column(String(64), nullable=True)
+    # El host del sitio: el log guarda rutas, no URLs.
+    host = Column(String(255), nullable=False)
+    # pendiente | procesando | hecho | error
+    estado = Column(String(16), nullable=False, default="pendiente", index=True)
+    motivo = Column(Text, nullable=True)
+    lineas_ok = Column(BigInteger, nullable=True)
+    lineas_error = Column(BigInteger, nullable=True)
+    # Las primeras lineas que no casaron: casi siempre otro formato.
+    errores = Column(JSON, nullable=True)
+    personas = Column(BigInteger, nullable=True)
+    desde = Column(DateTime(timezone=True), nullable=True)
+    hasta = Column(DateTime(timezone=True), nullable=True)
+    # Por bot: visitas verificadas, falsas y sin comprobar.
+    bots = Column(JSON, nullable=True)
+    progreso = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    terminado_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class LogUrl(Base):
+    """Las visitas de un bot a una ruta en un log, agregadas (decision 213).
+    Una fila por (ruta, bot, verificado). `verificado` None = no se pudo
+    comprobar (el proveedor no publica rangos)."""
+
+    __tablename__ = "log_urls"
+    __table_args__ = (Index("ix_log_urls_import", "import_id"),)
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    import_id = Column(BigInteger, ForeignKey("log_imports.id", ondelete="CASCADE"), nullable=False)
+    ruta = Column(Text, nullable=False)
+    clave = Column(Text, nullable=False)
+    bot = Column(String(32), nullable=False)
+    verificado = Column(Boolean, nullable=True)
+    visitas = Column(Integer, nullable=False, default=0)
+    codigos = Column(JSON, nullable=True)
+    movil = Column(Integer, nullable=True)
+    primero = Column(DateTime(timezone=True), nullable=True)
+    ultimo = Column(DateTime(timezone=True), nullable=True)
 
 
 class BacklinkImport(Base):

@@ -1398,6 +1398,9 @@ NO_COMPARABLES = frozenset({
     "backlinks_a_error",
     "backlinks_a_noindex",
     "backlinks_a_bloqueada_robots",
+    # Los de logs (decision 213), igual: dependen del log subido.
+    "indexable_sin_visitas_googlebot",
+    "googlebot_recibe_error",
 })
 
 

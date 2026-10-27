@@ -41,6 +41,10 @@ def main() -> None:
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS pagerank_externo_score INTEGER"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS backlinks_externos INTEGER"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS autoridad_externa DOUBLE PRECISION"))
+        # Logs del servidor (decision 213).
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS googlebot_visitas INTEGER"))
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS googlebot_ultima TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS logs_resumen JSON"))
         # Inspeccion de URLs de Search Console (decision 144).
         conn.execute(text("ALTER TABLE gsc_estado ADD COLUMN IF NOT EXISTS inspeccion_ultima TIMESTAMPTZ"))
         conn.execute(text("ALTER TABLE gsc_estado ADD COLUMN IF NOT EXISTS inspeccion_hechas INTEGER"))

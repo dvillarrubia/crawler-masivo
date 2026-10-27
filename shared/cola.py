@@ -103,3 +103,21 @@ def siguiente_enriquecido(conexion):
     vuelta del bucle (y con ella los rastreos y el vigilante)."""
     valor = conexion.lpop(COLA_ENRIQUECIDO)
     return valor or None
+
+
+# ---------------------------------------------------------------------------
+# Logs del servidor (#35, decision 213)
+# ---------------------------------------------------------------------------
+# Otra lista aparte, por lo mismo que la de enriquecido: cada elemento es el
+# id de una `log_imports`, no de un job.
+COLA_LOGS = "logs:pending"
+
+
+def encolar_log(conexion, import_id) -> None:
+    conexion.rpush(COLA_LOGS, str(import_id))
+
+
+def siguiente_log(conexion):
+    """Sin bloquear, como el enriquecido."""
+    valor = conexion.lpop(COLA_LOGS)
+    return valor or None

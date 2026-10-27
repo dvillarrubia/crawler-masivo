@@ -1591,3 +1591,83 @@
    - `tests/test_google_limpieza_frontend.py` (`limitesGoogle` en Chromium):
      la cifra medida frente a la general, y cada fecha solo cuando la ventana
      la cruza.
+
+<a id="d213"></a>
+213. **Los logs del servidor se suben por cliente, los lee el worker en streaming, solo cuenta el Googlebot cuya IP es de Google, y del log solo queda lo agregado de los bots** (#35)
+
+   **Problema.** El rastreo dice lo que SE PUEDE encontrar; el log, lo que
+   Googlebot VISITA. Sin él no se sabía qué páginas importantes no visita, en
+   qué se le va el presupuesto ni qué visita que el rastreo no encontró. Hay
+   tres dificultades:
+   - Un log de un mes son gigas.
+   - Cualquiera pone «Googlebot» en su user-agent: muchos de esos visitantes
+     son scrapers.
+   - El log tiene IPs de personas.
+
+   **Decisión.**
+   - **Por cliente, como los backlinks (212) y Search Console (141).** Se
+     sube en la Configuración del cliente (sección «Logs del servidor»): en
+     claro o `.gz` (detectado por los bytes), hasta 5 GB. Se guardan las tres
+     últimas importaciones. El análisis de un censo usa la más reciente ya
+     leída.
+   - **El worker lo lee, no la API.** La API copia el fichero al volumen de
+     archivo (`ARCHIVO_DIR/logs`, compartido con el worker) y lo encola en
+     `logs:pending`. El worker lo lee en un hilo, de uno en uno y sin parar la
+     cola de rastreos, y apunta el progreso. Lo coge con un UPDATE que mira el
+     estado, así que nunca lo leen dos procesos. Si un despliegue lo corta, se
+     reencola al arrancar si el fichero sigue.
+   - **Del log solo queda lo agregado.** Una fila por (ruta, bot,
+     verificado) en `log_urls`, con visitas, códigos, primera y última y la
+     parte con el Googlebot de móvil. Lo de personas se cuenta y no se guarda.
+     El fichero se borra al acabar.
+   - **Formatos.** `combined` y `common`, y una regex propia con grupos con
+     nombre (obligatorios `ip`, `url`, `codigo` y `ua`), validada al subir:
+     un error lo dice la API, no el worker una hora después. Las líneas que no
+     casan se cuentan y se guardan las 50 primeras, porque casi siempre son de
+     otro formato. Un log en el que no casa ninguna queda en error con esas
+     líneas.
+   - **Un bot se verifica, no se cree.**
+     - La IP se comprueba contra los rangos que publican Google (los tres
+       ficheros: Googlebot, rastreadores especiales y los que pide un
+       usuario), Bing, OpenAI y Perplexity.
+     - Si no se pueden bajar, por DNS inverso y directo (lo que documentan
+       Google y Bing).
+     - Lo que no se puede comprobar (Anthropic no publica rangos) queda como
+       `verificado = NULL` y se dice. No se da por bueno ni por falso.
+     - Solo cuenta el Googlebot verificado. Los falsos se dicen aparte («120
+       visitas más dicen ser de Googlebot»).
+   - **Cruzado con el censo** (`analysis/avisos_de_logs.py`), con la misma
+     regla de cruce y desempate que los backlinks (`shared.backlinks.IndiceCenso`):
+     - `urls.googlebot_visitas` y `googlebot_ultima`: 0 si el log no la vio,
+       NULL si el cliente no tiene logs.
+     - `jobs.logs_resumen` y el bloque «Googlebot en los logs» del Resumen:
+       periodo, cobertura de las indexables, en qué se va el presupuesto
+       (indexables, no indexables, redirecciones, errores, lo que el rastreo
+       no encontró, con parámetros), lo que visita y no está en el censo, y
+       los otros bots.
+     - `indexable_sin_visitas_googlebot` (warning): indexable 200 del cuarto
+       con más PageRank sin ninguna visita. **Solo con 7 días de log o más**:
+       en tres días, no ir a una página no dice nada.
+     - `googlebot_recibe_error` (warning): el rastreo la vio en 200 y a
+       Googlebot le respondió con error en la mayoría de sus visitas (dos como
+       mínimo).
+     - Los dos son `NO_COMPARABLES` entre censos: dependen del log subido.
+     - Solo cuenta el rastreador principal (`googlebot`). Imágenes,
+       inspección y AdsBot no entran en la cobertura ni en el presupuesto.
+
+   **Fuera.**
+   - Repartir el presupuesto por tipo de página (espera a #12).
+   - Asociar un log a un censo concreto por fechas: hoy es el más reciente
+     del cliente, y el resumen dice su periodo.
+   - Probarlo con un log real de 1 GB y revisarlo a mano con un cliente.
+
+   Tests:
+   - `tests/test_logs_servidor.py`: los bots y su orden, `combined`, `.gz`,
+     la regex propia, la verificación por rangos, por DNS y sin comprobar,
+     lo verificado frente a lo falso, y el procesado de punta a punta (el
+     fichero se borra, no se lee dos veces, un formato que no casa).
+   - `tests/test_logs_api.py`: subir y encolar, lo que se rechaza ya, el
+     dominio, las tres que se guardan y borrar.
+   - `tests/test_logs_db.py`, contra Postgres: las visitas, el resumen, los
+     dos avisos, el falso que no cuenta, pocos días y sin logs a NULL.
+   - `tests/test_logs_frontend.py`: el bloque del Resumen.

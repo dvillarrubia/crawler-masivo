@@ -942,6 +942,7 @@ class JobResponse(BaseModel):
     analisis_version: str | None = None
     # Reparto del PageRank por tipo de URL y fraccion desperdiciada en errores
     pagerank_resumen: dict[str, Any] | None = None
+    logs_resumen: dict[str, Any] | None = None
     # Respuestas por clase (contenido, challenge_waf, rate_limited...) y la
     # causa si el rastreo se dio por bloqueado (decision 103).
     health: dict[str, Any] | None = None
@@ -1183,6 +1184,9 @@ class UrlResponse(BaseModel):
     pagerank_externo_score: int | None = None
     backlinks_externos: int | None = None
     autoridad_externa: float | None = None
+    # Logs del servidor (decision 213); NULL sin logs subidos.
+    googlebot_visitas: int | None = None
+    googlebot_ultima: datetime | None = None
     in_sitemap: bool | None = None
     near_duplicate_count: int | None = None
     closest_similarity: float | None = None
