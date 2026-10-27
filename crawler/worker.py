@@ -1589,6 +1589,7 @@ def _quizas_recuperar(rconn, ultima_vez: float, ahora: float) -> float:
         return ultima_vez
     _recover_stale_jobs(rconn)
     _recuperar_enriquecidos(rconn)
+    _recuperar_logs(rconn)
     return ahora
 
 
@@ -1739,6 +1740,58 @@ def _quizas_enriquecer(rconn, executor, activos: dict) -> None:
         return
     logger.info("Dequeued enriquecido %s", run_id)
     activos[run_id] = executor.submit(_ejecutar_enriquecido, run_id)
+
+
+# ---------------------------------------------------------------------------
+# Logs del servidor (#35, decision 213)
+# ---------------------------------------------------------------------------
+def _procesar_log(import_id: str) -> None:
+    """Lee un log subido. Best-effort entero: un fallo no tumba el bucle."""
+    try:
+        from shared.database import SessionLocal
+        from shared.logs_servidor import procesar
+
+        final = procesar(int(import_id), sesion_factory=SessionLocal)
+        logger.info("Log %s: %s", import_id, final or "no estaba pendiente; se omite")
+    except Exception:
+        logger.exception("Log %s: fallo al procesar", import_id)
+
+
+def _quizas_procesar_logs(rconn, executor, activos: dict) -> None:
+    """Uno a la vez y sin bloquear: un log de gigas tarda minutos y no puede
+    parar la cola de rastreos."""
+    from shared.cola import siguiente_log
+
+    for i in [k for k, f in activos.items() if f.done()]:
+        activos.pop(i)
+    if activos:
+        return
+    try:
+        import_id = (siguiente_log(rconn) or "").strip()
+    except Exception as exc:
+        logger.warning("Redis: no se pudo leer la cola de logs (%s)", exc)
+        return
+    if import_id:
+        logger.info("Dequeued log %s", import_id)
+        activos[import_id] = executor.submit(_procesar_log, import_id)
+
+
+def _recuperar_logs(rconn) -> None:
+    try:
+        from shared.cola import encolar_log
+        from shared.database import SessionLocal
+        from shared.logs_servidor import recuperar
+
+        s = SessionLocal()
+        try:
+            ids = recuperar(s)
+        finally:
+            s.close()
+        for i in ids:
+            logger.warning("Recuperando log %s a medias: se reencola", i)
+            encolar_log(rconn, i)
+    except Exception:
+        logger.exception("No se pudieron recuperar los logs a medias")
 
 
 def _recuperar_enriquecidos(rconn) -> None:
@@ -1979,6 +2032,9 @@ def main() -> None:
     # Search Console (decision 141): un hilo; descargar no compite con rastrear.
     executor_gsc = ThreadPoolExecutor(max_workers=1)
     sincronizaciones: dict[str, Future] = {}
+    # Logs del servidor (decision 213): un hilo, uno a la vez.
+    executor_logs = ThreadPoolExecutor(max_workers=1)
+    logs_activos: dict[str, Future] = {}
     ultima_gsc = 0.0
 
     try:
@@ -1994,6 +2050,7 @@ def main() -> None:
             # llenos el bucle hace `continue` y la cola de enriquecido no se
             # leeria nunca.
             _quizas_enriquecer(rconn, executor_enr, enriquecidos)
+            _quizas_procesar_logs(rconn, executor_logs, logs_activos)
             ultima_gsc = _quizas_sincronizar_gsc(executor_gsc, sincronizaciones, ultima_gsc, time.time())
 
             # Clean up finished futures

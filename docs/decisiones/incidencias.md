@@ -1591,3 +1591,113 @@
    - `tests/test_google_limpieza_frontend.py` (`limitesGoogle` en Chromium):
      la cifra medida frente a la general, y cada fecha solo cuando la ventana
      la cruza.
+
+<a id="d213"></a>
+213. **Los logs del servidor se suben por cliente, los lee el worker en streaming, solo cuenta el Googlebot cuya IP es de Google, del log solo queda lo agregado de los bots, y no se afirma nada si el log no es del mismo host, de la época del censo o no ve a Googlebot** (#35)
+
+   **Problema.** El rastreo dice lo que SE PUEDE encontrar; el log, lo que
+   Googlebot VISITA. Sin él no se sabía qué páginas importantes no visita, en
+   qué se le va el presupuesto ni qué visita que el rastreo no encontró. Hay
+   tres dificultades:
+   - Un log de un mes son gigas.
+   - Cualquiera pone «Googlebot» en su user-agent.
+   - El log tiene IPs de personas.
+
+   **Decisión.**
+   - **Por cliente, como los backlinks (212) y Search Console (141).** Se
+     sube en la Configuración del cliente (sección «Logs del servidor»): en
+     claro o `.gz` (detectado por los bytes), hasta 5 GB, cortando al pasar el
+     tope y no después de copiarlo entero.
+     - Se guardan las tres últimas importaciones, y las fallidas se van
+       primero.
+     - Al borrar el cliente se borran también los ficheros sin leer.
+   - **El worker lo lee, no la API.** La API copia el fichero al volumen de
+     archivo (`ARCHIVO_DIR/logs`, compartido con el worker; comprobado en el
+     VPS) y lo encola en `logs:pending`.
+     - El worker lo lee en un hilo, de uno en uno y sin parar la cola de
+       rastreos.
+     - Lo coge con un UPDATE que mira el estado, así que no lo leen dos
+       procesos.
+     - **Late mientras lee** (`latido_at`). La recuperación periódica solo
+       devuelve a la cola lo que lleva 15 minutos sin latir: en la primera
+       versión devolvía cualquier lectura de más de 5 minutos, y otro proceso
+       lo habría leído dos veces.
+     - Medido: unas 150.000 líneas por segundo. Un log de 1 GB tarda pocos
+       minutos.
+   - **Del log solo queda lo agregado**: una fila por (ruta, bot, verificado)
+     en `log_urls`, con visitas, códigos, primera y última y la parte con el
+     Googlebot de móvil.
+     - Lo de personas se cuenta y no se guarda.
+     - Hay un tope de rutas distintas (unos 400 MB en total: el worker
+       comparte memoria con los rastreos). El Googlebot verificado tiene su
+       propio cupo, para que un escáner que se hace pasar por él no deje fuera
+       las visitas de verdad. Lo que no cabe se cuenta en `resumen.fuera_del_tope`,
+       y si se cortó el de Googlebot no se afirman ausencias.
+     - Una URL entera de otro host (una petición de proxy) no es de este log
+       y se aparta.
+     - El fichero se borra al acabar, también con error o si el cliente ya
+       no existe.
+   - **Formatos.** `combined` (con las comillas escapadas de Apache dentro
+     del referer o el user-agent) y una regex propia con grupos con nombre
+     (obligatorios `ip`, `url`, `codigo` y `ua`), validada al subir. `common`
+     no se ofrece: no lleva user-agent y no hay bot que ver. Las líneas que no
+     casan se cuentan y se guardan las 50 primeras **con las IPs tapadas**,
+     porque casi siempre son de personas.
+   - **Un bot se verifica, no se cree.**
+     - Los rangos que publican Google (sus tres ficheros), Bing, OpenAI y
+       Perplexity se bajan ANTES de leer. Cada IP se comprueba al leer su
+       línea, con caché, así que no se guardan IPs.
+     - Solo `False` es «seguro que no». Si de un proveedor no se bajaron todos
+       sus ficheros, lo que no casa queda `None` (sin comprobar).
+     - También es `None` una IP que no se puede leer (`ip:puerto`, una lista
+       de X-Forwarded-For) y un proveedor que no publica rangos (Anthropic).
+     - La IPv4 mapeada en IPv6 se lee como IPv4.
+     - Solo cuenta el Googlebot verificado. Los falsos se dicen aparte.
+   - **Cruzado con el censo** (`analysis/avisos_de_logs.py`), con la misma
+     regla de cruce y desempate que los backlinks (`shared.backlinks.IndiceCenso`)
+     y **solo un log del mismo host que el censo** (con o sin `www.`) **y de
+     su época** (se solapa con él o le queda a 30 días como mucho). Sin uno
+     así, ni columnas ni resumen:
+     - `urls.googlebot_visitas` y `googlebot_ultima`: 0 si el log no la vio,
+       NULL sin log de ese host.
+     - `jobs.logs_resumen` y el bloque «Googlebot en los logs» del Resumen:
+       periodo, cobertura de las indexables, en qué se va el presupuesto, lo
+       que visita y no está en el censo, los falsos y los otros bots.
+     - `indexable_sin_visitas_googlebot` (warning) y `googlebot_recibe_error`
+       (warning), **uno por plantilla** con sus páginas y ejemplos (36 y 53).
+       Casan entre censos por la plantilla (`ANCLADOS_POR_GRUPO`) y no se
+       comparan como incidencias nuevas o resueltas (`NO_COMPARABLES`).
+     - El «cuarto con más PageRank» es el cuarto de arriba **por posición**:
+       con empates en una escala entera, `>= p75` podía ser el mínimo y entraban
+       todas.
+   - **Lo que no se puede afirmar no se afirma** (67, 70, 89):
+     - La ausencia pide además 7 días de log, 100 visitas de Googlebot
+       verificado como mínimo y que el log vea al menos el 10 % de las
+       indexables. Detrás de una CDN, con otro host o con una regex que coge
+       otra IP, todo sale «falso», y avisar en todo el cuartil alto sería
+       culpar al sitio de un problema del log.
+     - El resumen dice por qué no se afirma (`no_se_afirma`).
+
+   **Fuera.**
+   - Repartir el presupuesto por tipo de página (espera a #12).
+   - El DNS inverso de respaldo: si los rangos no se pueden bajar, se dice
+     «sin comprobar». Es más honesto que esperar minutos a un resolver lento
+     que puede dar falsos negativos.
+   - Probarlo con un log real de 1 GB y revisarlo a mano con un cliente.
+
+   Tests:
+   - `tests/test_logs_servidor.py`:
+     - los bots y su orden, `combined` con comillas escapadas, `.gz`, la regex
+       propia y que no hay `common`;
+     - la URL de otro host, la verificación (rangos completos, parciales, IP
+       ilegible, IPv4 mapeada, sin rangos), las IPs tapadas y el tope de rutas;
+     - el procesado de punta a punta (el fichero se borra también con error,
+       no se lee dos veces) y la recuperación que no toca lo que late.
+   - `tests/test_logs_api.py`: subir y encolar, lo que se rechaza ya, el
+     dominio, las tres que se guardan y borrar.
+   - `tests/test_logs_db.py`, contra Postgres:
+     - las visitas, el resumen y los dos avisos agrupados;
+     - el falso que no cuenta y pocos días;
+     - el log que no ve a Googlebot, el de otro host y el de otra época;
+     - sin logs a NULL.
+   - `tests/test_logs_frontend.py`: el bloque del Resumen.

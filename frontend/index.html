@@ -1750,6 +1750,66 @@
             </template>
               </div>
             </details>
+            <!-- Logs del servidor (#35, decision 213) -->
+            <details class="cfg-seccion" id="cfg-logs" data-testid="seccion-cfg-logs">
+              <summary>
+                <span class="cfg-seccion-titulo">Logs del servidor</span>
+                <span class="cfg-seccion-resumen text-sm text-dim" x-text="resumenSeccionConfig('cfg-logs')"></span>
+              </summary>
+              <div class="cfg-seccion-cuerpo">
+            <template x-if="cliente">
+              <div x-init="cargarLogsSrv()" data-testid="logs-srv">
+                <p class="text-dim text-sm mb-1">El log de acceso del servidor (Apache o nginx, en claro o .gz) dice qué visita Googlebot de verdad. Cruzado con el rastreo:
+                  qué páginas importantes no visita, en qué se le va el presupuesto y qué visita que el rastreo no encontró. Solo cuenta el Googlebot cuya IP es de Google:
+                  el resto se separa como falso. Se lee en segundo plano y el fichero se borra al acabar (tiene IPs de personas); se aplica en el próximo análisis.</p>
+                <div class="card mb-1 btn-rojo-sm" x-show="logsSrv.error" x-text="logsSrv.error"></div>
+                <template x-for="i in (logsSrv.lista || [])" :key="i.id">
+                  <div class="card mb-1 text-sm" data-testid="log-importacion">
+                    <div class="flex items-center gap-1 flex-wrap">
+                      <span class="badge" :class="i.estado === 'hecho' ? (i.en_uso ? 'badge-completed' : 'badge-neutral') : i.estado === 'error' ? 'badge-failed' : 'badge-pending'"
+                            x-text="i.estado === 'hecho' ? (i.en_uso ? 'en uso' : 'anterior') : TEXTO_ESTADO_LOG[i.estado]"></span>
+                      <strong x-text="i.fichero || 'log'"></strong>
+                      <span class="text-dim" x-text="i.host + ' · subido el ' + fmt.date(i.subido)"></span>
+                      <button class="btn btn-sm ml-auto" @click="borrarLogSrv(i)" x-show="i.estado !== 'procesando'">Quitar</button>
+                    </div>
+                    <div class="text-dim mt-30" x-show="i.estado === 'procesando' && i.progreso" x-text="fmt.num(i.progreso) + ' líneas leídas…'"></div>
+                    <div class="text-red mt-30" x-show="i.motivo" x-text="i.motivo"></div>
+                    <div class="mt-30" x-show="i.estado === 'hecho'"
+                         x-text="'Del ' + fmt.dia(i.desde) + ' al ' + fmt.dia(i.hasta) + ' · ' + fmt.num(i.lineas_ok) + ' líneas' + (i.lineas_error ? ' (' + fmt.num(i.lineas_error) + ' sin leer)' : '') + (i.bots && i.bots.googlebot ? ' · Googlebot: ' + fmt.num(i.bots.googlebot.verificadas) + ' visitas verificadas' + (i.bots.googlebot.falsas ? ', ' + fmt.num(i.bots.googlebot.falsas) + ' falsas' : '') : '')"></div>
+                    <details class="mt-30" x-show="(i.errores || []).length">
+                      <summary class="text-dim pointer">Líneas que no casan con el formato</summary>
+                      <pre class="pre-wrap fs-sm"><template x-for="(e, n) in i.errores" :key="n"><span x-text="e + '\n'"></span></template></pre>
+                    </details>
+                  </div>
+                </template>
+                <div class="flex gap-1 items-end flex-wrap">
+                  <div class="form-group mb-0">
+                    <label>Fichero de log</label>
+                    <input type="file" accept=".log,.gz,.txt,text/plain,application/gzip" @change="logsSrv.fichero = $event.target.files[0] || null" data-testid="log-fichero">
+                  </div>
+                  <div class="form-group mb-0">
+                    <label>Formato</label>
+                    <select x-model="logsSrv.formato">
+                      <option value="combined">Apache/nginx combined</option>
+                      <option value="propio">Otro (regex)</option>
+                    </select>
+                  </div>
+                  <div class="form-group mb-0">
+                    <label>Dominio del sitio</label>
+                    <input type="text" x-model="logsSrv.host" placeholder="www.cliente.com">
+                  </div>
+                  <button class="btn btn-primary btn-sm" @click="subirLogSrv()" :disabled="!logsSrv.fichero || logsSrv.ocupado || (logsSrv.formato === 'propio' && !logsSrv.regex)"
+                          data-testid="log-subir" x-text="logsSrv.ocupado ? 'Subiendo…' : 'Subir'"></button>
+                </div>
+                <div class="form-group mt-40" x-show="logsSrv.formato === 'propio'">
+                  <label>Regex con grupos con nombre</label>
+                  <input type="text" class="mono w-full" x-model="logsSrv.regex" placeholder="(?P<ip>\S+) … (?P<url>\S+) … (?P<codigo>\d{3}) … (?P<ua>[^&quot;]*)">
+                  <div class="form-hint">Obligatorios: <code>ip</code>, <code>url</code>, <code>codigo</code> y <code>ua</code>. Opcionales: <code>fecha</code> y <code>metodo</code>.</div>
+                </div>
+              </div>
+            </template>
+              </div>
+            </details>
             <details class="cfg-seccion" id="cfg-slack" data-testid="seccion-cfg-slack">
               <summary>
                 <span class="cfg-seccion-titulo">Slack del cliente</span>
@@ -3114,6 +3174,29 @@
             <div class="text-dim fs-sm mt-50" x-show="detailTab !== 'diff'">
               Las páginas de cada una, con ejemplos y plantillas: <a href="#" @click.prevent="switchTab('diff')">ver el detalle en Comparar</a>.
             </div>
+          </div>
+        </template>
+        <!-- Googlebot en los logs (#35, decision 213): solo con logs subidos. -->
+        <template x-if="detailTab === 'overview' && bloqueLogs(job)">
+          <div class="card mb-2 text-sm" data-testid="logs-bloque" x-data="{ get bl() { return bloqueLogs(job) } }">
+            <div class="google-cab"><h2>Googlebot en los logs</h2><span class="text-dim">Log del servidor</span></div>
+            <template x-for="(f, n) in bl.frases" :key="'l' + n"><p class="google-frase" x-text="f"></p></template>
+            <details class="google-paginas" x-show="bl.no_en_censo.length" data-testid="logs-no-en-censo">
+              <summary class="text-dim" x-text="'Lo que Googlebot visita y el rastreo no encontró (' + fmt.num(bl.no_en_censo.length) + ')'"></summary>
+              <p class="text-dim">Huérfanas de verdad, URLs antiguas o con parámetros. Si dan error, redirigirlas; si no deben existir, que no las enlace nada.</p>
+              <ul><template x-for="u in bl.no_en_censo" :key="u.ruta">
+                <li><span class="google-clics" x-text="fmt.n(u.visitas, 'visita', 'visitas')"></span>
+                  <span class="informe-url" x-text="u.ruta"></span>
+                  <span class="text-dim" x-text="Object.entries(u.codigos || {}).map(([c, n]) => c + ': ' + fmt.num(n)).join(' · ')"></span></li>
+              </template></ul>
+            </details>
+            <details class="google-paginas" x-show="bl.bots.length">
+              <summary class="text-dim">Otros bots del log</summary>
+              <ul><template x-for="b in bl.bots" :key="b.bot">
+                <li><span class="google-clics" x-text="fmt.n(b.visitas, 'visita', 'visitas')"></span> <span x-text="b.bot"></span>
+                  <span class="text-dim" x-text="b.verificadas ? '· ' + fmt.num(b.verificadas) + ' verificadas' + (b.falsas ? ', ' + fmt.num(b.falsas) + ' falsas' : '') : (b.sin_comprobar ? '· su IP no se puede comprobar' : '')"></span></li>
+              </template></ul>
+            </details>
           </div>
         </template>
         <!-- Autoridad desde fuera (#31, decision 212): solo con backlinks subidos. -->
@@ -6640,6 +6723,11 @@
                   <div class="detail-row"><span class="detail-label">Outlinks</span><span class="detail-value" x-text="fmt.num(urlDetail.outlinks_count)"></span></div>
                   <div class="detail-row"><span class="detail-label">Outlinks externos</span><span class="detail-value" x-text="fmt.num(urlDetail.external_outlinks_count)"></span></div>
                   <div class="detail-row"><span class="detail-label" data-tip="Cuánta autoridad le llega por los enlaces internos, en escala 0-100 logarítmica anclada a la página más fuerte del sitio. Es la que hay que leer y ordenar.">PageRank (0-100)</span><span class="detail-value" x-text="urlDetail.pagerank_score != null ? urlDetail.pagerank_score : '—'"></span></div>
+                  <!-- Logs del servidor (decision 213) -->
+                  <template x-if="urlDetail.googlebot_visitas != null">
+                    <div class="detail-row"><span class="detail-label" data-tip="Visitas de Googlebot verificado (su IP es de Google) en el periodo del log subido del cliente.">Visitas de Googlebot</span>
+                      <span class="detail-value" x-text="fmt.num(urlDetail.googlebot_visitas) + (urlDetail.googlebot_ultima ? ' · la última el ' + fmt.date(urlDetail.googlebot_ultima) : '')"></span></div>
+                  </template>
                   <!-- Con los backlinks del cliente (decision 212) -->
                   <template x-if="urlDetail.pagerank_externo_score != null">
                     <div class="detail-row"><span class="detail-label" data-tip="El mismo PageRank, con el salto puesto donde entra la autoridad de otros sitios según el CSV de backlinks del cliente. Dice por dónde entra la autoridad real; el de arriba, cómo la reparte el sitio.">PageRank desde fuera (0-100)</span>

@@ -55,6 +55,7 @@ from analysis import avisos_de_nosnippet
 from analysis import avisos_de_nofollow
 from analysis import avisos_de_wordpress
 from analysis import avisos_de_backlinks
+from analysis import avisos_de_logs
 from shared.rel_de_enlace import sql_nofollow_por_rel
 from shared.indexabilidad import (
     BOT_POR_DEFECTO, clave_url, es_noindex, estado_indexabilidad, limite_de_fragmento, misma_url,
@@ -480,6 +481,9 @@ class SEOAnalyzer:
         # Backlinks del cliente (decision 212): despues de Search Console, que
         # ya cambio las huerfanas con trafico por su propio aviso.
         avisos_de_backlinks.avisar_sin_tumbar(self)
+        # Logs del servidor (decision 213): despues del PageRank, que es con
+        # lo que se elige que paginas importantes no visita Googlebot.
+        avisos_de_logs.avisar_sin_tumbar(self)
         # Al final: sus condiciones pueden leer lo que acaba de escribir el
         # analisis (indexable, click_depth, in_sitemap...). No emite incidencias.
         self.segmentar()
@@ -4837,7 +4841,7 @@ class SEOAnalyzer:
         anterior: sin importacion, o sin grafo (donde no se calcula el PageRank
         desde fuera), no puede quedar el de antes. Best-effort, con su
         savepoint."""
-        from shared.backlinks import cruzar, filas_de, ultima_importacion
+        from shared.backlinks import cruzar, filas_de, rango_de, ultima_importacion
 
         self._backlinks = self._backlinks_import = None
         try:
@@ -4853,17 +4857,8 @@ class SEOAnalyzer:
                     select(Url.id, Url.url, Url.status_code, Url.indexable, Url.redirect_url)
                     .where(Url.job_id == self.job_id, Url.is_internal.is_(True))).all()
 
-                def rango(status, indexable, redirect):
-                    if status == 200 and indexable:
-                        return 0
-                    if status == 200:
-                        return 1
-                    if redirect or (status is not None and 300 <= status < 400):
-                        return 2
-                    return 3
-
                 self._backlinks = cruzar(filas_de(self.session, imp),
-                                         [(u[0], u[1], rango(u[2], u[3], u[4])) for u in urls])
+                                         [(u[0], u[1], rango_de(u[2], u[3], u[4])) for u in urls])
                 self._backlinks_import = imp
         except Exception:
             self._backlinks = self._backlinks_import = None

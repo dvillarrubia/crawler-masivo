@@ -909,6 +909,8 @@ function app() {
     gsc: { estado: null, llaves: [], llave: '', nombreNueva: '', propiedades: null, propiedad: '', error: '', ocupado: false },
     // Backlinks del cliente en CSV (#31, decision 212)
     backlinks: { lista: null, fichero: null, fecha: '', ocupado: false, error: '', ultimo: null },
+    // Logs del servidor (#35, decision 213)
+    logsSrv: { lista: null, fichero: null, formato: 'combined', regex: '', host: '', ocupado: false, error: '' },
     // Slack del cliente (decision 149)
     slack: { estado: null, tokens: [], token: '', nombreNuevo: '', tokenTexto: '', canales: null, canal: '', canalNombre: '',
              alertas: true, resumen: true, informe: true, error: '', ocupado: false, prueba: null },
@@ -2517,6 +2519,57 @@ function app() {
     },
 
     // --- Search Console (decision 141) ---------------------------------
+    // ------- Logs del servidor (#35, decision 213) -------
+    // Se suben aqui y los lee el worker: un log de un mes son gigas. Mientras
+    // haya uno leyendose, la lista se refresca sola.
+    async cargarLogsSrv() {
+      if (!this.cliente) return;
+      const id = this.cliente.id;
+      try {
+        const lista = await api(`/clients/${id}/logs`);
+        if (!this.cliente || this.cliente.id !== id) return;
+        this.logsSrv.lista = lista;
+        if (!this.logsSrv.host) this.logsSrv.host = (this.cliente.dominios || [])[0] || '';
+        clearTimeout(this._logsTimer);
+        if (lista.some(l => ['pendiente', 'procesando'].includes(l.estado))) {
+          this._logsTimer = setTimeout(() => { if (this.view === 'client') this.cargarLogsSrv(); }, 5000);
+        }
+      } catch (e) { this.logsSrv.error = e.message; }
+    },
+
+    async subirLogSrv() {
+      const l = this.logsSrv;
+      if (!this.cliente || !l.fichero || l.ocupado) return;
+      l.ocupado = true; l.error = '';
+      try {
+        const fd = new FormData();
+        fd.append('fichero', l.fichero);
+        fd.append('formato', l.formato);
+        if (l.formato === 'propio') fd.append('regex', l.regex || '');
+        if (l.host) fd.append('host', l.host);
+        const res = await fetch(`${API}/clients/${this.cliente.id}/logs`, { method: 'POST', body: fd });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error(mensajeDeError(err));
+        }
+        l.fichero = null;
+        await this.cargarLogsSrv();
+        this.showToast('Log subido: se lee en segundo plano y se aplica en el próximo análisis');
+      } catch (e) {
+        l.error = 'No se pudo subir: ' + e.message;
+      } finally {
+        l.ocupado = false;
+      }
+    },
+
+    async borrarLogSrv(i) {
+      if (!await this.preguntar({ titulo: 'Quitar este log', mensaje: i.en_uso ? 'Es el que usa el análisis: el próximo usará el anterior, si lo hay.' : 'El análisis no lo usa.', aceptar: 'Quitar', peligro: true })) return;
+      try {
+        await api(`/clients/${this.cliente.id}/logs/${i.id}`, { method: 'DELETE' });
+        await this.cargarLogsSrv();
+      } catch (e) { this.logsSrv.error = 'No se pudo quitar: ' + e.message; }
+    },
+
     // ------- Backlinks del cliente (#31, decision 212) -------
     // Un CSV de Ahrefs, Semrush o Majestic. Se aplica al analizar: el proximo
     // censo lo lleva solo, y uno ya hecho, re-analizandolo.
@@ -2990,6 +3043,12 @@ function app() {
         const e = ((this.gsc && this.gsc.estado) || []).find(x => x.propiedad);
         if (e) return this.textoEstadoGsc(e) + ' · ' + e.propiedad;
         return (c.integraciones || []).some(i => i.tipo === 'gsc') ? '' : 'sin conectar';
+      }
+      if (id === 'cfg-logs') {
+        const l = ((this.logsSrv && this.logsSrv.lista) || [])[0];
+        if (!l) return 'sin subir';
+        if (l.estado !== 'hecho') return TEXTO_ESTADO_LOG[l.estado] || l.estado;
+        return 'del ' + fmt.dia(l.desde) + ' al ' + fmt.dia(l.hasta);
       }
       if (id === 'cfg-backlinks') {
         const u = ((this.backlinks && this.backlinks.lista) || [])[0];
@@ -7169,6 +7228,7 @@ const EXP_COLUMN_DEFS = {
   pagerank_score:       { label: 'PageRank (0-100)',  type: 'numeric', sortable: true,  filterKey: 'pagerank_score',          width: 160, fmt: r => r.pagerank_score != null ? String(r.pagerank_score) : '' },
   // Con los backlinks del cliente (decision 212): vacias sin CSV subido.
   pagerank_externo_score: { label: 'PageRank desde fuera', type: 'numeric', sortable: true, filterKey: 'pagerank_externo_score', width: 170, fmt: r => r.pagerank_externo_score != null ? String(r.pagerank_externo_score) : '' },
+  googlebot_visitas:    { label: 'Visitas Googlebot', type: 'numeric', sortable: true,  filterKey: 'googlebot_visitas',       width: 150, fmt: r => r.googlebot_visitas != null ? fmt.num(r.googlebot_visitas) : '' },
   backlinks_externos:   { label: 'Backlinks',         type: 'numeric', sortable: true,  filterKey: 'backlinks_externos',      width: 110, fmt: r => r.backlinks_externos != null ? fmt.num(r.backlinks_externos) : '' },
   pagerank_raw:         { label: 'PageRank (x media)', grupo: 'otros', type: 'numeric', sortable: true, filterKey: 'pagerank_raw',            width: 170, fmt: r => r.pagerank_raw != null ? fmt.dec(r.pagerank_raw * 1e4, 2) : '' },
   pagerank:             { label: 'PageRank (0-10, antiguo)', grupo: 'otros', type: 'numeric', sortable: true,  filterKey: 'pagerank',                width: 140, fmt: r => r.pagerank != null ? fmt.dec(r.pagerank, 4) : '' },
@@ -7235,7 +7295,7 @@ const EXP_GRUPOS_COLUMNAS = [
   ['Indexación',  ['indexable','indexability_status','bloqueada_googlebot','canonical_href','canonical_header','meta_robots','x_robots_tag','meta_refresh','redireccion_js','in_sitemap','rel_next','rel_prev']],
   ['Títulos y snippet', ['title','title_len','title_pixel_width','meta_description','meta_description_len','meta_description_pixel_width','h1','h1_count']],
   ['Contenido',   ['word_count','content_word_count','near_duplicate_count','closest_similarity']],
-  ['Enlazado',    ['enlazada_desde','origenes','inlinks_count','unique_inlinks_count','outlinks_count','external_outlinks_count','pagerank_score','pagerank_externo_score','backlinks_externos','click_depth','crawl_depth','folder_depth','url_length']],
+  ['Enlazado',    ['enlazada_desde','origenes','inlinks_count','unique_inlinks_count','outlinks_count','external_outlinks_count','pagerank_score','pagerank_externo_score','backlinks_externos','googlebot_visitas','click_depth','crawl_depth','folder_depth','url_length']],
   ['Redes sociales', ['og_title','og_image','og_type','og_url','twitter_card']],
   ['Móvil e idioma', ['viewport','html_lang']],
   ['Search Console (90 días)', ['gsc_clics','gsc_impresiones','gsc_posicion']],
@@ -7396,6 +7456,9 @@ const EXP_TABS = [
     columns: ['url','status_code','title','indexable','pagerank_score'] },
   { key: 'a_enlazado', label: 'Enlazado',      icon: 'share-2',      filter: HTML_INTERNO, ambito: ['orphan_page','sitemap_orphan','solo_enlazada_por_redireccion','not_reachable_from_home','high_outlink_count','not_in_sitemap','enlace_no_rastreable','enlace_interno_a_error','enlace_interno_a_redireccion','utm_en_enlace_interno','enlace_sin_ancla','ancla_generica','solo_enlazada_con_nofollow','enlace_interno_nofollow','pagina_nofollow','solo_enlazada_desde_paginacion_excluida','enlace_externo_roto','dominio_externo_muerto'],
     columns: ['url','status_code','inlinks_count','origenes','click_depth','pagerank_score','in_sitemap','indexable'] },
+  // Logs del servidor (decision 213).
+  { key: 'a_logs', label: 'Logs', icon: 'scroll-text', filter: { is_internal: true }, ambito: ['indexable_sin_visitas_googlebot','googlebot_recibe_error'],
+    columns: ['url','status_code','googlebot_visitas','pagerank_score','inlinks_count','indexable'] },
   // Backlinks del CSV del cliente (decision 212).
   { key: 'a_backlinks', label: 'Backlinks', icon: 'external-link', filter: { is_internal: true }, ambito: ['backlinks_a_error','backlinks_a_noindex','backlinks_a_bloqueada_robots'],
     columns: ['url','status_code','backlinks_externos','pagerank_externo_score','inlinks_count','pagerank_score','indexable'] },
@@ -8338,11 +8401,44 @@ const CAMPO_CONFIG = Object.fromEntries(CAMPOS_CONFIG.map(c => [c.ruta, c]));
 
 // Las secciones plegables de Configuracion del cliente, en orden (revision de
 // UX del 25-oct, 2.4): el indice de arriba lleva a cada una y la abre.
+const TEXTO_ESTADO_LOG = { pendiente: 'en cola', procesando: 'leyéndose', hecho: 'leído', error: 'con error' };
+const NOMBRE_BOT_LOG = {
+  googlebot: 'Googlebot', 'googlebot-imagen': 'Googlebot imágenes', 'googlebot-video': 'Googlebot vídeo',
+  'google-inspeccion': 'Inspección de URLs', googleother: 'GoogleOther', 'adsbot-google': 'AdsBot',
+  bingbot: 'Bingbot', 'oai-searchbot': 'OAI-SearchBot', 'chatgpt-user': 'ChatGPT-User', gptbot: 'GPTBot',
+  'claude-searchbot': 'Claude-SearchBot', 'claude-user': 'Claude-User', claudebot: 'ClaudeBot',
+  perplexitybot: 'PerplexityBot', 'perplexity-user': 'Perplexity-User', applebot: 'Applebot',
+};
+
+// Googlebot en los logs del cliente (#35, decision 213), de `jobs.logs_resumen`.
+function bloqueLogs(job) {
+  const r = job && job.logs_resumen;
+  if (!r) return null;
+  const pct = (a, b) => b ? fmt.pct(100 * a / b, 0) : '—';
+  const rep = r.reparto || {};
+  const total = r.visitas || 0;
+  const frases = [];
+  frases.push(fmt.n(total, 'visita', 'visitas') + ' de Googlebot verificado del ' + fmt.dia(r.desde) + ' al ' + fmt.dia(r.hasta)
+    + ' (' + fmt.n(Math.round(r.dias), 'día', 'días') + ')' + (r.parte_movil != null ? ', el ' + fmt.pct(100 * r.parte_movil, 0) + ' con el de móvil.' : '.'));
+  frases.push('Visitó ' + fmt.num(r.indexables_visitadas) + ' de las ' + fmt.num(r.indexables) + ' páginas indexables del rastreo (' + pct(r.indexables_visitadas, r.indexables) + ').');
+  const gasto = [['indexables', 'indexables'], ['no_indexables', 'no indexables'], ['redirecciones', 'redirecciones'],
+    ['errores', 'errores'], ['no_en_censo', 'URLs que el rastreo no encontró']]
+    .filter(([k]) => rep[k]).map(([k, t]) => pct(rep[k], total) + ' en ' + t);
+  if (gasto.length) frases.push('En qué se va: ' + gasto.join(', ') + '.');
+  if (rep.con_parametros) frases.push(pct(rep.con_parametros, total) + ' de las visitas son a URLs con parámetros.');
+  if (r.falsas) frases.push(fmt.n(r.falsas, 'visita', 'visitas') + ' más dicen ser de Googlebot y vienen de IPs que no son de Google: no cuentan.');
+  if (!r.afirmable_ausencia && r.no_se_afirma) frases.push('No se afirma qué páginas no visita: ' + r.no_se_afirma + '.');
+  const bots = Object.entries(r.otros_bots || {}).filter(([, d]) => d.visitas)
+    .sort((a, b) => b[1].visitas - a[1].visitas).slice(0, 8)
+    .map(([b, d]) => ({ bot: NOMBRE_BOT_LOG[b] || b, visitas: d.visitas, verificadas: d.verificadas, falsas: d.falsas, sin_comprobar: d.sin_comprobar }));
+  return { frases, no_en_censo: r.no_en_censo || [], bots };
+}
+
 const FUENTE_BACKLINKS = { ahrefs: 'Ahrefs', semrush: 'Semrush', majestic: 'Majestic', generico: 'un CSV' };
 
 const SECCIONES_CONFIG_CLIENTE = [
   ['cfg-perfiles', 'Perfiles'], ['cfg-rastreo', 'Cómo se rastrea'], ['cfg-datos', 'Datos'],
-  ['cfg-gsc', 'Search Console'], ['cfg-backlinks', 'Backlinks'], ['cfg-slack', 'Slack'], ['cfg-enlace', 'Enlace para el cliente'],
+  ['cfg-gsc', 'Search Console'], ['cfg-backlinks', 'Backlinks'], ['cfg-logs', 'Logs'], ['cfg-slack', 'Slack'], ['cfg-enlace', 'Enlace para el cliente'],
   ['cfg-integraciones', 'Otras integraciones'], ['reglas-alertas', 'Reglas de alertas'],
 ];
 
