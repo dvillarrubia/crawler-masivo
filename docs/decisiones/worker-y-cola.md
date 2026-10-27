@@ -248,14 +248,16 @@
 <a id="d209"></a>
 209. **Un disparo programado se toma con candado y se encola después de guardarlo; los programados esperan en su propia cola, detrás de lo lanzado a mano; y una programación se puede lanzar ahora**
 
-   **Problema.** Producción corre dos réplicas del worker (`replicas: 2` en
-   `docker-compose.prod.yml`) y las dos pasaban por `_lanzar_programados` cada
-   minuto. Las dos leían las pendientes, decidían sin candado y creaban el job:
-   si coincidían en el mismo instante, un disparo salía dos veces, con dos
-   rastreos del mismo sitio a la vez. No había pasado todavía en las series de
-   Lopesan ni de workoholics, porque cada réplica pasa por el planificador en
-   un segundo distinto del minuto y la ventana es de milisegundos. Contra
-   Postgres, forzando el cruce, salen 2 jobs de 1 disparo. Había otros dos
+   **Problema.** Con más de un worker, cada uno pasa por `_lanzar_programados`
+   cada minuto. Los dos leían las pendientes, decidían sin candado y creaban
+   el job: si coincidían en el mismo instante, un disparo salía dos veces, con
+   dos rastreos del mismo sitio a la vez. Contra Postgres, forzando el cruce,
+   salen 2 jobs de 1 disparo. **Corrección tras desplegar:** se escribió que
+   producción corre dos réplicas, por el `replicas: 2` de
+   `docker-compose.prod.yml`. No es así: el despliegue usa
+   `docker-compose.vps.yml` y en el VPS hay un solo worker
+   (`crawler-masivo-worker`). El fallo no podía darse hoy. El candado es para
+   cuando se escale, y el resto de la decisión vale igual. Había otros dos
    fallos en el mismo código: el id se encolaba ANTES del commit, así que la
    otra réplica podía sacarlo de Redis y no encontrarlo en la base de datos; y
    una programación que reventaba hacía perder la pasada entera, y como va

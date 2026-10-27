@@ -1221,7 +1221,7 @@ tope de filas, impresiones infladas de mayo de 2025 a abril de 2026) y 21
 combinaciones. Los datos van por cliente y por día, con una cuenta de servicio
 cuya llave vive en el servidor; «sin datos» nunca se lee como «cero». Por
 cliente y no por rastreo, como pide #164: el dato de Google no depende de
-cuándo rastreamos. Cambia lo que decía la ola 4.1 del plan («tabla por job»).
+cuándo rastreamos. Cambia lo que decía la ola 4.1 del plan («tabla por job»). Lo que Google no da se dice junto a las cifras, con la parte de clics sin búsqueda medida en el sitio (decisión 210).
 
 - [#164](https://github.com/dvillarrubia/crawler-masivo/issues/164) **Base**: conexión por cliente, descarga nocturna en segundo plano,
   columnas en el explorador, la ficha y el CSV; se retira la conexión antigua
