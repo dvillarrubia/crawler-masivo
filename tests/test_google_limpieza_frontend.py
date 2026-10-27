@@ -248,8 +248,11 @@ def test_lo_que_search_console_no_cuenta():
         "desde": "2026-09-01", "hasta": "2026-10-23", "clics_paginas": 1000, "clics_busquedas": 580,
         "parte": 0.42, "con_dias_cortados": True}}}
     b = _bloque({"gsc_resumen": medido})
-    assert b["limites"][1].startswith("42 % de los clics del 1 sept 2026 al 23 oct 2026 llega sin su búsqueda")
-    assert "50.000 filas" in b["limites"][1]
+    assert b["limites"][1].startswith("El 42 % de los clics del 1 sept 2026 al 23 oct 2026 llega sin su búsqueda")
+    assert "mezcla dos cosas" in b["limites"][1] and "50.000 filas" in b["limites"][1]
+    casi = {**GSC, "oportunidades": {"sin_busqueda": {**medido["oportunidades"]["sin_busqueda"],
+                                                      "parte": 0.004, "con_dias_cortados": False}}}
+    assert _bloque({"gsc_resumen": casi})["limites"][1].startswith("Casi todos los clics")
 
 
 def test_las_fechas_en_que_google_cambio_lo_que_cuenta_solo_si_la_ventana_las_cruza():

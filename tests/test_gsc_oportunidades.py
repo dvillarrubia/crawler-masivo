@@ -349,10 +349,14 @@ def _pagina_gsc(s, c, ruta, clics, dia=EN_VENTANA):
                     url_clave=clave_de_url(f"https://x.com{ruta}"), clics=clics, impresiones=clics * 10))
 
 
+def _serie(desde=EN_VENTANA, hasta=EN_VENTANA, **extra):
+    return {"sitemaps": 0, "consultas": {"primer_dia": desde.isoformat(), "ultimo_dia": hasta.isoformat(), **extra}}
+
+
 def test_la_parte_de_clics_sin_busqueda_se_mide_en_los_dias_de_las_dos_series(s):
     """#163: lo que Google anonimiza se mide en el sitio. Un dia de paginas
     ANTERIOR a la primera busqueda no cuenta: alli no hay con que comparar."""
-    c, j = _montar(s, detalle={"sitemaps": 0, "consultas": {"primer_dia": EN_VENTANA.isoformat()}})
+    c, j = _montar(s, detalle=_serie())
     _url(s, j, "/a/", clics=100, imp=1000, pos=5.0)
     _pagina_gsc(s, c, "/a/", 100)
     _pagina_gsc(s, c, "/a/", 900, dia=EN_VENTANA - timedelta(days=1))   # sin busquedas ese dia
@@ -361,13 +365,56 @@ def test_la_parte_de_clics_sin_busqueda_se_mide_en_los_dias_de_las_dos_series(s)
     resumen, _ = _analizar(s, j)
     sb = resumen["sin_busqueda"]
     assert (sb["clics_paginas"], sb["clics_busquedas"]) == (100, 60)
-    assert sb["parte"] == 0.4 and sb["desde"] == EN_VENTANA.isoformat()
+    assert sb["parte"] == 0.4 and sb["desde"] == EN_VENTANA.isoformat() and sb["dias"] == 1
     assert sb["con_dias_cortados"] is False
 
 
+def test_la_serie_de_busquedas_atrasada_no_infla_la_parte(s):
+    """El relleno de busquedas va por detras del de paginas: los dias que aun
+    no tiene no cuentan (con ellos salia 0,85 en vez de 0,40)."""
+    c, j = _montar(s, detalle=_serie())
+    _url(s, j, "/a/", clics=100, imp=1000, pos=5.0)
+    _pagina_gsc(s, c, "/a/", 100)
+    for k in range(1, 4):
+        _pagina_gsc(s, c, "/a/", 100, dia=EN_VENTANA + timedelta(days=k))
+    _consulta(s, c, "/a/", "hoteles", 60, 600)
+    resumen, _ = _analizar(s, j)
+    assert resumen["sin_busqueda"]["parte"] == 0.4
+
+
+def test_una_propiedad_sin_serie_de_busquedas_no_entra_en_ninguna_suma(s):
+    """Con ella en las paginas y sin sus busquedas salia 0,94 en vez de 0,40."""
+    from shared.models import GscPagina
+
+    c, j = _montar(s, detalle=_serie())
+    s.add(GscEstado(cliente_id=c.id, propiedad="https://x.com/", estado="ok", detalle={"sitemaps": 0}))
+    _url(s, j, "/a/", clics=100, imp=1000, pos=5.0)
+    _pagina_gsc(s, c, "/a/", 100)
+    s.add(GscPagina(cliente_id=c.id, propiedad="https://x.com/", fecha=EN_VENTANA, url="https://x.com/b/",
+                    url_clave=clave_de_url("https://x.com/b/"), clics=900, impresiones=9000))
+    _consulta(s, c, "/a/", "hoteles", 60, 600)
+    resumen, _ = _analizar(s, j)
+    assert resumen["sin_busqueda"]["parte"] == 0.4
+    assert resumen["sin_busqueda"]["propiedades"] == 1
+
+
+def test_un_dia_de_paginas_cortado_no_cuenta(s):
+    """En un dia cortado la suma de paginas se queda corta: la parte saldria
+    por debajo sin avisar."""
+    c, j = _montar(s, detalle=_serie(desde=EN_VENTANA - timedelta(days=1)))
+    e = s.query(GscEstado).one()
+    e.dias_truncados = [(EN_VENTANA - timedelta(days=1)).isoformat()]
+    _url(s, j, "/a/", clics=100, imp=1000, pos=5.0)
+    _pagina_gsc(s, c, "/a/", 100)
+    _pagina_gsc(s, c, "/a/", 10, dia=EN_VENTANA - timedelta(days=1))
+    _consulta(s, c, "/a/", "hoteles", 60, 600)
+    _consulta(s, c, "/a/", "hoteles", 10, 100, dia=EN_VENTANA - timedelta(days=1))
+    resumen, _ = _analizar(s, j)
+    assert resumen["sin_busqueda"]["parte"] == 0.4 and resumen["sin_busqueda"]["dias"] == 1
+
+
 def test_un_dia_de_busquedas_cortado_se_dice(s):
-    c, j = _montar(s, detalle={"sitemaps": 0, "consultas": {"primer_dia": EN_VENTANA.isoformat(),
-                                                           "truncados": [EN_VENTANA.isoformat()]}})
+    c, j = _montar(s, detalle=_serie(truncados=[EN_VENTANA.isoformat()]))
     _url(s, j, "/a/", clics=10, imp=100, pos=5.0)
     _pagina_gsc(s, c, "/a/", 10)
     _consulta(s, c, "/a/", "hoteles", 5, 50)
@@ -381,3 +428,10 @@ def test_sin_serie_de_busquedas_no_se_afirma_ninguna_parte(s):
     _pagina_gsc(s, c, "/a/", 10)
     resumen, _ = _analizar(s, j)
     assert resumen["sin_busqueda"] is None
+
+
+def test_si_la_medida_revienta_las_oportunidades_siguen(s, monkeypatch):
+    c, j = _montar(s, detalle={"sitemaps": 0, "consultas": {"primer_dia": "no-es-fecha", "ultimo_dia": "x"}})
+    _url(s, j, "/a/", clics=10, imp=100, pos=5.0)
+    resumen, _ = _analizar(s, j)
+    assert resumen is not None and resumen["sin_busqueda"] is None

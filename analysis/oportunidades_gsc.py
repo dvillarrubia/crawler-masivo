@@ -274,41 +274,64 @@ def _sin_busqueda(ctx: _Contexto) -> dict[str, Any] | None:
 
     Google da los clics de una pagina con TODAS sus busquedas, pero al pedirlos
     por pagina y busqueda se calla las raras o sensibles (anonimizadas). La
-    diferencia entre las dos series en los mismos dias y propiedades es lo
-    que ninguna cifra por busqueda puede contar. Solo los dias que tienen las
-    dos series; si alguno de busquedas se corto en el tope de filas, la
-    diferencia mezcla las dos cosas y se dice (`con_dias_cortados`).
+    diferencia entre las dos series es lo que ninguna cifra por busqueda puede
+    contar, y solo se puede afirmar donde las dos cubren lo mismo: por
+    propiedad, los dias que su serie de busquedas tiene descargados (va de
+    `primer_dia` a `ultimo_dia` sin huecos, y puede ir por detras de la de
+    paginas: el relleno inicial tarda horas), dentro de la ventana y sin los
+    dias en que la de paginas se corto en el tope de filas. Una propiedad sin
+    serie de busquedas no entra en ninguna de las dos sumas. Si un dia de
+    busquedas se corto, la diferencia mezcla las dos causas y se dice
+    (`con_dias_cortados`). Best-effort entero (decision 40): si algo falla,
+    `None`, y las oportunidades siguen.
     """
     from shared.models import GscConsulta as C
     from shared.models import GscPagina as P
 
-    primeros = [((e.detalle or {}).get("consultas") or {}).get("primer_dia") for e in ctx.estados]
-    primeros = [d for d in primeros if d]
-    if not ctx.propiedades or not primeros:
-        return None
-    desde = max(ctx.desde.isoformat(), max(primeros))
-    hasta = ctx.hasta.isoformat()
-    if desde > hasta:
-        return None
-    cortados = any(desde <= d <= hasta
-                   for e in ctx.estados
-                   for d in (((e.detalle or {}).get("consultas") or {}).get("truncados") or []))
     try:
+        dias: dict[str, set[str]] = {}
+        cortados = False
+        for e in ctx.estados:
+            if e.propiedad not in ctx.propiedades:
+                continue
+            st = (e.detalle or {}).get("consultas") or {}
+            primero, ultimo = st.get("primer_dia"), st.get("ultimo_dia")
+            if not primero or not ultimo:
+                continue
+            desde = max(ctx.desde, datetime.fromisoformat(primero).date())
+            hasta = min(ctx.hasta, datetime.fromisoformat(ultimo).date())
+            fuera = {str(d) for d in (e.dias_truncados or [])}
+            validos = {(desde + timedelta(days=n)).isoformat()
+                       for n in range((hasta - desde).days + 1)} - fuera
+            if not validos:
+                continue
+            dias[e.propiedad] = dias.get(e.propiedad, set()) | validos
+            cortados = cortados or any(str(d) in validos for d in (st.get("truncados") or []))
+        if not dias:
+            return None
+        todos = sorted(set().union(*dias.values()))
+
+        def _por_dia(modelo) -> int:
+            filas = ctx.an.session.execute(
+                select(modelo.propiedad, modelo.fecha, func.coalesce(func.sum(modelo.clics), 0))
+                .where(modelo.cliente_id == ctx.job.cliente_id, modelo.propiedad.in_(list(dias)),
+                       modelo.fecha >= todos[0], modelo.fecha <= todos[-1])
+                .group_by(modelo.propiedad, modelo.fecha)).all()
+            return sum(int(n or 0) for prop, fecha, n in filas
+                       if str(fecha)[:10] in dias.get(prop, ()))
+
         with ctx.an.session.begin_nested():
-            def _suma(modelo):
-                return int(ctx.an.session.execute(
-                    select(func.coalesce(func.sum(modelo.clics), 0))
-                    .where(modelo.cliente_id == ctx.job.cliente_id, modelo.propiedad.in_(ctx.propiedades),
-                           modelo.fecha >= desde, modelo.fecha <= hasta)).scalar() or 0)
-            paginas, busquedas = _suma(P), _suma(C)
-    except Exception:  # noqa: BLE001 -- base sin migrar: un savepoint, no un rollback
+            paginas, busquedas = _por_dia(P), _por_dia(C)
+        if paginas <= 0:
+            return None
+        return {"desde": todos[0], "hasta": todos[-1], "dias": len(todos),
+                "propiedades": len(dias), "clics_paginas": paginas,
+                "clics_busquedas": min(busquedas, paginas),
+                "parte": round(max(0, paginas - busquedas) / paginas, 4),
+                "con_dias_cortados": cortados}
+    except Exception:  # noqa: BLE001
+        logger.exception("Clics sin busqueda del job %s: no se miden", ctx.an.job_id)
         return None
-    if paginas <= 0:
-        return None
-    return {"desde": desde, "hasta": hasta, "clics_paginas": paginas,
-            "clics_busquedas": min(busquedas, paginas),
-            "parte": round(max(0, paginas - busquedas) / paginas, 4),
-            "con_dias_cortados": cortados}
 
 
 def _oportunidades(ctx: _Contexto, consultas: dict) -> int:

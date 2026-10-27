@@ -1555,10 +1555,22 @@
      - Es la diferencia entre `gsc_paginas` (por página, con todas sus
        búsquedas) y `gsc_consultas` (por página y búsqueda, sin las
        anonimizadas).
-     - Se cuenta en los MISMOS días (desde el primero que tiene las dos
-       series) y en las mismas propiedades activas.
+     - Se cuenta solo donde las dos series cubren lo mismo: por propiedad
+       activa, los días que su serie de búsquedas tiene descargados (de
+       `primer_dia` a `ultimo_dia`, dentro de la ventana) y sin los días en
+       que la serie de páginas se cortó en el tope de filas. La revisión del
+       PR encontró dos maneras de inflarla sin estas reglas, y las dos son
+       reales:
+       - La serie de búsquedas va por detrás de la de páginas (el relleno
+         inicial tarda horas): con tres días de retraso salía el 85 % en vez
+         del 40 %.
+       - Una propiedad sin serie de búsquedas sumaba sus páginas: salía el
+         94 %.
      - Si algún día de búsquedas se cortó en el tope de 50.000 filas, la
-       diferencia mezcla las dos causas y se dice (`con_dias_cortados`).
+       diferencia mezcla las dos causas y el texto lo dice
+       (`con_dias_cortados`). Por debajo del 1 % se dice que las cifras
+       cuadran. Si la medida falla, `None`, y las oportunidades siguen
+       (decisión 40).
      - Sin serie de búsquedas no se afirma ninguna parte (`None`), y la
        interfaz da la cifra general del 40-50 % como «en muchos sitios», no
        como la del cliente.
@@ -1573,7 +1585,9 @@
 
    Tests:
    - `tests/test_gsc_oportunidades.py`: la parte medida solo en los días de
-     las dos series, un día cortado y sin serie de búsquedas.
+     las dos series, con la serie de búsquedas atrasada, con una propiedad sin
+     serie de búsquedas, con un día de páginas cortado y otro de búsquedas
+     cortado, sin serie de búsquedas y cuando la medida revienta.
    - `tests/test_google_limpieza_frontend.py` (`limitesGoogle` en Chromium):
      la cifra medida frente a la general, y cada fecha solo cuando la ventana
      la cruza.

@@ -7637,6 +7637,16 @@ const BLOQUE_GOOGLE_VACIO = Object.freeze({ cifras: [], conclusiones: [], inspec
 // cuando hay serie de busquedas) y dos solo si la ventana cruza las fechas
 // en que Google cambio lo que cuenta: impresiones infladas del 13-05-2025 al
 // 27-04-2026 y el fin de `num=100` en septiembre de 2025.
+function textoSinBusqueda(sb) {
+  if (!sb || !sb.clics_paginas) return 'Google anonimiza las búsquedas raras o sensibles (en muchos sitios, entre el 40 y el 50 % de los clics): las cifras por búsqueda nunca suman el total.';
+  const dias = 'del ' + fmt.dia(sb.desde) + ' al ' + fmt.dia(sb.hasta);
+  if (sb.parte < 0.01) return 'Casi todos los clics ' + dias + ' llegan con su búsqueda: aquí las cifras por búsqueda cuadran con el total.';
+  return 'El ' + fmt.pct(100 * sb.parte, 0) + ' de los clics ' + dias + ' llega sin su búsqueda'
+    + (sb.con_dias_cortados
+      ? '. La cifra mezcla dos cosas: las búsquedas que Google anonimiza (las raras o sensibles) y los días en que la descarga de búsquedas se cortó en su tope de 50.000 filas.'
+      : ': Google anonimiza las búsquedas raras o sensibles.')
+    + ' Por eso las cifras por búsqueda (canibalización, CTR por búsqueda) no suman el total.';
+}
 const GSC_INFLADAS = ['2025-05-13', '2026-04-27'];
 const GSC_NUM100 = ['2025-09-01', '2025-09-30'];
 function limitesGoogle(g) {
@@ -7646,12 +7656,7 @@ function limitesGoogle(g) {
   const sb = g.oportunidades && g.oportunidades.sin_busqueda;
   const salida = [
     'La API de Search Console no separa los clics que vienen de AI Overviews ni de AI Mode (AI Mode cuenta dentro de Web): estas cifras no dicen qué parte llega desde las respuestas de IA.',
-    sb && sb.clics_paginas
-      ? fmt.pct(100 * sb.parte, 0) + ' de los clics del ' + fmt.dia(sb.desde) + ' al ' + fmt.dia(sb.hasta)
-        + ' llega sin su búsqueda: Google anonimiza las búsquedas raras o sensibles'
-        + (sb.con_dias_cortados ? ' y algún día de búsquedas se cortó en su tope de 50.000 filas' : '')
-        + '. Por eso las cifras por búsqueda (canibalización, CTR por búsqueda) no suman el total.'
-      : 'Google anonimiza las búsquedas raras o sensibles (en muchos sitios, entre el 40 y el 50 % de los clics): las cifras por búsqueda nunca suman el total.',
+    textoSinBusqueda(sb),
   ];
   if (cruza(GSC_INFLADAS)) salida.push('Las impresiones del 13 de mayo de 2025 al 27 de abril de 2026 están infladas por un error de Google que no corrigió el histórico: no compares impresiones ni CTR a través de esas fechas.');
   if (cruza(GSC_NUM100)) salida.push('En septiembre de 2025 Google dejó de servir 100 resultados por página (num=100): cayeron las impresiones de escritorio y subió la posición media sin que el sitio cambiara.');
