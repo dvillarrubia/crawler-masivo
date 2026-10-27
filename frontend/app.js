@@ -196,6 +196,13 @@ const ISSUE_LABEL = {
 
 const SEVERITY_LABEL = { error: 'Error', warning: 'Aviso', info: 'Info' };
 
+// Las categorias de la Puntuacion por su clave (revision de UX del 25-oct,
+// 3.9): con tilde y sin emoji aunque la API sea anterior.
+const NOMBRE_CATEGORIA = {
+  crawlability: 'Rastreabilidad', content: 'Contenido', links: 'Enlaces', security: 'Seguridad',
+  structured_data: 'Datos estructurados', i18n: 'Internacionalización',
+};
+
 const POSITION_LABEL = {
   nav: 'Navegación', footer: 'Pie de página', content: 'Contenido',
   header: 'Cabecera', sidebar: 'Lateral',
@@ -719,6 +726,13 @@ function mensajeDeError(err) {
 }
 
 
+// Lo que dice una API anterior cuando aun no tiene una ruta: FastAPI
+// responde «Not Found» o «Method Not Allowed», y el servidor de estaticos
+// devuelve la pagina (HTML) a una ruta de /api que no conoce. Salia en
+// pantalla «Method Not Allowed» o «Unexpected token '<'…» (revision del
+// 27-oct): se dice en castellano. `sinRuta` deja al que llama distinguirlo.
+const SIN_RUTA = 'Este servidor todavía no tiene esta función: es una versión anterior.';
+
 async function api(path, opts = {}) {
   const res = await fetch(API + path, {
     headers: { 'Content-Type': 'application/json' },
@@ -726,9 +740,21 @@ async function api(path, opts = {}) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
+    const crudo = typeof (err && err.detail) === 'string' ? err.detail : '';
+    if (res.status === 405 || (res.status === 404 && (crudo === 'Not Found' || !crudo))) {
+      const e = new Error(SIN_RUTA);
+      e.sinRuta = true;
+      throw e;
+    }
     throw new Error(mensajeDeError(err));
   }
   if (res.status === 204) return null;
+  const tipo = (res.headers && res.headers.get && res.headers.get('content-type')) || '';
+  if (tipo.includes('text/html')) {
+    const e = new Error(SIN_RUTA);
+    e.sinRuta = true;
+    throw e;
+  }
   return res.json();
 }
 
@@ -952,6 +978,7 @@ function app() {
     // del 25-oct, 1.2).
     issuesOrden: 'prioridad',
     principales: null,        // { jobId, filas }: «Qué arreglar primero» del Resumen
+    _fichaPendiente: null,    // { jobId, url }: abrirFichaDeCenso
     issuesSegmento: '',       // segmento elegido en Problemas (decision 125)
     issuesVista: 'tipos',     // 'tipos' | 'lista'
     grupoAbierto: {},
@@ -1703,6 +1730,7 @@ function app() {
           nuevo.name = f.name;
           nuevo.cliente_id = f.cliente_id;
           nuevo.profile_id = f.profile_id;
+          nuevo.tipo = f.tipo;
           nuevo.seeds = (r.seeds && r.seeds.length) ? r.seeds.join('\n') : f.seeds;
           // Las reglas propias no son herencia: cambiar de cliente o de perfil
           // no las borra (revision de #233). Con el nombre de una heredada, la
@@ -1728,13 +1756,21 @@ function app() {
       const i = this.cfgRastreo;
       if (!i) return '';
       const n = CAMPOS_CONFIG.filter(c => cfgTiene(i, c.ruta)).length;
-      const partes = [
-        cfgEfectivo(i, 'max_urls') ? fmt.num(cfgEfectivo(i, 'max_urls')) + ' URLs' : 'sin tope de URLs',
-        cfgEfectivo(i, 'concurrent_requests_per_domain') + ' a la vez por dominio',
-        cfgEfectivo(i, 'render_js') ? 'con render JS' : 'sin render JS',
-      ];
+      // Sin lo de serie (API anterior a la decision 196, `base` vacia) un valor
+      // que no se ha fijado no se sabe: no se pinta. Salia «undefined a la vez
+      // por dominio» y «sin tope de URLs» sin saberlo (revision del 27-oct).
+      const partes = partesResumenConfig(i, ['max_urls', 'concurrent_requests_per_domain', 'render_js']);
+      if (i.resueltaError && !partes.length) partes.push('lo de serie del servidor');
       if (n) partes.push(n === 1 ? '1 cambio en este rastreo' : n + ' cambios en este rastreo');
       return partes.join(' · ');
+    },
+
+    // El tipo con el que sale el rastreo del modal (revision de UX del 25-oct,
+    // 1.6; decision 203): el elegido o, sin elegir, censo con perfil y prueba
+    // sin el. Un rastreo puntual sin marcar contaba como censo en la portada.
+    tipoRastreoModal() {
+      const f = this.createForm || {};
+      return f.tipo || (f.profile_id ? 'censo' : 'prueba');
     },
 
     // El mismo rastreo con 250 URLs y «CANARY» en el nombre: se reconoce
@@ -1744,14 +1780,14 @@ function app() {
       const host = (this.createForm.seeds.split('\n')[0] || '').replace(/^https?:\/\//, '').split('/')[0];
       // Sin repetir el prefijo si el nombre ya lo trae.
       this.createForm.name = /^CANARY\b/i.test(original || '') ? original : 'CANARY - ' + (original || host);
-      await this.submitCreate({ max_urls: 250 });
+      await this.submitCreate({ max_urls: 250 }, 'canario');
       if (this.showCreate) this.createForm.name = original;  // fallo: se deja como estaba
     },
 
     // Se manda lo que fija ESTE rastreo (`cfgRastreo.propia`): lo heredado lo
     // pone el servidor (create_job con exclude_unset). Sin cliente, lo mismo
     // sobre lo de serie. `extra` es lo que pone el boton (el tope del canario).
-    async submitCreate(extra = null) {
+    async submitCreate(extra = null, tipoForzado = null) {
       this.createError = null;
       const i = this.cfgRastreo;
       const mal = cfgListoParaGuardar(i);
@@ -1767,11 +1803,18 @@ function app() {
         Object.assign(config, extra || {});
         const ce = _extraccionAConfig(f);
         if (ce) config.custom_extraction = ce;
-        const payload = { name: f.name, seeds, config };
+        const tipo = tipoForzado || this.tipoRastreoModal();
+        const payload = { name: f.name, seeds, config, tipo };
         if (f.cliente_id) payload.cliente_id = f.cliente_id;
         if (f.profile_id) payload.profile_id = f.profile_id;
 
-        await api('/jobs', { method: 'POST', body: JSON.stringify(payload) });
+        const creado = await api('/jobs', { method: 'POST', body: JSON.stringify(payload) });
+        // Una API anterior a la decision 203 no lee `tipo` al crear: se marca
+        // despues, con lo que ya existia para cambiarlo (UX-07/08).
+        if (creado && creado.id && creado.tipo !== tipo) {
+          try { await api(`/jobs/${creado.id}`, { method: 'PATCH', body: JSON.stringify({ tipo }) }); }
+          catch (e) { this.showToast('El rastreo ha salido, pero no se ha podido marcar como ' + tipo + ': ' + e.message); }
+        }
         this.showCreate = false;
         this.jobsPage = 1;
         await this.loadJobs();
@@ -2055,7 +2098,7 @@ function app() {
       if (!this.estadoCliente || this.estadoCliente.jobId !== jobId) return;
       this.estadoCliente = {
         ...e, job, stats,
-        principales: filas ? filas.filter(r => r.severity !== 'info').slice(0, 5) : null,
+        principales: filas ? filasPorTipo(filas.filter(r => r.severity !== 'info'), filas).slice(0, 5) : null,
         principalesError: filas === null,
       };
     },
@@ -2094,6 +2137,34 @@ function app() {
     referenciaDe(j) {
       if (!j || !j.comparado_con) return null;
       return (this.clienteSerie || []).find(x => x.id === j.comparado_con) || null;
+    },
+
+    // La portada con una API anterior a la decision 202: alguna fila sin
+    // `paginas_con_error`; la columna pasa a decir que son incidencias.
+    panelSinPaginasError() {
+      return this.filasPanelOrdenadas().some(p => p.ultimo && p.ultimo.paginas_con_error == null);
+    },
+
+    // Tipos distintos de error o aviso del censo: el contador de la pestaña
+    // Problemas (V16; decision 202).
+    tiposQueMirar(stats) {
+      return new Set(((stats && stats.issues_by_type) || [])
+        .filter(i => i.severity === 'error' || i.severity === 'warning').map(i => i.issue_type)).size;
+    },
+
+    // Paginas con error de una fila de la serie o de la portada (decision
+    // 202): la misma cifra que la tarjeta del censo y el Estado. Con una API
+    // anterior la fila no la trae; en la ficha del cliente sale de la
+    // evolucion (`urls_con_error` del mismo rastreo, misma cuenta) y, si
+    // tampoco, null: entonces se pintan las incidencias de error, dicho.
+    paginasConError(j) {
+      if (!j) return null;
+      if (j.paginas_con_error != null) return j.paginas_con_error;
+      for (const s of ((this.clienteEvolucion && this.clienteEvolucion.series) || [])) {
+        const p = s.puntos.find(x => x.job_id === j.id && x.urls_con_error != null);
+        if (p) return p.urls_con_error;
+      }
+      return null;
     },
 
     // La fecha de la referencia de una fila: la del censo de la serie o, si
@@ -2147,6 +2218,18 @@ function app() {
         const r = await api(`/clients/${id}/incidentes?estado=${this.incidentesVer}`);
         if (this.cliente && this.cliente.id === id) this.incidentes = r;
       } catch (e) { this.incidentes = []; this.reglasError = e.message; }
+    },
+
+    // Los grupos de la pestaña Alertas: `aFavor` las de tipo info, que van
+    // aparte en «Cambios a favor» (1.12).
+    gruposIncidentes(aFavor) {
+      return agruparIncidentes(this.incidentes || []).filter(g => (g.severidad === 'info') === !!aFavor);
+    },
+    async cambiarGrupoIncidentes(g, cambio, estadoDesde) {
+      for (const i of g.items) {
+        if (i.estado === 'cerrado' || (estadoDesde && i.estado !== estadoDesde)) continue;
+        await this.cambiarIncidente(i, cambio);
+      }
     },
 
     async cambiarIncidente(i, cambio) {
@@ -2289,6 +2372,9 @@ function app() {
     },
 
     etiquetaMetrica(k) {
+      // «URLs con error» de la API son paginas: las mismas que «páginas con
+      // error» de la tarjeta (decision 202), y con el mismo nombre.
+      if (k === 'urls_con_error') return 'Páginas con error';
       const m = this.clienteEvolucion && this.clienteEvolucion.metricas && this.clienteEvolucion.metricas[k];
       return m ? m.etiqueta : k;
     },
@@ -2794,8 +2880,7 @@ function app() {
         const i = this.cfgCliente;
         const n = i ? CAMPOS_CONFIG.filter(x => cfgTiene(i, x.ruta)).length : Object.keys(c.config_defecto || {}).length;
         if (!i) return '';
-        const partes = [cfgEfectivo(i, 'concurrent_requests_per_domain') + ' a la vez por dominio',
-                        cfgEfectivo(i, 'render_js') ? 'con render JS' : 'sin render JS'];
+        const partes = partesResumenConfig(i, ['concurrent_requests_per_domain', 'render_js']);
         partes.push(n ? (n === 1 ? '1 cambio sobre lo de serie' : n + ' cambios sobre lo de serie') : 'lo de serie');
         const fuera = cfgClavesFuera(i);
         if (fuera.length) partes.push('además ' + fuera.join(', ') + ' en «Avanzado»');
@@ -2989,6 +3074,18 @@ function app() {
       this.loading = false;
       window.scrollTo({ top: 0, behavior: 'smooth' });
       this.$nextTick(() => lucide.createIcons());
+      // Una ficha pedida desde fuera del censo (Google del Estado del cliente).
+      const pend = this._fichaPendiente;
+      this._fichaPendiente = null;
+      if (pend && this.job && this.job.id === pend.jobId) this.abrirFichaPorUrl(pend.url);
+    },
+
+    // La ficha de una URL de otro censo (las frases de Google del Estado del
+    // cliente, 3.3): se abre el censo y, al cargarlo, su ficha.
+    abrirFichaDeCenso(jobId, url) {
+      if (this.job && this.job.id === jobId && this.view !== 'client') return this.abrirFichaPorUrl(url);
+      this._fichaPendiente = { jobId, url };
+      location.hash = '#/rastreos/' + jobId;
     },
 
     backToJobs() {
@@ -3300,7 +3397,9 @@ function app() {
           api(`/clients/${id}/profiles`), api(`/programaciones?cliente_id=${id}&resumen=true`)]);
         if (this.progForm !== f || f.cliente_id !== id) return;
         f.perfiles = perfiles;
-        f.existentes = existentes;
+        // Una API anterior ignora `?cliente_id=` y las devuelve todas: se
+        // filtra tambien aqui (revision del 27-oct).
+        f.existentes = existentes.filter(p => p.cliente_id === id);
       } catch (e) { f.error = e.message; return; }
       if (!f.profile_id && f.desdeJob) {
         const igual = f.perfiles.find(p => _mismasSemillas(p.seeds, f.desdeJob.seeds));
@@ -3392,7 +3491,10 @@ function app() {
       const id = this.cliente.id;
       try {
         const l = await api(`/programaciones?cliente_id=${id}&resumen=true`);
-        if (this.cliente && this.cliente.id === id) this.clienteProgramaciones = l;
+        // Una API anterior ignora `?cliente_id=` y devuelve las de todos: en
+        // «Programaciones sin perfil» de Lopesan salia la de workoholics.es.
+        // Se filtra tambien aqui por el cliente de cada una (revision del 27-oct).
+        if (this.cliente && this.cliente.id === id) this.clienteProgramaciones = l.filter(p => p.cliente_id === id);
       } catch (_) { this.clienteProgramaciones = []; }
     },
 
@@ -4321,6 +4423,28 @@ function app() {
       this.$nextTick(() => lucide.createIcons());
     },
 
+    // El panel lateral de URLs con los problemas agrupados como la ficha
+    // (revision de UX del 25-oct, 2.7). Se guarda por respuesta: el x-for y
+    // el contador de la pestaña lo piden varias veces.
+    expProblemasAgrupados() {
+      const d = this.expUrlDetail;
+      if (!d) return [];
+      const crudo = _crudo(d);
+      if (crudo._problemasAgrupados) return crudo._problemasAgrupados;
+      const g = this._agruparProblemasUrl(d.issues, d.url);
+      Object.defineProperty(crudo, '_problemasAgrupados', { value: g, enumerable: false });
+      return g;
+    },
+    // «200 de 4.720» o «200+»: la API manda como mucho 200 enlaces de cada
+    // lado (V26). Con menos, la cifra de la lista es la de verdad.
+    cuentaEnlacesPanel(d, lado) {
+      const lista = (d && d[lado]) || [];
+      if (lista.length < 200) return fmt.num(lista.length);
+      const total = lado === 'inlinks' ? d.inlinks_count : d.outlinks_count;
+      if (total == null) return fmt.num(lista.length) + '+';
+      return total > lista.length ? fmt.num(lista.length) + ' de ' + fmt.num(total) : fmt.num(lista.length);
+    },
+
     // Los problemas de la URL agrupados por tipo (revision de UX del 25-oct,
     // 2.7; V27): antes salia el mismo tipo cuatro veces, con el JSON en crudo
     // y sin enlace a su tipo. Un grupo por tipo con su gravedad mas alta, los
@@ -4629,15 +4753,22 @@ function app() {
           return no('las incidencias de este censo ya no son las que se compararon (alguno de los dos se volvió a analizar después): no comparable');
         }
       }
+      // Sin leer todos los sitemaps, «No incluida en el sitemap» no se puede
+      // afirmar (V13): tampoco su diferencia. Fuera de los totales y dicho.
+      const dudosos = dudaSitemaps(j) ? ['not_in_sitemap'].filter(t => porTipo[t]) : [];
+      const quitar = campo => dudosos.reduce((n, t) => n + (porTipo[t][campo] || 0), 0);
       const resueltosDelTodo = Object.entries(porTipo)
+        .filter(([t]) => !dudosos.includes(t))
         .filter(([, d]) => d.resueltas && !d.siguen && !d.nuevas)
         .map(([tipo, d]) => ({ tipo, ...d }))
         .sort((a, b) => b.resueltas - a.resueltas);
       return {
-        ...base, ok: true, porTipo, resueltosDelTodo,
-        nuevas: (inc.nuevas || {}).total || 0, resueltas: (inc.resueltas || {}).total || 0,
+        ...base, ok: true, porTipo, resueltosDelTodo, dudosos,
+        nuevas: ((inc.nuevas || {}).total || 0) - quitar('nuevas'),
+        resueltas: ((inc.resueltas || {}).total || 0) - quitar('resueltas'),
         sinPagina: inc.sin_pagina_en_el_nuevo || 0,
-        avisos: c.avisos || [],
+        avisos: (c.avisos || []).concat(dudosos.length
+          ? ['Sin contar «No incluida en el sitemap»: no se leyeron todos los sitemaps y su diferencia no se puede afirmar.'] : []),
       };
     },
 
@@ -4646,6 +4777,7 @@ function app() {
     // todas sus gravedades juntas, y repetirla en las dos filas sumaria doble.
     cambioDeTipo(r, diff) {
       if (!diff || diff.ok !== true || this.issuesSegmento) return null;
+      if ((diff.dudosos || []).includes(r.issue_type)) return null;
       const filas = this.issuesResumen || [];
       // La primera VISIBLE: con el filtro «Info» la fila de aviso del mismo
       // tipo esta oculta y la etiqueta no puede ir en ella.
@@ -4732,16 +4864,25 @@ function app() {
       this.principales = { jobId, filas: null };
       try {
         const filas = await api(`/jobs/${jobId}/issues/resumen?orden=prioridad&ejemplos=0`);
-        if (this.job && this.job.id === jobId) this.principales = { jobId, filas: filas.filter(r => r.severity !== 'info').slice(0, 10) };
+        // Cinco, como el Estado del cliente y la propuesta (revision de UX del
+        // 25-oct, fase 3), y una fila por tipo (decision 202).
+        if (this.job && this.job.id === jobId) this.principales = { jobId, filas: filasPorTipo(filas.filter(r => r.severity !== 'info'), filas).slice(0, 5) };
       } catch (e) {
         // Un fallo no es «no hay errores»: lo que no se sabe no se afirma.
         if (this.job && this.job.id === jobId) this.principales = { jobId, filas: null, error: e.message };
       }
     },
 
+    // Con «Todas», una fila por tipo (decision 202; filasPorTipo). Se guarda
+    // por lista: cambioDeTipo y lineaIAProblema comparan la fila por
+    // identidad y no puede ser otra en cada llamada.
     resumenIssues(severidad) {
       const r = this.issuesResumen || [];
-      return severidad ? r.filter(x => x.severity === severidad) : r;
+      if (severidad) return r.filter(x => x.severity === severidad);
+      const crudo = _crudo(r);
+      let f = _cacheFilasTipo.get(crudo);
+      if (!f) { f = filasPorTipo(crudo); _cacheFilasTipo.set(crudo, f); }
+      return f;
     },
 
     verTipoDeIncidencia(tipo, severidad) {
@@ -5413,8 +5554,8 @@ function app() {
         pagina_legal: 'Página legal (de prueba)', soft_404: 'Soft 404', pagina_de_utilidad: 'Páginas de utilidad',
         canibalizacion: 'Canibalización por búsqueda', intencion_pagina: 'Intención y embudo de la página',
         intencion_busquedas: 'Intención de las búsquedas de Search Console', tipo_pagina: 'Tipo de página (por plantilla)',
-        categoria_cliente: 'Categoría del cliente (por plantilla)', title_contenido: 'Title frente al contenido',
-        title_generico: 'Title genérico', schema_visible: 'Datos estructurados frente a lo visible',
+        categoria_cliente: 'Categoría del cliente (por plantilla)', title_contenido: 'El título frente al contenido',
+        title_generico: 'Título genérico', schema_visible: 'Datos estructurados frente a lo visible',
       })[nombre];
       if (t) return t;
       const m = this.enriqCatalogo.find(x => x.nombre === nombre);
@@ -6956,11 +7097,17 @@ const EXP_TABS = [
   { key: '4xx',        label: '4xx',         icon: 'alert-triangle', filter: { status_group: '4xx' },             columns: ['url','status_code','inlinks_count','origenes','enlazada_desde','click_depth','content_type'] },
   { key: '5xx',        label: '5xx',         icon: 'alert-octagon', filter: { status_group: '5xx' },              columns: ['url','status_code','status_text','response_time_ms','click_depth','inlinks_count'] },
   { key: '_div3', divider: true },
-  { key: 'indexable',  label: 'Indexables',  icon: 'eye',         filter: { indexable: true, is_internal: true },
-    titulo: 'URLs internas indexables de cualquier tipo: páginas HTML y también PDF o imágenes',
+  // Sobre las mismas paginas que la tarjeta «Indexables» del Resumen (HTML
+  // internas con 2xx; revision de UX del 25-oct, 3.4; decision 202): la barra
+  // decia «Indexables 3.407» (contaba tambien PDF e imagenes) y la tarjeta
+  // «3.216 indexables», y la tarjeta abria una lista de «No indexables» con
+  // las redirecciones y los errores dentro. Los PDF y las imagenes tienen su
+  // entrada; las redirecciones y los errores, la suya por codigo.
+  { key: 'indexable',  label: 'Páginas indexables',  icon: 'eye', filter: { resource_type: 'html', is_internal: true, status_group: '2xx', indexable: true },
+    titulo: 'Páginas HTML internas que responden 2xx y se pueden indexar: la misma cifra que la tarjeta «Indexables» del Resumen',
     columns: ['url','status_code','inlinks_count','title','title_len','meta_description','word_count','pagerank_score','canonical_href'] },
-  { key: 'noindex',    label: 'No indexables', icon: 'eye-off',   filter: { indexable: false, is_internal: true },
-    titulo: 'URLs internas no indexables de cualquier tipo: también las redirecciones y las que dan error',
+  { key: 'noindex',    label: 'Páginas no indexables', icon: 'eye-off', filter: { resource_type: 'html', is_internal: true, status_group: '2xx', indexable: false },
+    titulo: 'Páginas HTML internas que responden 2xx y no se pueden indexar (noindex, canonical a otra URL…): las «no indexables» de la tarjeta del Resumen',
     columns: ['url','status_code','indexability_status','title','meta_robots','canonical_href'] },
   // URLs que el sitio enlaza y robots.txt prohibe: no se piden, pero existen y
   // hay que decidir si el bloqueo es correcto o se esta tapando contenido.
@@ -7397,6 +7544,35 @@ function paginasTrafico(t, max = 10) {
   return { paginas: paginas.slice(0, max), cortadas: cortadas || paginas.length > max };
 }
 
+// «/es/hoteles/» de «https://www.lopesan.com/es/hoteles/»: lo que se lee
+// en una frase; la URL entera va en el title.
+function rutaCorta(url) {
+  try { const u = new URL(url); return (u.pathname + u.search) || url; } catch (_) { return url; }
+}
+
+// Las paginas de una frase del trafico (revision de UX del 25-oct, 3.3): las
+// frases las escribe el servidor (`shared.trafico_entre_censos.textos`) sin
+// sus URLs; aqui se busca el grupo del que sale cada una por lo que la frase
+// dice (el cambio que cita, o el caso especial, el sentido y el numero de
+// paginas). Solo si sale UN grupo: si dos encajan, la frase va sin enlaces
+// (no se adivina). Devuelve sus ejemplos, que son paginas de verdad.
+function paginasDeFraseTrafico(texto, t) {
+  if (!t || !t.comparable || !texto) return [];
+  const m = /^(\d[\d.]*) p[aá]ginas? /.exec(texto);
+  if (!m) return [];
+  const n = Number(m[1].replace(/\./g, ''));
+  const sube = /\s(ganó|ganaron)\s/.test(texto);
+  const grupos = sube ? (t.subidas || []) : (t.caidas || []);
+  const especial = /que pasan a su canonical/.test(texto) ? 'trasvase'
+    : /sin cambio técnico/.test(texto) ? 'sin_cambio'
+    : /en el rastreo anterior: no hay con qué comparar/.test(texto) ? 'sin_dato_anterior' : null;
+  const candidatos = grupos.filter(g => (g.paginas || 0) === n && (especial
+    ? g.cambio === especial
+    : g.texto && !['trasvase', 'sin_cambio', 'sin_dato_anterior'].includes(g.cambio) && texto.includes(g.texto)));
+  if (candidatos.length !== 1) return [];
+  return (candidatos[0].ejemplos || []).map(e => e.url).filter(Boolean).slice(0, 3);
+}
+
 // Lo que lee la plantilla mientras el x-if que la envuelve aun no ha
 // reaccionado a un job que pasa a null.
 const BLOQUE_GOOGLE_VACIO = Object.freeze({ cifras: [], conclusiones: [], inspeccion: null, textos: [], paginas: [], cortadas: false, trafico: null });
@@ -7471,6 +7647,91 @@ function resumenSitemaps(job) {
     dudoso: !!s.parcial || fallidos > 0 || ilegibles > 0,
   };
 }
+
+// Alertas del cliente agrupadas en pantalla (revision de UX del 25-oct, 1.12;
+// V08; decision 204): la misma regla vista por dos series o en dos censos
+// salia en dos filas iguales («Páginas que ya no se encuentran» del 19 y del
+// 21 oct). Un grupo por `clave` con todas sus alertas, la gravedad mas alta y
+// la mas reciente para el titular. No cambia nada guardado: cada alerta sigue
+// siendo suya (decision 139) y las acciones se aplican a todas las del grupo.
+const ORDEN_SEV_ALERTA = { critical: 0, warning: 1, info: 2 };
+function agruparIncidentes(lista) {
+  const por = new Map();
+  for (const i of lista || []) {
+    const k = i.clave || i.regla || i.id;
+    if (!por.has(k)) por.set(k, { clave: k, items: [] });
+    por.get(k).items.push(i);
+  }
+  const t = x => new Date(x.abierto_en || 0).getTime();
+  const grupos = [...por.values()].map(g => {
+    g.items.sort((a, b) => t(a) - t(b));
+    g.ultimo = g.items[g.items.length - 1];
+    g.severidad = g.items.reduce((m, x) => ((ORDEN_SEV_ALERTA[x.severidad] ?? 3) < (ORDEN_SEV_ALERTA[m] ?? 3) ? x.severidad : m), g.ultimo.severidad);
+    g.estados = [...new Set(g.items.map(x => x.estado))];
+    g.series = [...new Set(g.items.map(x => x.nombre_serie || x.serie).filter(Boolean))];
+    return g;
+  });
+  return grupos.sort((a, b) => (ORDEN_SEV_ALERTA[a.severidad] ?? 3) - (ORDEN_SEV_ALERTA[b.severidad] ?? 3) || t(b.ultimo) - t(a.ultimo));
+}
+
+// Una fila por tipo en Problemas y en el desplegable de URLs (revision de UX
+// del 25-oct, 1.7; V14; decision 202). La API da una fila por tipo y
+// gravedad, y «Canibalizacion» salia dos veces (39 aviso, 157 info): se
+// juntan en una con su gravedad mas alta y el desglose en `partes`. Las
+// paginas del tipo son `paginas_tipo` (distintas, de la API) solo si estan
+// todas sus gravedades; si no (se quitaron las info, o la API es anterior y
+// no lo trae) son null: sumar las de cada gravedad contaria dos veces la
+// pagina que tenga las dos, y eso no se afirma. `todas` son las filas de la
+// API sin filtrar, para saber si estan todas las gravedades.
+const ORDEN_GRAVEDAD = { error: 0, warning: 1, info: 2 };
+function filasPorTipo(filas, todas) {
+  const por = new Map();
+  const salida = [];
+  for (const r of filas || []) {
+    const g = por.get(r.issue_type);
+    if (g) { g.partes.push(r); continue; }
+    const nueva = { ...r, partes: [r] };
+    por.set(r.issue_type, nueva);
+    salida.push(nueva);
+  }
+  const deTodas = {};
+  for (const r of (todas || filas || [])) deTodas[r.issue_type] = (deTodas[r.issue_type] || 0) + 1;
+  for (const g of salida) {
+    if (g.partes.length < 2) continue;
+    const partes = [...g.partes].sort((a, b) => (ORDEN_GRAVEDAD[a.severity] ?? 3) - (ORDEN_GRAVEDAD[b.severity] ?? 3));
+    const suma = k => partes.reduce((n, p) => n + (p[k] || 0), 0);
+    const ejemplos = [];
+    const vistos = new Set();
+    for (const p of partes) for (const e of (p.ejemplos || [])) {
+      if (vistos.has(e.url_id)) continue;
+      vistos.add(e.url_id);
+      ejemplos.push(e);
+    }
+    Object.assign(g, {
+      partes,
+      severity: partes[0].severity,
+      incidencias: suma('incidencias'),
+      agregadas: suma('agregadas') || null,
+      paginas: g.paginas_tipo != null && deTodas[g.issue_type] === partes.length ? g.paginas_tipo : null,
+      ejemplos: ejemplos.slice(0, Math.max(3, (partes[0].ejemplos || []).length)),
+      prioridad: Math.max(...partes.map(p => p.prioridad || 0)),
+      importancia: Math.max(...partes.map(p => p.importancia || 0)),
+      // El % y el reparto por segmento son de cada gravedad: el de la mas
+      // alta, y la fila lo dice (no se suman).
+      pct_paginas: null,
+      por_segmento: partes[0].por_segmento,
+    });
+  }
+  return salida;
+}
+// «39 aviso · 157 info»: el desglose de una fila con varias gravedades.
+function desgloseGravedad(r) {
+  return (r.partes || [r]).map(p => fmt.num(p.paginas) + ' ' + fmt.severity(p.severity).toLowerCase()).join(' · ');
+}
+const _cacheFilasTipo = new WeakMap();
+// El objeto sin el proxy de Alpine (para guardar cosas por identidad); sin
+// Alpine cargado (los tests que ejecutan app.js sueltos), el mismo.
+function _crudo(x) { return (typeof Alpine !== 'undefined' && Alpine.raw) ? Alpine.raw(x) : x; }
 
 // La frase que matiza «No incluida en el sitemap» cuando la lectura de los
 // sitemaps no fue completa (revision de UX del 25-oct, 3.6; V13). null si se
@@ -7599,6 +7860,7 @@ function _freshForm() {
     seeds: '',
     cliente_id: '',
     profile_id: '',
+    tipo: '',            // '' = el de serie (tipoRastreoModal); decision 203
     extraccion: [],      // reglas a medida (decision 166): ver _extraccionAConfig
   };
 }
@@ -7843,6 +8105,20 @@ function cfgEfectivo(inst, ruta) {
   // Modo lista (decision 128): sin que nadie fije el sitemap, una lista no lo lee.
   if (ruta === 'use_sitemap' && !inst.origenBase.use_sitemap && Number(cfgEfectivo(inst, 'max_depth')) === 0) return false;
   return cfgHeredado(inst, ruta);
+}
+
+// El resumen en corto de una configuracion: solo lo que se sabe. Un valor
+// `undefined` es que ni se fijo ni llego lo de serie (API anterior).
+function partesResumenConfig(inst, claves) {
+  const partes = [];
+  for (const k of claves) {
+    const v = cfgEfectivo(inst, k);
+    if (v === undefined) continue;
+    if (k === 'max_urls') partes.push(v ? fmt.num(v) + ' URLs' : 'sin tope de URLs');
+    else if (k === 'concurrent_requests_per_domain') { if (v != null) partes.push(fmt.num(v) + ' a la vez por dominio'); }
+    else if (k === 'render_js') { if (v != null) partes.push(v ? 'con render JS' : 'sin render JS'); }
+  }
+  return partes;
 }
 
 function cfgOrigen(inst, ruta) {
@@ -8197,7 +8473,9 @@ const MOTIVO_NO_COMPARABLE = {
 
 // Lo que se grafica en la ficha del cliente, en este orden. Las etiquetas y el
 // sentido («mejor si baja») vienen de `shared.evolucion.METRICAS`.
-const METRICAS_GRAFICADAS = ['errores', 'urls_4xx', 'urls_5xx', 'indexables',
+// Paginas con error y no incidencias (decision 202): la misma cifra que la
+// tarjeta del censo, la tabla de debajo y la portada.
+const METRICAS_GRAFICADAS = ['urls_con_error', 'urls_4xx', 'urls_5xx', 'indexables',
   'pagerank_desperdiciado', 'click_depth_medio'];
 
 // Lo minimo que abarca el eje vertical de una grafica, como fraccion de su

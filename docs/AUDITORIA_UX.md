@@ -601,6 +601,84 @@ Cosas que no estaban en la auditoría y aparecieron al hacerla:
   porque sustituye a un estilo en línea). Las `.caja-codigo` usaban
   `var(--surface)`, que no existe: eran transparentes y lo siguen siendo.
 
+### Revisión del 27-oct · Lo que la auditoría independiente dejó abierto (decisiones 202, 203 y 204)
+
+Cada punto se comprobó antes contra producción con el frontend de esta rama
+(solo lectura). Lo que exigía cambiar el análisis no se tocó: va en «Lo
+abierto».
+
+- [x] **V10 · Errores = páginas en todas partes** (decisión 202): portada,
+  tabla y gráfica del Historial y tendencia cuentan páginas con error, la cifra
+  de la tarjeta y del Estado (72, no 85). Con la API de hoy la ficha del
+  cliente las saca de la evolución, y la portada dice «errores (incidencias)»
+  hasta que se despliegue.
+- [x] **V16 · Contador de Problemas**: tipos de error o aviso (34), no las
+  11.681 incidencias con las info.
+- [x] **V14 / 1.7 · Una fila por tipo** con «39 aviso · 157 info», en
+  Problemas, el desplegable de URLs y «Qué arreglar primero». Las páginas del
+  tipo, solo con `paginas_tipo` de la API nueva: sumar las de cada gravedad no
+  se afirma.
+- [x] **3.4 · «Indexables 3.407» frente a «3.216»**: las entradas pasan a
+  «Páginas indexables» y «Páginas no indexables», sobre las páginas HTML
+  internas con 2xx de la tarjeta (3.216 y 515), y la tarjeta abre la suya.
+- [x] **«Qué arreglar primero»**: primero en el Resumen, luego lo que ha
+  cambiado y Google (el orden de la propuesta), cinco filas como el Estado y
+  en lista: la barra medía la prioridad con las páginas al lado.
+- [x] **V13 · Sitemaps dudosos**: «no concluyente» en la fila de Problemas, su
+  frase al desplegarla, la ficha («No está en los sitemaps leídos…») y el
+  panel; fuera de «+N nuevas · −N resueltas» y de su etiqueta, dicho debajo.
+- [x] **V26 · Panel de URLs**: «Enlaces que recibe 200 de 4.720» (o «200+»),
+  «Ver quién la enlaza» con el tope, problemas agrupados por tipo con el
+  detalle legible, «1 clic desde la home».
+- [x] **V08 / 1.12 · Alertas** (decisión 204): agrupadas por regla («Vista en
+  los censos del 19 oct y del 21 oct»), «Ver las N páginas», las info en
+  «Cambios a favor»; las acciones valen para todo el grupo.
+- [x] **V12 / UX-07 / 1.6 · Tipo al lanzar** (decisión 203): siempre uno
+  marcado en el modal, prueba sin perfil y censo con él; «topado en N URLs» en
+  la portada (con la API nueva).
+- [x] **V31 / 1.15 · Semántico**: dice que el Search Console del cliente aún no
+  lo usa este análisis y enlaza a su configuración (fuera «Sin GSC» y «Subir
+  cuenta», que llamaba a una ruta cerrada); «Analizar» desactivado sin clave,
+  con el motivo al lado.
+- [x] **V42 / UX-20/14**: «Internacionalización» y «Datos estructurados» (API y
+  por clave en la interfaz, sin emojis), «Máximo de URLs», «auditoría»,
+  «tenían», «Qué ha cambiado», miles en la tabla de Comparar, decimales con
+  coma en Semántico, «Semana hasta el 26 oct 2026», «El título frente al
+  contenido» en el modal de IA. Puntuación: «70 páginas tienen algún error: el
+  1,3 % de las 5.578 URLs internas (contando imágenes, PDF y redirecciones)».
+- [x] **3.3 · Viñetas de Google con sus páginas**: cada frase enlaza a las
+  fichas de su grupo cuando se sabe cuál es (un solo grupo con ese cambio y
+  ese número de páginas); si dos encajan, sin enlaces.
+- [x] **Otros de la auditoría**: TLS «en naranja a 30 días o menos; aviso en
+  Problemas a 7 días»; reglas de alertas que dicen que las dos «por cifras»
+  son de serie; programaciones de otro cliente filtradas también en la
+  interfaz (la API de hoy ignora `?cliente_id=`); «undefined a la vez por
+  dominio», «Unexpected token '<'» y «Method Not Allowed» pasan a «Este servidor
+  todavía no tiene esta función» y el resumen de la configuración solo dice lo
+  que sabe; la tarjeta «Indexables» de un censo sin analizar dice «—» y «sin
+  analizar todavía».
+- [x] **V43 / UX-21 / 3.8**: hechos en esta rama (decisión 201): quedan 107
+  `style=""` fijos de una sola vez (más 42 `:style` con datos), no 964.
+- [x] `test_programaciones_perfil.py::test_el_worker_resuelve_la_config_igual_que_la_api`
+  fallaba en la imagen local de la API porque es del 13-oct y no trae parsel
+  (en `api/requirements.txt` desde el 16-oct): ahora se salta diciendo que hay
+  que reconstruirla.
+- Lo abierto:
+  - Semántico con el Search Console del cliente: el análisis lee
+    `gsc_job_data` (cuentas de antes) y no los datos por cliente
+    (decisión 141). Preseleccionar la cuenta exige cambiar el análisis.
+  - Puntuación: el tope cuenta páginas con error sobre todas las URLs
+    internas (decisión 92). Cambiar el denominador cambia la nota: se dice
+    como es.
+  - Datos de producción (no código): marcar como prueba el rastreo de
+    `lopesan-remedicion`, dar dominios a Lopesan y lanzar o quitar su perfil
+    «lista».
+  - Comparar sigue llamándose «Comparar» (la propuesta decía «Cambios»; no
+    es un hallazgo).
+  - «Externas» sin cifra y «topado» con la API de hoy: llegan al desplegar.
+  - `tests/test_movil_frontend.py` sigue bajando Alpine del CDN: no hay copia
+    en el repo.
+
 ### Cómo se probó
 
 Cada fase, con una API local montada sobre el worktree (`docker run … -v

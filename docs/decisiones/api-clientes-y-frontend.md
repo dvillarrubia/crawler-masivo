@@ -825,3 +825,95 @@
    por debajo de la mitad y sus clases definidas; un solo ayudante de
    porcentaje).
 
+
+<a id="d202"></a>
+202. **Las cifras de errores cuentan páginas en todas partes, y Problemas pinta una fila por tipo con el desglose de gravedad**
+
+   **Problema.** La auditoría independiente del 27-oct encontró cifras que no
+   cuadraban entre vistas del mismo censo. La portada, la tabla y la gráfica
+   del Historial decían «Errores 85» (incidencias de gravedad error) y la
+   tarjeta del censo y el Estado del cliente «72 páginas con error» (V10). El
+   contador de la pestaña Problemas era 11.681, todas las incidencias con las
+   info (V16). Problemas sacaba dos filas por tipo («Canibalización por
+   búsqueda» 39 aviso y 157 info, V14). La barra lateral de URLs decía
+   «Indexables 3.407» (contaba PDF e imágenes) y la tarjeta «3.216» (3.4). Y
+   en «Qué arreglar primero» la barra medía la prioridad con las páginas al
+   lado: 10 páginas llenaban la barra y 358 casi no se veían.
+
+   **Decisión.**
+   - `CensoDeSerie` (portada y `/clients/{id}/serie`) lleva
+     `paginas_con_error`: páginas distintas con algún error, la misma consulta
+     que `/stats`. `errores` sigue siendo incidencias. La tendencia del panel
+     (`tendencias_de_clientes`) pasa a `urls_con_error` (y lo dice en
+     `metrica`); cada serie de la evolución lleva también
+     `tendencia_paginas_error`. La gráfica del Historial pinta
+     `urls_con_error` como «Páginas con error». El MCP devuelve
+     `paginas_con_error` y `tendencia_paginas_con_error`.
+   - Con una API anterior, la ficha del cliente saca las páginas de la
+     evolución (`urls_con_error` del mismo rastreo, la misma cuenta) y la
+     portada dice «errores (incidencias)» en la cabecera: no llama páginas a
+     lo que son incidencias.
+   - `/issues/resumen` lleva `paginas_tipo`: páginas distintas del tipo en
+     cualquier gravedad. La interfaz junta las filas de un tipo en una
+     (`filasPorTipo`) con la gravedad más alta y «39 aviso · 157 info»; las
+     páginas del tipo solo si están todas sus gravedades y la API las trae.
+     Sumar las de cada gravedad contaría dos veces la página que tenga las dos,
+     y eso no se afirma: sin el dato, la fila dice solo el desglose. Lo mismo
+     en el desplegable de problemas de URLs (cada tipo en el grupo de su
+     gravedad más alta) y en «Qué arreglar primero».
+   - El contador de la pestaña Problemas son los tipos de error o aviso (los
+     que hay que mirar), sin los info.
+   - «Páginas indexables» y «Páginas no indexables» de la barra de URLs
+     cuentan y abren las páginas HTML internas con 2xx, las de la tarjeta (que
+     abre «no indexables» y antes llevaba a una lista con las redirecciones y
+     los errores dentro).
+   - «Qué arreglar primero» es lo primero del Resumen, seguido de lo que ha
+     cambiado y de Google (el orden de la propuesta), con cinco filas como el
+     Estado del cliente y en la misma lista numerada: sin barra.
+
+   Tests: `tests/test_pulido_frontend.py` (filas por tipo, páginas que no se
+   suman, contador, cifras de páginas con su respaldo), `tests/test_stats_api.py`
+   (`paginas_tipo`), `tests/test_evolucion_api.py` (portada y serie con dos
+   errores en la misma página, tendencia de páginas).
+
+<a id="d203"></a>
+203. **El tipo del rastreo se elige al lanzarlo (prueba de serie sin perfil), y la portada dice «topado en N URLs»**
+
+   **Problema.** Un rastreo sin marcar contaba como censo salvo que el nombre
+   llevara una pista (`tipo_de_rastreo`), y el modal de lanzar no pedía tipo:
+   la portada podía juzgar a un cliente por una prueba (V12, UX-07). Un censo
+   que se paraba en su tope salía en la portada como si fuera el sitio entero.
+
+   **Decisión.** `JobCreate` acepta `tipo` (`censo`, `prueba`, `canario`) y
+   lo guarda; sin él, como antes (los scripts y las programaciones no lo
+   mandan). El modal Nuevo rastreo siempre lleva uno marcado y a la vista:
+   censo si hay perfil, prueba si no; «Lanzar canario» manda canario. Con una
+   API anterior, que ignora el campo, se marca después con el `PATCH` que ya
+   existía. `CensoDeSerie.topado` es el `max_urls` de la config si el rastreo
+   acabó por tope (`MOTIVOS_TRUNCADO`); sin tope en la config, `null` (no se
+   inventa la cifra), y la portada lo dice en naranja bajo la cifra de errores.
+
+   Lo que queda en datos y no en código: `lopesan-remedicion` tiene su prueba
+   sin marcar y sigue contando como censo hasta que alguien la marque.
+
+   Tests: `tests/test_clientes.py` (el tipo al crear),
+   `tests/test_evolucion_api.py` (topado con y sin tope),
+   `tests/test_pulido_frontend.py` (el tipo de serie del modal).
+
+<a id="d204"></a>
+204. **En la pestaña Alertas, las alertas iguales del cliente se agrupan en pantalla y las informativas van a «Cambios a favor»**
+
+   **Problema.** En Cerradas salían por separado «Páginas que ya no se
+   encuentran» y «se han alejado de la home» del 19 y del 21 oct (dos series,
+   la misma regla), y la de tipo info iba mezclada con el resto (V08, 1.12).
+
+   **Decisión.** Solo presentación: cada incidente sigue siendo suyo
+   (decisión 139). La interfaz agrupa por `clave` (`agruparIncidentes`): un
+   grupo con su gravedad más alta, el titular de la más reciente, «Vista en
+   los censos del 19 oct y del 21 oct», el detalle de cierre de cada una y un
+   botón «Ver las N páginas» (Comparar del último censo que la vio, con las
+   páginas que guarda la alerta). Marcar como vista, volver a abierta y
+   silenciar se aplican a todas las vivas del grupo. Las de gravedad info van
+   en una sección «Cambios a favor».
+
+   Tests: `tests/test_pulido_frontend.py` (agrupado, gravedad, info aparte).

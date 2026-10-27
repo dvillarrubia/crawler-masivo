@@ -1183,6 +1183,22 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   vuelve a ganar en los campos de texto (cron, GSC, Slack), las etiquetas de
   «Qué arreglar primero» caben en dos líneas y los `h5`/`h6` del markdown
   suben a 12 px. Solo frontend.
+- **Cierre de la fase 3 tras la auditoría del 27-oct** (decisiones 202, 203
+  y 204; en local, sin desplegar): las cifras de errores son páginas en la
+  portada, el Historial y su gráfica (la tarjeta decía 72 y la tabla 85);
+  Problemas, una fila por tipo con «39 aviso · 157 info» y las páginas del
+  tipo solo si se saben; el contador de Problemas son tipos de error o aviso;
+  «Indexables» de URLs cuenta lo mismo que la tarjeta; «Qué arreglar primero»
+  va primero, en cinco filas y sin barra que mida otra cosa. «No incluida en
+  el sitemap» sale como no concluyente en Problemas, la ficha y el panel, y
+  fuera de la diferencia con el censo anterior, mientras no se lean todos los
+  sitemaps. Tipo obligatorio al lanzar (prueba sin perfil) y «topado en N
+  URLs» en la portada. Alertas agrupadas por regla con «Ver las N páginas» y
+  las info en «Cambios a favor». Panel de URLs con «200 de 4.720» enlaces, los
+  problemas agrupados y en castellano; frases de Google con sus páginas;
+  Semántico que dice que no usa el Search Console del cliente y no deja
+  analizar sin clave; textos y números (V42); una API anterior ya no enseña
+  «Method Not Allowed» ni «undefined».
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 

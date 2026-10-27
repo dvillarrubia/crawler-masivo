@@ -198,6 +198,7 @@ def create_job(
         client_id=cliente.slug if cliente else payload.client_id,
         cliente_id=cliente.id if cliente else None,
         profile_id=perfil.id if perfil else None,
+        tipo=payload.tipo,
         status="pending",
         config=config,
     )

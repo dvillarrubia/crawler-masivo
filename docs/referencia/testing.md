@@ -482,6 +482,15 @@ rastreos, historial del cliente, Resumen y URLs; las listas sin cabecera de
 tabla y con sus etiquetas; el desplegable de vistas con sus cifras. A 1440 px,
 barra lateral, busqueda primero, URL fija y la tarjeta «Páginas HTML» con la
 misma cifra que su entrada.
+Cierre de la fase 3 (decisiones 202, 203 y 204): `test_pulido_frontend.py`
+(Chromium, `app.js` suelto: filas por tipo sin sumar paginas que no se saben,
+contador de Problemas, la diferencia sin «No incluida en el sitemap» dudosa,
+paginas con error con su respaldo de la evolucion, alertas agrupadas, frases de
+Google con sus paginas solo si el grupo es unico, «200 de 4.720», errores de una
+API anterior en castellano, el tipo de serie del modal y los textos de V42).
+`test_programaciones_perfil.py::test_el_worker_resuelve_la_config_igual_que_la_api`
+se salta, diciendolo, en una imagen de la API sin parsel (anterior a la decision
+104): no es un fallo del codigo, hay que reconstruir la imagen.
 Revision de UX del 25-oct, 3.3 y 3.6 (decisiones 197 y 198):
 `test_trafico_entre_censos.py` tambien junta en una frase la misma pagina de dos
 grupos (y no lo hace sin saber que son las mismas) y comprueba que `GET

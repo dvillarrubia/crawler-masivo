@@ -295,7 +295,8 @@ def _cifras_de_jobs(db: Session, ids: list[uuid.UUID]) -> dict:
     HTML internas con 2xx."""
     from shared.models import Issue, Url
 
-    cifras = {i: {"urls": 0, "paginas_html": 0, "indexables": 0, "errores": 0, "avisos": 0} for i in ids}
+    cifras = {i: {"urls": 0, "paginas_html": 0, "indexables": 0, "errores": 0, "avisos": 0,
+                  "paginas_con_error": 0} for i in ids}
     if not ids:
         return cifras
     # Las filas, no `total_urls_crawled`: en los reanudados antes de la
@@ -317,7 +318,26 @@ def _cifras_de_jobs(db: Session, ids: list[uuid.UUID]) -> dict:
         .group_by(Issue.job_id)
     ):
         cifras[jid].update(errores=err, avisos=avi)
+    # Paginas con error, la misma cuenta que /stats (decision 202): la
+    # columna «errores» de la portada y de la serie contaba incidencias.
+    for jid, pag in (
+        db.query(Issue.job_id, func.count(func.distinct(Issue.url_id)))
+        .filter(Issue.job_id.in_(ids), Issue.severity == "error")
+        .group_by(Issue.job_id)
+    ):
+        cifras[jid]["paginas_con_error"] = pag
     return cifras
+
+
+def _topado(j: Job) -> int | None:
+    """El tope de URLs si el rastreo se paro al llegar a el (decision 203).
+    Sin tope en la config no se inventa una cifra: None."""
+    from shared.comparacion import MOTIVOS_TRUNCADO
+
+    if (j.finish_reason or "") not in MOTIVOS_TRUNCADO:
+        return None
+    tope = (j.config or {}).get("max_urls") if isinstance(j.config, dict) else None
+    return int(tope) if isinstance(tope, (int, float)) and tope > 0 else None
 
 
 def _serie(db: Session, jobs: list[Job]) -> list[CensoDeSerie]:
@@ -337,6 +357,7 @@ def _serie(db: Session, jobs: list[Job]) -> list[CensoDeSerie]:
             comparado_con=(comp or {}).get("comparado_con"),
             fecha_anterior=(str((comp or {}).get("fecha_anterior"))
                             if (comp or {}).get("fecha_anterior") else None),
+            topado=_topado(j),
             **cifras[j.id],
         ))
     return salida

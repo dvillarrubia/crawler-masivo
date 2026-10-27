@@ -303,9 +303,11 @@ def test_al_lanzar_se_manda_solo_lo_de_este_rastreo():
         await a.lanzarCanario();
         return enviados;
     }""")
+    # Con perfil sale como censo; el canario, como canario (decision 203).
     assert r[0] == {"name": "n", "seeds": ["https://x.com/"], "config": {"render_js": True},
-                    "cliente_id": "c1", "profile_id": "p1"}
+                    "cliente_id": "c1", "profile_id": "p1", "tipo": "censo"}
     assert r[1]["config"] == {"render_js": True, "max_urls": 250}
+    assert r[1]["tipo"] == "canario"
     assert r[1]["name"].startswith("CANARY - ")
 
 

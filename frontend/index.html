@@ -671,7 +671,7 @@
           <div class="empty py-250 px-150">
             <h3 class="mb-50 fs-base">Todavía no hay clientes</h3>
             <p class="text-dim maxw-440px lh-150">
-              Los rastreos antiguos que tenian un ID de cliente escrito a mano se convierten en
+              Los rastreos antiguos que tenían un ID de cliente escrito a mano se convierten en
               clientes solos al desplegar. Para dar de alta uno nuevo, «Nuevo cliente».
             </p>
           </div>
@@ -703,8 +703,11 @@
                 <th class="ta-l">último censo</th>
                 <th class="ta-r">páginas</th>
                 <th class="ta-r">indexables</th>
-                <th class="ta-r">errores</th>
-                <th class="ta-l">tendencia de errores</th>
+                <!-- Con una API anterior (sin `paginas_con_error`) la columna son
+                     incidencias y la cabecera lo dice (decision 202). -->
+                <th class="ta-r" :title="panelSinPaginasError() ? 'Incidencias de gravedad error: esta versión del servidor no dice cuántas páginas' : 'Páginas con al menos un error: la misma cifra que la tarjeta del censo'"
+                    x-text="panelSinPaginasError() ? 'errores (incidencias)' : 'páginas con error'">páginas con error</th>
+                <th class="ta-l">tendencia</th>
                 <th class="ta-l" title="Alertas abiertas: las que saltaron y ningún rastreo posterior ha visto resueltas. Si no hay ninguna abierta, las que saltaron en el último censo">alertas</th>
               </tr></thead>
               <tbody>
@@ -732,12 +735,24 @@
                     <td class="solo-escritorio ta-r"
                         :class="p.ultimo && p.ultimo.paginas_html && p.ultimo.indexables / p.ultimo.paginas_html < .5 ? 'text-orange' : ''"
                         x-text="p.ultimo && p.ultimo.paginas_html ? Math.round(p.ultimo.indexables / p.ultimo.paginas_html * 100) + ' %' : '—'"></td>
-                    <td class="ta-r" data-label="Errores" :class="p.ultimo && p.ultimo.errores ? 'text-red' : ''"
-                        x-text="p.ultimo ? fmt.num(p.ultimo.errores) : '—'"></td>
+                    <!-- Paginas con error (decision 202): la portada decia «85» y la
+                         tarjeta del mismo censo «72 páginas con error». Con una API
+                         anterior, las incidencias, dicho en el title. -->
+                    <td class="ta-r" data-label="Páginas con error" :class="p.ultimo && (paginasConError(p.ultimo) ?? p.ultimo.errores) ? 'text-red' : ''">
+                      <template x-if="!p.ultimo"><span>—</span></template>
+                      <template x-if="p.ultimo && paginasConError(p.ultimo) != null"><span x-text="fmt.num(paginasConError(p.ultimo))"></span></template>
+                      <template x-if="p.ultimo && paginasConError(p.ultimo) == null">
+                        <span title="Incidencias de gravedad error: esta versión del servidor no dice cuántas páginas" x-text="fmt.num(p.ultimo.errores)"></span>
+                      </template>
+                      <!-- Un censo que paro en el tope no es el sitio entero (1.6;
+                           decision 203). -->
+                      <div class="text-sm orange" x-show="p.ultimo && p.ultimo.topado" data-testid="panel-topado"
+                           x-text="p.ultimo && p.ultimo.topado ? 'topado en ' + fmt.num(p.ultimo.topado) + ' URLs' : ''"></div>
+                    </td>
                     <td class="nowrap" data-label="Tendencia">
                       <template x-if="!p.evolucion || !p.evolucion.tendencia"><span class="text-dim text-sm">—</span></template>
                       <template x-if="p.evolucion && p.evolucion.tendencia">
-                        <span class="evo-tendencia" :title="'Serie «' + p.evolucion.serie + '». ' + ((textoTendencia(p.evolucion.tendencia) || {}).titulo || '')">
+                        <span class="evo-tendencia" :title="(p.evolucion.metrica === 'urls_con_error' ? 'Páginas con error' : 'Incidencias de error') + ', serie «' + p.evolucion.serie + '». ' + ((textoTendencia(p.evolucion.tendencia) || {}).titulo || '')">
                           <span x-html="sparkline(p.evolucion.valores, p.evolucion.cortes, { mejor: 'baja' })"></span>
                           <span class="delta" :class="(textoTendencia(p.evolucion.tendencia) || {}).clase"
                                 x-text="(textoTendencia(p.evolucion.tendencia) || {}).texto"></span>
@@ -943,7 +958,7 @@
                       <p class="google-frase" :class="c.nivel === 'dim' ? 'text-dim' : c.nivel" x-text="c.texto"></p>
                     </template>
                     <ul class="google-lista" x-show="bg.textos.length">
-                      <template x-for="(x, n) in bg.textos" :key="'t' + n"><li x-text="x"></li></template>
+                      <template x-for="(x, n) in bg.textos" :key="'t' + n"><li><span x-text="x"></span><!-- Sus paginas (3.3): solo si se sabe de que grupo sale la frase. --><template x-for="u in paginasDeFraseTrafico(x, bg.trafico)" :key="u"><span class="google-enlace-frase"> · <a href="#" class="informe-url" @click.prevent="abrirFichaDeCenso(estadoCliente.jobId, u)" :title="'Abrir la ficha de ' + u" x-text="rutaCorta(u)"></a></span></template></li></template>
                     </ul>
                     <div x-show="bg.inspeccion" class="google-frase" x-text="bg.inspeccion"></div>
                   </div>
@@ -967,14 +982,14 @@
                       <div class="text-dim text-sm">No hay errores ni avisos.</div>
                     </template>
                     <ol class="estado-problemas" x-show="estadoCliente && estadoCliente.principales && estadoCliente.principales.length">
-                      <template x-for="i in (estadoCliente && estadoCliente.principales) || []" :key="i.issue_type + i.severity">
+                      <template x-for="i in (estadoCliente && estadoCliente.principales) || []" :key="i.issue_type">
                         <li>
                           <span class="estado-sev" :style="'background:' + issueBarColor(i.severity)" :title="fmt.severity(i.severity)"></span>
-                          <a class="estado-problema" :href="'#/rastreos/' + ultimoCensoCliente().id + '/problemas?tipo=' + encodeURIComponent(i.issue_type) + '&gravedad=' + i.severity"
+                          <a class="estado-problema" :href="'#/rastreos/' + ultimoCensoCliente().id + '/problemas?tipo=' + encodeURIComponent(i.issue_type) + ((i.partes || []).length > 1 ? '' : '&gravedad=' + i.severity)"
                              x-text="fmt.issue(i.issue_type)"></a>
-                          <a class="text-sm estado-paginas" :href="'#/rastreos/' + ultimoCensoCliente().id + '/explorador?problema=' + encodeURIComponent(i.issue_type) + '&gravedad=' + i.severity"
+                          <a class="text-sm estado-paginas" :href="'#/rastreos/' + ultimoCensoCliente().id + '/explorador?problema=' + encodeURIComponent(i.issue_type) + ((i.partes || []).length > 1 ? '' : '&gravedad=' + i.severity)"
                              :title="'Ver las URLs con «' + fmt.issue(i.issue_type) + '» en el Explorador'"
-                             x-text="fmt.num(i.paginas) + (i.paginas === 1 ? ' página' : ' páginas')"></a>
+                             x-text="i.paginas != null ? fmt.n(i.paginas, 'página', 'páginas') : 'páginas: ' + desgloseGravedad(i)"></a>
                         </li>
                       </template>
                     </ol>
@@ -1193,8 +1208,8 @@
                     <th class="ta-r">URLs</th>
                     <th class="ta-r">páginas</th>
                     <th class="ta-r">indexables</th>
-                    <th class="ta-r">errores</th>
-                    <th class="ta-r">avisos</th>
+                    <th class="ta-r" :title="serieVisible().some(j => paginasConError(j) == null) ? 'Las filas sin la cifra de páginas (versión anterior del servidor) dicen las incidencias de error, con «incid.»' : 'Páginas con al menos un error: la misma cifra que la tarjeta del censo y la gráfica'">páginas con error</th>
+                    <th class="ta-r" title="Incidencias de gravedad aviso">avisos</th>
                     <th class="ta-l">frente al anterior</th>
                   </tr></thead>
                   <tbody>
@@ -1209,12 +1224,16 @@
                         <td class="solo-escritorio ta-r" x-text="fmt.num(j.urls)"></td>
                         <td class="ta-r" data-label="Páginas" x-text="fmt.num(j.paginas_html)"></td>
                         <td class="solo-escritorio ta-r" x-text="j.paginas_html ? Math.round(j.indexables / j.paginas_html * 100) + ' %' : '—'"></td>
-                        <td class="ta-r nowrap" data-label="Errores">
-                          <span x-text="fmt.num(j.errores)"></span>
-                          <template x-if="referenciaDe(j)">
-                            <span class="delta" :class="j.errores > referenciaDe(j).errores ? 'peor' : (j.errores < referenciaDe(j).errores ? 'mejor' : '')"
-                                  :title="'Frente al ' + fmt.dia(referenciaDe(j).created_at) + ': ' + fmt.num(referenciaDe(j).errores)"
-                                  x-text="j.errores === referenciaDe(j).errores ? '=' : (j.errores > referenciaDe(j).errores ? '▲' : '▼') + fmt.num(Math.abs(j.errores - referenciaDe(j).errores))"></span>
+                        <!-- Paginas con error (decision 202), como la grafica y la
+                             tarjeta; sin la cifra (API anterior), las incidencias. -->
+                        <td class="ta-r nowrap" data-label="Páginas con error"
+                            x-data="{ get v() { return (x => x != null ? x : null)(paginasConError(j)) }, get r() { const r = referenciaDe(j); return r ? (paginasConError(r) ?? (this.v == null ? r.errores : null)) : null } }">
+                          <span x-text="v != null ? fmt.num(v) : fmt.num(j.errores) + ' incid.'"
+                                :title="v != null ? '' : 'Incidencias de gravedad error: esta versión del servidor no dice cuántas páginas'"></span>
+                          <template x-if="r != null">
+                            <span class="delta" :class="(v ?? j.errores) > r ? 'peor' : ((v ?? j.errores) < r ? 'mejor' : '')"
+                                  :title="'Frente al ' + fmt.dia(referenciaDe(j).created_at) + ': ' + fmt.num(r)"
+                                  x-text="(v ?? j.errores) === r ? '=' : ((v ?? j.errores) > r ? '▲' : '▼') + fmt.num(Math.abs((v ?? j.errores) - r))"></span>
                           </template>
                         </td>
                         <td class="ta-r" data-label="Avisos" x-text="fmt.num(j.avisos)"></td>
@@ -1267,47 +1286,74 @@
                   <a href="#" x-show="incidentesVer === 'vivos'" @click.prevent="verAlertasCerradas()">Ver las cerradas</a>
                 </div>
               </template>
-              <ul class="incidentes" x-show="incidentes && incidentes.length">
-                <template x-for="i in incidentes || []" :key="i.id">
-                  <li :class="'sev-' + i.severidad">
-                    <div class="incidente-cabecera">
-                      <!-- La gravedad con su color y el estado en neutro (revision de
-                           UX del 25-oct, 1.12): «abierto» iba en el rojo de un
-                           rastreo fallido, y una buena noticia de tipo info parecia
-                           un fallo. -->
-                      <span class="badge" :style="'background:transparent;color:' + fmt.colorSeveridad(i.severidad) + ';border:1px solid ' + fmt.colorSeveridad(i.severidad)"
-                            x-text="({critical: 'Crítica', warning: 'Aviso', info: 'Info'})[i.severidad] || i.severidad"></span>
-                      <strong x-text="tituloIncidente(i)"></strong>
-                      <span class="text-sm text-dim" x-text="({abierto: 'abierto', visto: 'visto', cerrado: 'cerrado'})[i.estado] || i.estado"></span>
-                    </div>
-                    <div class="text-sm text-dim">
-                      <span x-text="i.nombre_serie || i.serie"></span>
-                      · desde el <a :href="'#/rastreos/' + i.abierto_job_id" x-show="i.abierto_job_id" x-text="fmt.dia(i.abierto_en)"></a><span x-show="!i.abierto_job_id" x-text="fmt.dia(i.abierto_en)"></span>
-                      <span x-show="i.veces > 1" x-text="'· en ' + i.veces + ' rastreos seguidos'"></span>
-                      <template x-if="i.cerrado_en && !i.motivo_cierre && i.cerrado_job_id">
-                        <span>· cerrado el <a :href="'#/rastreos/' + i.cerrado_job_id" x-text="fmt.dia(i.cerrado_en)"></a></span>
-                      </template>
-                      <!-- Cerrado sin rastreo (decision 188): se dice por que, y no que el fallo se fuera. -->
-                      <template x-if="i.cerrado_en && i.motivo_cierre">
-                        <span x-text="'· cerrado el ' + fmt.dia(i.cerrado_en) + ({serie_pausada: ': se pausó su programación', serie_borrada: ': se borró su programación o su perfil', serie_unida: ': su programación pasó a su perfil, que ya tenía esta alerta abierta'}[i.motivo_cierre] || '') + ' (no se comprobó si sigue)'"></span>
-                      </template>
-                      <!-- Cerrado por un rastreo que luego se borro: se sabe la fecha y nada mas. -->
-                      <template x-if="i.cerrado_en && !i.motivo_cierre && !i.cerrado_job_id">
-                        <span x-text="'· cerrado el ' + fmt.dia(i.cerrado_en)"></span>
-                      </template>
-                      <span x-show="i.silenciado_hasta && i.estado !== 'cerrado'" x-text="'· sin avisos hasta el ' + fmt.dia(i.silenciado_hasta)"></span>
-                    </div>
-                    <div class="flex gap-1 mt-1 flex-wrap" x-show="i.estado !== 'cerrado'">
-                      <button class="btn btn-sm" x-show="i.estado === 'abierto'" @click="cambiarIncidente(i, {estado: 'visto'})">Marcar como visto</button>
-                      <button class="btn btn-sm" x-show="i.estado === 'visto'" @click="cambiarIncidente(i, {estado: 'abierto'})">Volver a abierto</button>
-                      <label class="text-sm flex gap-30 items-center">Silenciar hasta
-                        <input type="date" :value="i.silenciado_hasta || ''" @change="cambiarIncidente(i, {silenciado_hasta: $event.target.value || null})">
-                      </label>
-                      <a class="btn btn-sm" x-show="i.ultimo_job_id" :href="'#/rastreos/' + i.ultimo_job_id">Último rastreo que lo vio</a>
-                    </div>
-                  </li>
-                </template>
-              </ul>
+              <!-- Agrupadas por regla y las info aparte (revision de UX del 25-oct,
+                   1.12; V08; decision 204). Ver agruparIncidentes. -->
+              <template x-for="seccion in [[false, ''], [true, 'Cambios a favor']]" :key="String(seccion[0])">
+                <div x-show="gruposIncidentes(seccion[0]).length">
+                  <h4 class="fs-sm mt-75 mb-25" x-show="seccion[1]" x-text="seccion[1]"></h4>
+                  <p class="text-sm text-dim mt-0 mb-50" x-show="seccion[0]">Alertas informativas: cambios que no piden arreglar nada.</p>
+                  <ul class="incidentes" :data-testid="seccion[0] ? 'incidentes-a-favor' : 'incidentes-grupos'">
+                    <template x-for="g in gruposIncidentes(seccion[0])" :key="g.clave">
+                      <li :class="'sev-' + g.severidad">
+                        <div class="incidente-cabecera">
+                          <!-- La gravedad con su color y el estado en neutro (1.12). -->
+                          <span class="badge" :style="'background:transparent;color:' + fmt.colorSeveridad(g.severidad) + ';border:1px solid ' + fmt.colorSeveridad(g.severidad)"
+                                x-text="({critical: 'Crítica', warning: 'Aviso', info: 'Info'})[g.severidad] || g.severidad"></span>
+                          <strong x-text="tituloIncidente(g.ultimo)"></strong>
+                          <span class="text-sm text-dim" x-text="g.estados.map(e => ({abierto: 'abierta', visto: 'vista', cerrado: 'cerrada'})[e] || e).join(' y ')"></span>
+                        </div>
+                        <!-- Varias: en que censos se vio, una vez (decision 204). -->
+                        <template x-if="g.items.length > 1">
+                          <div class="text-sm text-dim" data-testid="incidente-visto-en">
+                            <span>Vista en los censos del </span>
+                            <template x-for="(i, n) in g.items" :key="i.id">
+                              <span><span x-text="n === 0 ? '' : (n === g.items.length - 1 ? ' y del ' : ', del ')"></span><a :href="'#/rastreos/' + (i.abierto_job_id || i.ultimo_job_id)" x-show="i.abierto_job_id || i.ultimo_job_id" x-text="fmt.diaCorto(i.abierto_en)"></a><span x-show="!(i.abierto_job_id || i.ultimo_job_id)" x-text="fmt.diaCorto(i.abierto_en)"></span></span>
+                            </template>
+                            <span x-text="g.series.length > 1 ? ' · en ' + g.series.join(' y ') : (g.series.length ? ' · ' + g.series[0] : '')"></span>
+                          </div>
+                        </template>
+                        <template x-for="i in g.items" :key="'d' + i.id">
+                          <div class="text-sm text-dim">
+                            <span x-show="g.items.length === 1" x-text="i.nombre_serie || i.serie"></span>
+                            <span x-show="g.items.length > 1" x-text="'La del ' + fmt.diaCorto(i.abierto_en)"></span>
+                            <span x-show="g.items.length === 1">· desde el <a :href="'#/rastreos/' + i.abierto_job_id" x-show="i.abierto_job_id" x-text="fmt.dia(i.abierto_en)"></a><span x-show="!i.abierto_job_id" x-text="fmt.dia(i.abierto_en)"></span></span>
+                            <span x-show="i.veces > 1" x-text="'· en ' + i.veces + ' rastreos seguidos'"></span>
+                            <template x-if="i.cerrado_en && !i.motivo_cierre && i.cerrado_job_id">
+                              <span>· cerrada el <a :href="'#/rastreos/' + i.cerrado_job_id" x-text="fmt.dia(i.cerrado_en)"></a></span>
+                            </template>
+                            <!-- Cerrada sin rastreo (decision 188): se dice por que, y no que el fallo se fuera. -->
+                            <template x-if="i.cerrado_en && i.motivo_cierre">
+                              <span x-text="'· cerrada el ' + fmt.dia(i.cerrado_en) + ({serie_pausada: ': se pausó su programación', serie_borrada: ': se borró su programación o su perfil', serie_unida: ': su programación pasó a su perfil, que ya tenía esta alerta abierta'}[i.motivo_cierre] || '') + ' (no se comprobó si sigue)'"></span>
+                            </template>
+                            <!-- Cerrada por un rastreo que luego se borro: se sabe la fecha y nada mas. -->
+                            <template x-if="i.cerrado_en && !i.motivo_cierre && !i.cerrado_job_id">
+                              <span x-text="'· cerrada el ' + fmt.dia(i.cerrado_en)"></span>
+                            </template>
+                            <span x-show="i.estado !== 'cerrado' && g.items.length > 1" x-text="'· ' + (({abierto: 'abierta', visto: 'vista'})[i.estado] || i.estado)"></span>
+                            <span x-show="i.silenciado_hasta && i.estado !== 'cerrado'" x-text="'· sin avisos hasta el ' + fmt.dia(i.silenciado_hasta)"></span>
+                          </div>
+                        </template>
+                        <div class="flex gap-1 mt-1 flex-wrap">
+                          <!-- Las paginas de la ultima vez que salto, en Comparar de ese censo. -->
+                          <a class="btn btn-sm" data-testid="incidente-ver-paginas" x-show="(g.ultimo.detalle || {}).paginas != null && g.ultimo.ultimo_job_id"
+                             :href="'#/rastreos/' + g.ultimo.ultimo_job_id + '/comparar'"
+                             x-text="(n => n === 1 ? 'Ver la página' : 'Ver las ' + fmt.num(n) + ' páginas')((g.ultimo.detalle || {}).paginas)"></a>
+                          <template x-if="g.estados.some(e => e !== 'cerrado')">
+                            <div class="flex gap-1 flex-wrap items-center">
+                              <button class="btn btn-sm" x-show="g.estados.includes('abierto')" @click="cambiarGrupoIncidentes(g, {estado: 'visto'}, 'abierto')">Marcar como vista</button>
+                              <button class="btn btn-sm" x-show="g.estados.includes('visto') && !g.estados.includes('abierto')" @click="cambiarGrupoIncidentes(g, {estado: 'abierto'}, 'visto')">Volver a abierta</button>
+                              <label class="text-sm flex gap-30 items-center">Silenciar hasta
+                                <input type="date" :value="(g.items.find(i => i.estado !== 'cerrado') || {}).silenciado_hasta || ''" @change="cambiarGrupoIncidentes(g, {silenciado_hasta: $event.target.value || null})">
+                              </label>
+                              <a class="btn btn-sm" x-show="g.ultimo.ultimo_job_id" :href="'#/rastreos/' + g.ultimo.ultimo_job_id">Último rastreo que la vio</a>
+                            </div>
+                          </template>
+                        </div>
+                      </li>
+                    </template>
+                  </ul>
+                </div>
+              </template>
             </div>
           </div>
         </template>
@@ -1864,7 +1910,10 @@
                 <template x-if="reglasForm">
                   <div>
                     <div class="card mb-2 text-sm">
-                      <span x-show="!reglasCliente.guardadas">Este cliente usa las <strong>reglas de serie</strong>. Cualquier cambio que guardes vale para los rastreos que terminen desde ese momento.</span>
+                      <!-- Lo de serie incluye reglas por cifras (shared/reglas.py): salia «usa
+                           las reglas de serie» y debajo «Reglas del cliente» con dos, y
+                           no se sabia si eran suyas (revision del 27-oct). -->
+                      <span x-show="!reglasCliente.guardadas">Este cliente usa las <strong>reglas de serie</strong>: las de los cambios frente al rastreo anterior y <span x-text="fmt.n(((reglasCliente.de_serie || {}).propias || []).length, 'regla', 'reglas')"></span> por cifras que trae todo cliente. Cualquier cambio que guardes pasa a ser de este cliente y vale para los rastreos que terminen desde ese momento.</span>
                       <span x-show="reglasCliente.guardadas">Este cliente tiene <strong>reglas propias</strong> sobre las de serie.</span>
                       Las alertas salen arriba en la ficha de cada rastreo; las marcadas «avisar» se mandan además por el webhook de avisos.
                     </div>
@@ -1872,8 +1921,9 @@
                     <!-- Reglas propias -->
                     <div class="card mb-2">
                       <div class="card-header">
-                        <h2>Reglas del cliente</h2>
-                        <button class="btn btn-sm" @click="reglaNueva()" data-testid="regla-nueva">
+                        <h2>Reglas por cifras</h2>
+                        <span class="text-sm text-dim ml-50" data-testid="reglas-origen" x-text="reglasCliente.guardadas ? 'de este cliente' : 'de serie, sin cambios'"></span>
+                        <button class="btn btn-sm ml-auto" @click="reglaNueva()" data-testid="regla-nueva">
                           <i data-lucide="plus" class="ico-14"></i> Nueva regla</button>
                       </div>
                       <div class="text-dim text-sm mb-2">Una cifra del rastreo, opcionalmente en un segmento, contra un umbral. Por ejemplo: «URLs 4xx en fichas: el valor &gt; 20». Las de cambio comparan con el censo anterior y no se evalúan si no es comparable (truncado, otro alcance o detrás de un muro).</div>
@@ -2025,7 +2075,7 @@
                       <template x-for="r in resumenes" :key="r.id">
                         <details class="borde-t py-40 px-0">
                           <summary class="text-sm pointer">
-                            <span x-text="'Semana hasta el ' + r.semana"></span>
+                            <span x-text="'Semana hasta el ' + fmt.dia(r.semana + 'T12:00:00')"></span>
                             <span class="text-dim" x-text="r.enviado ? ' · enviado' : ' · no enviado'"></span>
                           </summary>
                           <pre class="pre-wrap fs-sm my-30 mx-0" x-text="r.texto"></pre>
@@ -2714,11 +2764,13 @@
             </button>
             <button class="stat-card stat-link" @click="openExplorer(); setExplorerTab('noindex')"
                     data-tip="Páginas HTML que el buscador puede indexar; el resto lleva noindex, canonical a otra URL o similar">
-              <div class="stat-value" :class="stats.paginas_html && stats.indexables / stats.paginas_html < .5 ? 'orange' : 'green'"
-                   x-text="fmt.num(stats.indexables)"></div>
+              <!-- Sin analizar no hay indexabilidad calculada: «—» y «sin analizar
+                   todavía», como la tarjeta de errores; no «0 indexables · 0 %». -->
+              <div class="stat-value" :class="!job.analisis_version ? 'c-text-dim' : (stats.paginas_html && stats.indexables / stats.paginas_html < .5 ? 'orange' : 'green')"
+                   data-testid="tarjeta-indexables" x-text="job.analisis_version ? fmt.num(stats.indexables) : '—'"></div>
               <div class="stat-label">Indexables</div>
-              <div class="stat-sub" x-show="stats.paginas_html"
-                   x-text="Math.round(stats.indexables / Math.max(1, stats.paginas_html) * 100) + ' % · ' + fmt.num(stats.no_indexables) + ' no indexables'"></div>
+              <div class="stat-sub" x-show="stats.paginas_html || !job.analisis_version"
+                   x-text="!job.analisis_version ? 'sin analizar todavía' : Math.round(stats.indexables / Math.max(1, stats.paginas_html) * 100) + ' % · ' + fmt.num(stats.no_indexables) + ' no indexables'"></div>
             </button>
             <!-- En paginas y no en incidencias (revision de UX del 25-oct, 1.11):
                  «11.681 incidencias en total» sumaba tambien las info y no
@@ -2771,13 +2823,17 @@
             <i data-lucide="table-2" class="ico-14"></i> URLs
             <span class="count" x-text="stats ? fmt.num(stats.total_urls) : ''"></span>
           </button>
-          <button class="tab" role="tab" :aria-selected="pestanaActiva('issues')" :class="pestanaActiva('issues') && 'active'" @click="switchTab('issues')">
-            <i data-lucide="alert-triangle" class="ico-14"></i> Problemas <span class="count" x-text="(n => n ? fmt.num(n) : '')(stats ? stats.issues_by_type.reduce((a,i) => a + i.count, 0) : 0)"></span>
+          <!-- El contador son tipos de error o aviso, los que hay que mirar, sin
+               los info (revision de UX del 25-oct, 1.11; V16; decision 202):
+               «11.681» eran todas las incidencias, info incluidas. -->
+          <button class="tab" role="tab" :aria-selected="pestanaActiva('issues')" :class="pestanaActiva('issues') && 'active'" @click="switchTab('issues')"
+                  :data-tip="stats && job.analisis_version ? (n => fmt.n(n, 'tipo', 'tipos') + ' de error o aviso, sin contar los informativos')(tiposQueMirar(stats)) : null">
+            <i data-lucide="alert-triangle" class="ico-14"></i> Problemas <span class="count" data-testid="contador-problemas" x-text="(n => n ? fmt.num(n) : '')(stats && job.analisis_version ? tiposQueMirar(stats) : 0)"></span>
           </button>
           <button class="tab" role="tab" :aria-selected="pestanaActiva('links')" :class="pestanaActiva('links') && 'active'" @click="switchTab('links')">
             <i data-lucide="share-2" class="ico-14"></i> Enlaces<!-- Sin cifra: cambiaba con la vista y los filtros (destinos o enlaces) y no decia de que (2.8). -->
           </button>
-          <button class="tab" role="tab" :aria-selected="pestanaActiva('diff')" :class="pestanaActiva('diff') && 'active'" @click="switchTab('diff')" data-tip="Que ha cambiado respecto a otro rastreo del mismo sitio">
+          <button class="tab" role="tab" :aria-selected="pestanaActiva('diff')" :class="pestanaActiva('diff') && 'active'" @click="switchTab('diff')" data-tip="Qué ha cambiado respecto a otro rastreo del mismo sitio">
             <i data-lucide="git-compare" class="ico-14"></i> Comparar
           </button>
           <button class="tab" role="tab" :aria-selected="pestanaActiva('insights')" :class="pestanaActiva('insights') && 'active'" @click="switchTab('insights')" data-tip="Puntuación SEO por categorías, con recomendaciones. El entregable es «Informe para el cliente», arriba">
@@ -2833,6 +2889,75 @@
              censo de la comparacion automatica). Encima
              de las pestanas quedan la cabecera, los avisos criticos y las
              tarjetas. -->
+        <!-- «Que arreglar primero», lo primero del Resumen (revision de UX del
+             25-oct, fase 3; decision 202): los cinco primeros de Problemas por
+             prioridad, una fila por tipo, en lista numerada como el Estado del
+             cliente. Era una barra que media la prioridad con el numero de
+             paginas al lado: 10 paginas llenaban la barra y 358 casi no se veian. -->
+        <template x-if="detailTab === 'overview' && stats">
+          <div class="card mb-2" x-init="cargarPrincipales()" data-testid="que-arreglar-primero">
+            <div class="card-header"><h2>Qué arreglar primero</h2>
+              <a :href="'#/rastreos/' + job.id + '/problemas'" class="text-sm">Ver todos</a></div>
+            <div class="text-dim text-sm mt-n30 mb-60 mx-0">Los cinco primeros de Problemas por prioridad (gravedad × importancia de las páginas), sin los de tipo info, con las páginas afectadas.</div>
+            <template x-if="!principales || (principales.filas === null && !principales.error)">
+              <div class="text-dim text-sm">Cargando…</div>
+            </template>
+            <template x-if="principales && principales.error">
+              <div class="text-sm orange">No se pudieron cargar: <span x-text="principales.error"></span>
+                <button class="btn btn-sm" @click="principales = null; cargarPrincipales()">Reintentar</button></div>
+            </template>
+            <template x-if="principales && principales.filas && principales.filas.length === 0">
+              <div class="text-dim text-sm">No hay errores ni avisos.</div>
+            </template>
+            <ol class="estado-problemas" x-show="principales && principales.filas && principales.filas.length">
+              <template x-for="i in (principales && principales.filas) || []" :key="i.issue_type">
+                <li>
+                  <span class="estado-sev" :style="'background:' + issueBarColor(i.severity)" :title="fmt.severity(i.severity)"></span>
+                  <a class="estado-problema" href="#" @click.prevent="verTipoDeIncidencia(i.issue_type, (i.partes || []).length > 1 ? '' : i.severity); switchTab('issues')"
+                     x-text="fmt.issue(i.issue_type)"></a>
+                  <a class="text-sm estado-paginas" href="#" @click.prevent="verProblemaEnExplorador(i.issue_type)"
+                     :title="'Ver las URLs con «' + fmt.issue(i.issue_type) + '»'"
+                     x-text="i.paginas != null ? fmt.n(i.paginas, 'página', 'páginas') : 'páginas: ' + desgloseGravedad(i)"></a>
+                </li>
+              </template>
+            </ol>
+          </div>
+        </template>
+        <!-- Solo en el Resumen: en Comparar las alertas guardadas ya salen al
+             instante en el resultado (V21) y se veian dos veces. -->
+        <template x-if="job.comparacion && (job.comparacion.alertas || []).length && detailTab === 'overview'">
+          <div class="card mb-2"
+               :style="'border-left:3px solid ' + fmt.colorSeveridad(job.comparacion.alertas[0].severidad)">
+            <div class="text-sm">
+              <strong>Ha cambiado algo respecto al rastreo anterior.</strong>
+              Comparado con <span x-text="job.comparacion.nombre_anterior"></span><!-- La fecha solo si el nombre no la lleva: salia «· 2026-10-14 (2026-10-14)» (3.6, V20). --><span x-show="!(job.comparacion.nombre_anterior || '').includes((job.comparacion.fecha_anterior || '').slice(0,10))" x-text="' (' + fmt.dia(job.comparacion.fecha_anterior) + ')'"></span>.
+            </div>
+            <template x-for="al in job.comparacion.alertas" :key="al.regla + (al.extraccion || '')">
+              <div :style="'margin-top:.5rem;padding-left:.6rem;border-left:2px solid '
+                            + fmt.colorSeveridad(al.severidad)">
+                <div class="fila-extremos">
+                  <strong x-text="fmt.tituloAlerta(al)"></strong>
+                  <span class="nowrap cifras-tab">
+                    <strong x-text="fmt.num(al.paginas)"></strong>
+                    <span class="text-dim" x-text="' de ' + fmt.num(al.de) + ' · ' + fmt.pct(al.pct)"></span>
+                  </span>
+                </div>
+                <!-- Sobre que se cuenta cada cifra (revision de UX del 25-oct,
+                     3.6; V20): «1.013 de 3.153» no decia de que 3.153. -->
+                <div class="text-dim fs-sm" x-show="baseAlerta(al)" x-text="baseAlerta(al)"></div>
+                <div class="text-sm" x-text="al.que_decide_google"></div>
+                <div class="text-dim fs-sm" x-show="fmt.detalleAlerta(al)" x-text="fmt.detalleAlerta(al)"></div>
+                <!-- Por segmento de negocio (decision 127): «el 100 % de las
+                     fichas» dice que mirar; la forma de la ruta, no. -->
+                <div class="text-dim fs-sm" x-show="(al.segmentos || []).length"
+                     x-text="(al.segmentos || []).slice(0,3).map(sg => sg.segmento + ' ' + fmt.num(sg.paginas) + '/' + fmt.num(sg.de) + ' = ' + fmt.num(sg.pct) + ' %').join(' · ')"></div>
+              </div>
+            </template>
+            <div class="text-dim fs-sm mt-50" x-show="detailTab !== 'diff'">
+              Las páginas de cada una, con ejemplos y plantillas: <a href="#" @click.prevent="switchTab('diff')">ver el detalle en Comparar</a>.
+            </div>
+          </div>
+        </template>
         <!-- Bloque «Google» (revision de UX del 25-oct, 3.3; V46): en el
              Resumen, las tres cifras de Search Console con la fecha de su
              ventana, la frase del trafico frente al censo anterior y las
@@ -2857,7 +2982,7 @@
               <p class="google-frase" :class="c.nivel === 'dim' ? 'text-dim' : c.nivel" x-text="c.texto" data-testid="google-conclusion"></p>
             </template>
             <ul class="google-lista" x-show="bg.textos.length">
-              <template x-for="(x, n) in bg.textos" :key="'t' + n"><li x-text="x"></li></template>
+              <template x-for="(x, n) in bg.textos" :key="'t' + n"><li><span x-text="x"></span><!-- Sus paginas (3.3): solo si se sabe de que grupo sale la frase. --><template x-for="u in paginasDeFraseTrafico(x, bg.trafico)" :key="u"><span class="google-enlace-frase"> · <a href="#" class="informe-url" @click.prevent="abrirFichaPorUrl(u)" :title="'Abrir la ficha de ' + u" x-text="rutaCorta(u)"></a></span></template></li></template>
             </ul>
             <template x-if="bg.paginas.length">
               <details class="google-paginas" data-testid="google-paginas">
@@ -2951,41 +3076,6 @@
             </template>
           </div>
           </template>
-          </div>
-        </template>
-        <!-- Solo en el Resumen: en Comparar las alertas guardadas ya salen al
-             instante en el resultado (V21) y se veian dos veces. -->
-        <template x-if="job.comparacion && (job.comparacion.alertas || []).length && detailTab === 'overview'">
-          <div class="card mb-2"
-               :style="'border-left:3px solid ' + fmt.colorSeveridad(job.comparacion.alertas[0].severidad)">
-            <div class="text-sm">
-              <strong>Ha cambiado algo respecto al rastreo anterior.</strong>
-              Comparado con <span x-text="job.comparacion.nombre_anterior"></span><!-- La fecha solo si el nombre no la lleva: salia «· 2026-10-14 (2026-10-14)» (3.6, V20). --><span x-show="!(job.comparacion.nombre_anterior || '').includes((job.comparacion.fecha_anterior || '').slice(0,10))" x-text="' (' + fmt.dia(job.comparacion.fecha_anterior) + ')'"></span>.
-            </div>
-            <template x-for="al in job.comparacion.alertas" :key="al.regla + (al.extraccion || '')">
-              <div :style="'margin-top:.5rem;padding-left:.6rem;border-left:2px solid '
-                            + fmt.colorSeveridad(al.severidad)">
-                <div class="fila-extremos">
-                  <strong x-text="fmt.tituloAlerta(al)"></strong>
-                  <span class="nowrap cifras-tab">
-                    <strong x-text="fmt.num(al.paginas)"></strong>
-                    <span class="text-dim" x-text="' de ' + fmt.num(al.de) + ' · ' + fmt.pct(al.pct)"></span>
-                  </span>
-                </div>
-                <!-- Sobre que se cuenta cada cifra (revision de UX del 25-oct,
-                     3.6; V20): «1.013 de 3.153» no decia de que 3.153. -->
-                <div class="text-dim fs-sm" x-show="baseAlerta(al)" x-text="baseAlerta(al)"></div>
-                <div class="text-sm" x-text="al.que_decide_google"></div>
-                <div class="text-dim fs-sm" x-show="fmt.detalleAlerta(al)" x-text="fmt.detalleAlerta(al)"></div>
-                <!-- Por segmento de negocio (decision 127): «el 100 % de las
-                     fichas» dice que mirar; la forma de la ruta, no. -->
-                <div class="text-dim fs-sm" x-show="(al.segmentos || []).length"
-                     x-text="(al.segmentos || []).slice(0,3).map(sg => sg.segmento + ' ' + fmt.num(sg.paginas) + '/' + fmt.num(sg.de) + ' = ' + fmt.num(sg.pct) + ' %').join(' · ')"></div>
-              </div>
-            </template>
-            <div class="text-dim fs-sm mt-50" x-show="detailTab !== 'diff'">
-              Las páginas de cada una, con ejemplos y plantillas: <a href="#" @click.prevent="switchTab('diff')">ver el detalle en Comparar</a>.
-            </div>
           </div>
         </template>
         <!-- Extraccion a medida (decision 104): una linea por regla con lo
@@ -3794,13 +3884,13 @@
                                     x-text="' · ' + fmt.severity(t.severidad)"></span>
                             </td>
                             <td class="ta-r c-green"
-                                x-text="t.resueltas || ''"></td>
+                                x-text="t.resueltas ? fmt.num(t.resueltas) : ''"></td>
                             <td class="ta-r c-red"
-                                x-text="t.nuevas || ''"></td>
+                                x-text="t.nuevas ? fmt.num(t.nuevas) : ''"></td>
                             <td class="text-dim ta-r" x-show="d.incidencias.nuevas.en_url_existente"
                                 x-text="t.nuevas && nuevasPorUrl(t.tipo, d) ? nuevasPorUrl(t.tipo, d).existente + ' / ' + nuevasPorUrl(t.tipo, d).nueva : ''"></td>
                             <td class="text-dim ta-r"
-                                x-text="t.siguen || ''"></td>
+                                x-text="t.siguen ? fmt.num(t.siguen) : ''"></td>
                           </tr>
                         </template>
                       </tbody>
@@ -3884,35 +3974,6 @@
                       <div class="bar-fill" :style="'width:' + (s.count / maxStatusCount() * 100) + '%;background:' + barColor(s.status_group)"></div>
                     </div>
                     <div class="bar-count" x-text="fmt.num(s.count)"></div>
-                  </div>
-                </template>
-              </div>
-            </div>
-
-            <div class="card" x-init="cargarPrincipales()" data-testid="que-arreglar-primero">
-              <div class="card-header"><h2>Qué arreglar primero</h2>
-                <a :href="'#/rastreos/' + job.id + '/problemas'" class="text-sm">Ver todos</a></div>
-              <div class="text-dim text-sm mt-n30 mb-60 mx-0">Páginas afectadas, por prioridad (gravedad × importancia de las páginas), como en Problemas; sin los de tipo info.</div>
-              <template x-if="!principales || (principales.filas === null && !principales.error)">
-                <div class="text-dim text-sm">Cargando…</div>
-              </template>
-              <template x-if="principales && principales.error">
-                <div class="text-sm orange">No se pudieron cargar: <span x-text="principales.error"></span>
-                  <button class="btn btn-sm" @click="principales = null; cargarPrincipales()">Reintentar</button></div>
-              </template>
-              <template x-if="principales && principales.filas && principales.filas.length === 0">
-                <div class="text-dim text-sm">No hay errores ni avisos.</div>
-              </template>
-              <div class="bar-chart">
-                <template x-for="i in (principales && principales.filas) || []" :key="i.issue_type + i.severity">
-                  <div class="bar-row bar-row-link" role="link" tabindex="0" :title="'Ver ' + fmt.issue(i.issue_type)"
-                       @click="verTipoDeIncidencia(i.issue_type, i.severity); switchTab('issues')"
-                       @keydown.enter="verTipoDeIncidencia(i.issue_type, i.severity); switchTab('issues')">
-                    <div class="bar-label" :title="fmt.issue(i.issue_type) + ' · ' + fmt.severity(i.severity)" x-text="fmt.issue(i.issue_type)"></div>
-                    <div class="bar-track">
-                      <div class="bar-fill" :style="'width:' + Math.max(2, (i.prioridad || 0) / Math.max(1e-9, principales.filas[0].prioridad || 0) * 100) + '%;background:' + issueBarColor(i.severity)"></div>
-                    </div>
-                    <div class="bar-count" x-text="fmt.num(i.paginas)"></div>
                   </div>
                 </template>
               </div>
@@ -4078,7 +4139,11 @@
             <template x-if="filasTls(job)">
               <div class="card chk" data-testid="tarjeta-tls">
                 <div class="card-header"><h2>Certificado TLS</h2>
-                  <span class="text-sm text-dim" x-text="'el día del rastreo · aviso a ' + ((job.config.analysis_thresholds || {}).tls_dias_aviso || 7) + ' días'"></span></div>
+                  <!-- Dos umbrales distintos, dichos los dos: aqui sale en naranja a 30
+                       dias o menos (1.16) y el analisis abre el aviso en Problemas a
+                       los de la config (7 de serie). Antes solo decia «aviso a 7
+                       días» y pintaba en naranja a 14 (revision del 27-oct). -->
+                  <span class="text-sm text-dim" data-testid="tls-umbrales" x-text="'el día del rastreo · en naranja a 30 días o menos; aviso en Problemas a ' + fmt.n((job.config.analysis_thresholds || {}).tls_dias_aviso || 7, 'día', 'días')"></span></div>
                 <div class="table-wrap"><table class="tbl fs-sm">
                   <thead><tr><th>Host</th><th>Estado</th><th>Emisor</th><th>Caduca</th><th>Días</th><th>Versión</th></tr></thead>
                   <tbody>
@@ -4298,7 +4363,7 @@
                   </template>
                 </div>
                 <div><span class="text-dim">Prof. máxima:</span> <span x-text="job.config?.max_depth"></span></div>
-                <div><span class="text-dim">Max URLs:</span> <span x-text="fmt.num(job.config?.max_urls)"></span></div>
+                <div><span class="text-dim">Máximo de URLs:</span> <span x-text="job.config?.max_urls ? fmt.num(job.config.max_urls) : 'sin tope'"></span></div>
                 <div><span class="text-dim">Concurrencia:</span> <span x-text="job.config?.concurrent_requests"></span></div>
                 <div><span class="text-dim">Por dominio:</span> <span x-text="job.config?.concurrent_requests_per_domain"></span></div>
                 <div><span class="text-dim">Seguir externos:</span> <span x-text="job.config?.follow_external ? 'Sí' : 'No'"></span></div>
@@ -4427,8 +4492,19 @@
                       <span class="text-dim" x-text="(ISSUE_INFO[r.issue_type] || {}).que || ''"></span>
                     </span>
                     <span class="issue-group-count">
-                      <strong x-text="fmt.num(cuentaDeTipo(r).n)"></strong> <span x-text="cuentaDeTipo(r).unidad"></span>
+                      <!-- Una fila por tipo (decision 202): con varias gravedades, las
+                           paginas distintas si la API las da y el desglose al lado. -->
+                      <template x-if="cuentaDeTipo(r).n != null">
+                        <span><strong x-text="fmt.num(cuentaDeTipo(r).n)"></strong> <span x-text="cuentaDeTipo(r).unidad"></span></span>
+                      </template>
+                      <span x-show="(r.partes || []).length > 1" data-testid="problema-desglose"
+                            :class="cuentaDeTipo(r).n != null && 'text-dim'"
+                            x-text="cuentaDeTipo(r).n != null ? '· ' + desgloseGravedad(r) : 'páginas: ' + desgloseGravedad(r)"></span>
                       <span class="text-dim" x-show="r.incidencias !== r.paginas && !cuentaDeTipo(r).propia" x-text="'· ' + fmt.n(r.incidencias, 'incidencia', 'incidencias')"></span>
+                      <!-- Sin leer todos los sitemaps, «no incluida» no se afirma
+                           tampoco en la fila (V13; revision de UX del 25-oct, 3.6). -->
+                      <span class="orange" x-show="r.issue_type === 'not_in_sitemap' && dudaSitemaps(job)" :title="dudaSitemaps(job)"
+                            data-testid="problema-no-concluyente">· no concluyente</span>
                       <span class="text-dim" x-show="r.pct_paginas != null" x-text="'· ' + fmt.num(r.pct_paginas) + ' % de ' + fmt.num(r.urls_denominador) + ' URLs del segmento'"></span>
                       <!-- Un tipo que solo tiene incidencias de un hallazgo para muchas
                            paginas no se puede repartir: sale con 0 y lo dice, no desaparece. -->
@@ -4459,9 +4535,12 @@
                         <dt>Cómo se arregla</dt><dd x-text="ISSUE_INFO[r.issue_type].arreglo"></dd>
                       </dl>
                     </template>
+                    <template x-if="r.issue_type === 'not_in_sitemap' && dudaSitemaps(job)">
+                      <div class="text-sm orange" x-text="dudaSitemaps(job)"></div>
+                    </template>
                     <template x-if="seccionesNegocio() && r.por_segmento && r.por_segmento.length && !issuesSegmento">
                       <div class="issue-segmentos">
-                        <div class="text-sm text-dim mt-50 mb-25 mx-0">Por sección · páginas afectadas sobre las URLs de la sección</div>
+                        <div class="text-sm text-dim mt-50 mb-25 mx-0" x-text="'Por sección · páginas afectadas sobre las URLs de la sección' + ((r.partes || []).length > 1 ? ' (solo las de gravedad «' + fmt.severity(r.severity).toLowerCase() + '»)' : '')"></div>
                         <ul>
                           <template x-for="p in repartoNegocio(r).dentro" :key="p.segmento">
                             <li>
@@ -4480,7 +4559,7 @@
                     </template>
                     <template x-if="!seccionesNegocio() && r.por_segmento && r.por_segmento.length && !issuesSegmento">
                       <div class="issue-segmentos">
-                        <div class="text-sm text-dim mt-50 mb-25 mx-0">Por segmento · páginas afectadas sobre las URLs del segmento</div>
+                        <div class="text-sm text-dim mt-50 mb-25 mx-0" x-text="'Por segmento · páginas afectadas sobre las URLs del segmento' + ((r.partes || []).length > 1 ? ' (solo las de gravedad «' + fmt.severity(r.severity).toLowerCase() + '»)' : '')"></div>
                         <ul>
                           <template x-for="p in r.por_segmento" :key="p.segmento">
                             <li>
@@ -4521,14 +4600,15 @@
                       </template>
                     </ul>
                     <div class="flex gap-1 mt-1 flex-wrap" x-show="r.incidencias > 0">
-                      <button class="btn btn-sm" @click="verTipoDeIncidencia(r.issue_type, r.severity)">
+                      <button class="btn btn-sm" @click="verTipoDeIncidencia(r.issue_type, (r.partes || []).length > 1 ? '' : r.severity)">
                         <span x-text="r.incidencias === 1 ? 'Ver la incidencia' : 'Ver las ' + fmt.num(r.incidencias) + ' incidencias'"></span>
                       </button>
                       <!-- Las paginas afectadas con todas sus columnas, filtrables y
-                           exportables (docs/INVESTIGACION_EXPLORADOR.md). -->
-                      <button class="btn btn-sm" @click="verProblemaEnExplorador(r.issue_type)" x-show="r.issue_type !== 'soft_404_plantilla' && r.paginas > 0">
+                           exportables (docs/INVESTIGACION_EXPLORADOR.md). Sin la
+                           cifra de paginas distintas, sin numero (decision 202). -->
+                      <button class="btn btn-sm" @click="verProblemaEnExplorador(r.issue_type)" x-show="r.issue_type !== 'soft_404_plantilla' && (r.paginas > 0 || (r.paginas == null && (r.partes || []).length > 1))">
                         <i data-lucide="table-2" class="ico-13"></i>
-                        <span x-text="r.paginas === 1 ? 'Ver la página en URLs' : 'Ver las ' + fmt.num(r.paginas) + ' páginas en URLs'"></span>
+                        <span x-text="r.paginas == null ? 'Ver las páginas en URLs' : r.paginas === 1 ? 'Ver la página en URLs' : 'Ver las ' + fmt.num(r.paginas) + ' páginas en URLs'"></span>
                       </button>
                     </div>
                   </div>
@@ -4943,7 +5023,20 @@
                   <h4 class="mb-50 fs-sm flex items-center gap-30" data-tip="Conecta GSC para incluir clicks reales de Google en el cálculo de autoridad. Sin GSC, solo se usa PageRank interno. Con GSC, las páginas con más tráfico orgánico influyen más en el centro semántico.">
                     <i data-lucide="bar-chart-3" class="ico-14"></i> Google Search Console (opcional)
                   </h4>
-                  <div class="flex gap-50 items-end flex-wrap">
+                  <!-- El Search Console del cliente (decision 141) es otro sistema: el
+                       Resumen y URLs lo usan, este analisis todavia no (lee las cuentas
+                       de antes, `/semantic/gsc-accounts`). Salia «Sin GSC» y «Subir
+                       cuenta» con Lopesan sincronizado, y «Subir cuenta» llamaba a una
+                       ruta cerrada (410). Se dice lo que hay (revision del 27-oct, V31). -->
+                  <p class="text-sm mb-50" data-testid="semantico-gsc-cliente"
+                     x-text="job.gsc_resumen ? 'Este cliente tiene Search Console sincronizado (lo usan el Resumen y URLs), pero el análisis semántico todavía no lo lee: sin una cuenta de las de abajo, solo pesa el PageRank.' : 'Search Console se conecta en la ficha del cliente → Configuración → Search Console. El análisis semántico todavía no usa esa conexión: sin una cuenta de las de abajo, solo pesa el PageRank.'"></p>
+                  <template x-if="job.cliente_id">
+                    <a class="text-sm" :href="'#/clientes/' + job.cliente_id + '/configuracion'">Ver Search Console del cliente</a>
+                  </template>
+                  <template x-if="!gscAccounts.length">
+                    <p class="text-sm text-dim mt-50">No hay cuentas de Search Console de las de antes guardadas.</p>
+                  </template>
+                  <div class="flex gap-50 items-end flex-wrap mt-50" x-show="gscAccounts.length">
                     <div>
                       <label class="text-dim text-sm">Cuenta GSC</label>
                       <select class="campo-simple-bloque"
@@ -4954,9 +5047,6 @@
                         </template>
                       </select>
                     </div>
-                    <button class="btn btn-sm flex items-center gap-25" @click="showGscUploadModal = true">
-                      <i data-lucide="upload" class="ico-12"></i> Subir cuenta
-                    </button>
                     <template x-if="semanticGscAccountId">
                       <button class="btn btn-sm flex items-center gap-25" @click="loadGscProperties()" :disabled="gscPropsLoading">
                         <template x-if="gscPropsLoading"><span class="spinner ico-12"></span></template>
@@ -5046,29 +5136,36 @@
                 <!-- Parametros: plegados, los valores por defecto sirven casi siempre -->
                 <details class="config-avanzada mb-125">
                   <summary><span>Parámetros</span>
-                    <span class="text-dim text-sm" x-text="'PageRank ' + semanticAlpha + ' · clics ' + semanticBeta + ' · canibalización desde ' + semanticThreshold"></span></summary>
+                    <span class="text-dim text-sm" x-text="'PageRank ' + fmt.dec(semanticAlpha, 2) + ' · clics ' + fmt.dec(semanticBeta, 2) + ' · canibalización desde ' + fmt.dec(semanticThreshold, 2)"></span></summary>
                   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.75rem">
-                    <div data-tip="Peso del PageRank interno en el cálculo de autoridad. Con alpha=1.0 solo usa PageRank. Si tienes datos GSC, baja alpha para dar peso a clicks reales.">
-                      <label class="text-dim text-sm">Alpha (PageRank): <span x-text="semanticAlpha"></span></label>
+                    <div data-tip="Peso del PageRank interno en el cálculo de autoridad. Con 1 solo cuenta el PageRank. Si hay datos de Search Console, bájalo para dar peso a los clics reales.">
+                      <label class="text-dim text-sm">Peso del PageRank: <span x-text="fmt.dec(semanticAlpha, 2)"></span></label>
                       <input type="range" min="0" max="1" step="0.05" x-model.number="semanticAlpha" class="w-full">
                     </div>
-                    <div data-tip="Peso de los clicks de Google Search Console. Solo aplica si has importado datos GSC. Con beta=0.4 las páginas con más tráfico orgánico tendrán más influencia en el centro semántico.">
-                      <label class="text-dim text-sm">Beta (Clicks GSC): <span x-text="semanticBeta"></span></label>
+                    <div data-tip="Peso de los clics de Search Console. Solo cuenta si el censo tiene sus datos. Con 0,4, las páginas con más tráfico orgánico pesan más en el centro semántico.">
+                      <label class="text-dim text-sm">Peso de los clics de Google: <span x-text="fmt.dec(semanticBeta, 2)"></span></label>
                       <input type="range" min="0" max="1" step="0.05" x-model.number="semanticBeta" class="w-full">
                     </div>
                     <div data-tip="Similitud coseno mínima para considerar dos páginas como canibalización. 0,92 = conservador (solo pares muy similares). Baja a 0,85 para detectar más pares, sube a 0,95 para solo los más críticos.">
-                      <label class="text-dim text-sm">Umbral canibalización: <span x-text="semanticThreshold"></span></label>
+                      <label class="text-dim text-sm">Umbral de canibalización: <span x-text="fmt.dec(semanticThreshold, 2)"></span></label>
                       <input type="range" min="0.8" max="0.99" step="0.01" x-model.number="semanticThreshold" class="w-full">
                     </div>
                   </div>
                 </details>
 
                 <!-- Boton Analizar -->
-                <button class="btn btn-primary flex items-center gap-40 fs-base py-60 px-150" @click="runSemanticAnalysis()" :disabled="semanticLoading">
-                  <template x-if="semanticLoading"><span class="spinner ico-16"></span></template>
-                  <i data-lucide="brain" class="ico-16" x-show="!semanticLoading"></i>
-                  Analizar
-                </button>
+                <!-- Sin clave de Gemini no se puede lanzar: desactivado y con el
+                     motivo al lado (revision de UX del 25-oct, 1.15; V31). -->
+                <div class="flex items-center gap-75 flex-wrap">
+                  <button class="btn btn-primary flex items-center gap-40 fs-base py-60 px-150" @click="runSemanticAnalysis()"
+                          :disabled="semanticLoading || !semanticGeminiAccountId" data-testid="semantico-analizar">
+                    <template x-if="semanticLoading"><span class="spinner ico-16"></span></template>
+                    <i data-lucide="brain" class="ico-16" x-show="!semanticLoading"></i>
+                    Analizar
+                  </button>
+                  <span class="text-sm text-dim" x-show="!semanticGeminiAccountId" data-testid="semantico-sin-clave"
+                        x-text="geminiAccounts.length ? 'Elige una clave de Gemini para poder analizar.' : 'Hace falta una clave de Gemini: añádela con «+ Nueva».'"></span>
+                </div>
               </div>
             </template>
 
@@ -5645,7 +5742,10 @@
                         <div>
                           <strong x-text="'Limitada a ' + insights.tope.tope + ' por errores'"></strong>
                           (sin el tope saldría <span x-text="insights.overall_score_sin_tope"></span>).
-                          <span x-text="fmt.num(insights.tope.paginas_con_error) + ' de ' + fmt.num(insights.tope.de) + ' URLs internas (' + String(insights.tope.pct).replace('.', ',') + ' %) tienen algún error.'"></span>
+                          <!-- La cuenta es de la API (decision 92): paginas con error sobre
+                               TODAS las URLs internas. Se dice asi, sin llamar
+                               «URLs» a las paginas (revision del 27-oct). -->
+                          <span x-text="fmt.n(insights.tope.paginas_con_error, 'página tiene', 'páginas tienen') + ' algún error: el ' + fmt.pct(insights.tope.pct) + ' de las ' + fmt.num(insights.tope.de) + ' URLs internas rastreadas (contando imágenes, PDF y redirecciones).'"></span>
                           <a :href="'#/rastreos/' + job.id + '/problemas?gravedad=error'">Ver los errores</a>
                         </div>
                       </div>
@@ -5661,8 +5761,10 @@
                       <!-- Cabecera de categoria -->
                       <div class="insight-card-header" role="button" tabindex="0" @keydown.enter.prevent="$el.click()" @keydown.space.prevent="$el.click()" @click="toggleCategory(cat.key)">
                         <div class="flex items-center gap-1">
-                          <span class="insight-icon" x-text="cat.icon"></span>
-                          <span class="insight-name" x-text="cat.name"></span>
+                          <!-- Sin emojis y con tildes (revision de UX del 25-oct, 3.9): el
+                               nombre sale de la clave, la API anterior manda
+                               «Internacionalizacion» y «Datos Estructurados». -->
+                          <span class="insight-name" x-text="NOMBRE_CATEGORIA[cat.key] || cat.name"></span>
                         </div>
                         <div class="flex items-center gap-1">
                           <div class="insight-score-bar">
@@ -6108,7 +6210,10 @@
                     </template>
                   </div>
                 </template>
-                <div class="text-sm text-dim" x-text="urlDetail.in_sitemap ? 'En el sitemap' : 'No está en el sitemap'"></div>
+                <!-- Sin leer todos los sitemaps no se afirma que falte (V13). -->
+                <div class="text-sm text-dim" data-testid="ficha-sitemap" :class="!urlDetail.in_sitemap && dudaSitemaps(job) && 'orange'"
+                     :title="!urlDetail.in_sitemap && dudaSitemaps(job) || ''"
+                     x-text="urlDetail.in_sitemap ? 'En el sitemap' : (dudaSitemaps(job) ? 'No está en los sitemaps leídos; no se leyeron todos, así que no se puede afirmar que falte' : 'No está en el sitemap')"></div>
                 <!-- De qué fichero(s) de sitemap viene y con qué lastmod (decisión 126) -->
                 <template x-for="(sm, n) in (urlDetail.sitemaps || [])" :key="'sm' + n">
                   <div class="text-sm text-dim truncate" :title="sm.fichero + ((sm.hreflang || []).length ? '\n' + sm.hreflang.map(h => h[0] + ' → ' + h[1]).join('\n') : '')"
@@ -6139,6 +6244,8 @@
                         <span x-text="fmt.issue(g.tipo)"></span><span class="text-dim" x-show="g.n > 1" x-text="' × ' + g.n"></span>
                         <span class="chip-alcance" x-show="g.alcance === 'plantilla' || g.alcance === 'servidor'"
                               x-text="g.alcance === 'servidor' ? 'del servidor' : 'de plantilla'"></span>
+                        <!-- Sin leer todos los sitemaps no se afirma (V13). -->
+                        <span class="orange text-sm" x-show="g.tipo === 'not_in_sitemap' && dudaSitemaps(job)" :title="dudaSitemaps(job) || ''">no concluyente</span>
                       </span>
                     </li>
                   </template>
@@ -6655,6 +6762,7 @@
                                   x-text="g.alcance === 'servidor' ? 'es del servidor: se arregla una vez' : g.alcance === 'plantilla' ? 'es de plantilla: se arregla una vez' : 'en parte de plantilla'"></span>
                           </div>
                           <p class="text-sm" x-show="(ISSUE_INFO[g.tipo] || {}).que" x-text="(ISSUE_INFO[g.tipo] || {}).que"></p>
+                          <p class="text-sm orange" x-show="g.tipo === 'not_in_sitemap' && dudaSitemaps(job)" x-text="dudaSitemaps(job)"></p>
                           <p class="text-sm text-dim" x-show="g.paginasAfectadas > 1"
                              x-text="(g.alcance === 'servidor' ? 'Lo da el servidor en ' : 'Se repite en ') + (g.n > 1 ? 'hasta ' : '') + fmt.num(g.paginasAfectadas) + ' páginas del censo; se anota una vez, en una página de ejemplo como esta.'"></p>
                           <template x-if="g.detalles.length">
@@ -6948,11 +7056,14 @@
               <option value="" :selected="!expValorProblema()">Con cualquier problema o ninguno</option>
               <option value="sev:error" :selected="expValorProblema() === 'sev:error'">Con algún error</option>
               <option value="sev:warning" :selected="expValorProblema() === 'sev:warning'">Con algún aviso</option>
+              <!-- Una opcion por tipo, en el grupo de su gravedad mas alta y con
+                   el desglose si tiene varias (revision de UX del 25-oct, 1.7;
+                   decision 202). -->
               <template x-for="g in [['error','Errores'],['warning','Avisos'],['info','Info']]" :key="g[0]">
                 <optgroup :label="g[1]">
-                  <template x-for="r in resumenIssues(g[0])" :key="r.issue_type">
+                  <template x-for="r in resumenIssues('').filter(x => x.severity === g[0])" :key="r.issue_type">
                     <option :value="r.issue_type" :selected="expProblema === r.issue_type"
-                            x-text="fmt.issue(r.issue_type) + ' · ' + fmt.num(r.paginas)"></option>
+                            x-text="fmt.issue(r.issue_type) + ' · ' + ((r.partes || []).length > 1 ? (r.paginas != null ? fmt.num(r.paginas) + ' (' + desgloseGravedad(r) + ')' : desgloseGravedad(r)) : fmt.num(r.paginas))"></option>
                   </template>
                 </optgroup>
               </template>
@@ -7355,14 +7466,17 @@
                 <button type="button" class="exp-detail-tab" :class="expDetailTab === 'headings' && 'active'" @click="expDetailTab = 'headings'">
                   Encabezados <span class="count" x-text="expUrlDetail?.headings?.length || 0"></span>
                 </button>
+                <!-- La API manda como mucho 200 enlaces de cada lado: el contador
+                     dice «200 de 4.720» o «200+», no «200» (revision de UX del
+                     25-oct, 1.10; V26). Y en castellano, como la ficha. -->
                 <button type="button" class="exp-detail-tab" :class="expDetailTab === 'inlinks' && 'active'" @click="expDetailTab = 'inlinks'">
-                  Inlinks <span class="count" x-text="expUrlDetail?.inlinks?.length || 0"></span>
+                  Enlaces que recibe <span class="count" data-testid="panel-cuenta-entrantes" x-text="cuentaEnlacesPanel(expUrlDetail, 'inlinks')"></span>
                 </button>
                 <button type="button" class="exp-detail-tab" :class="expDetailTab === 'outlinks' && 'active'" @click="expDetailTab = 'outlinks'">
-                  Outlinks <span class="count" x-text="expUrlDetail?.outlinks?.length || 0"></span>
+                  Enlaces que salen <span class="count" x-text="cuentaEnlacesPanel(expUrlDetail, 'outlinks')"></span>
                 </button>
                 <button type="button" class="exp-detail-tab" :class="expDetailTab === 'issues' && 'active'" @click="expDetailTab = 'issues'">
-                  Problemas <span class="count" x-text="expUrlDetail?.issues?.length || 0"></span>
+                  Problemas <span class="count" x-text="expProblemasAgrupados().length"></span>
                 </button>
                 <button type="button" class="exp-detail-tab" :class="expDetailTab === 'resources' && 'active'" @click="expDetailTab = 'resources'">
                   Recursos <span class="count" x-text="expUrlDetail?.resources?.length || 0"></span>
@@ -7416,7 +7530,7 @@
                         <dt>Robots</dt>
                         <dd x-text="[expUrlDetail.html_meta?.meta_robots, expUrlDetail.html_meta?.x_robots_tag && ('X-Robots-Tag: ' + expUrlDetail.html_meta.x_robots_tag)].filter(Boolean).join(' · ') || '—'"></dd>
                         <dt>Enlazado</dt>
-                        <dd x-text="(n => fmt.num(n) + (n === 1 ? ' página la enlaza · ' : ' páginas la enlazan · '))(expUrlDetail.unique_inlinks_count ?? expUrlDetail.inlinks_count ?? 0) + (expUrlDetail.click_depth != null ? expUrlDetail.click_depth + ' clics desde la home' : 'sin profundidad calculada') + (expUrlDetail.pagerank_score != null ? ' · PageRank ' + expUrlDetail.pagerank_score : '') + (expUrlDetail.in_sitemap ? ' · en el sitemap' : ' · fuera del sitemap')"></dd>
+                        <dd x-text="(n => fmt.num(n) + (n === 1 ? ' página la enlaza · ' : ' páginas la enlazan · '))(expUrlDetail.unique_inlinks_count ?? expUrlDetail.inlinks_count ?? 0) + (expUrlDetail.click_depth != null ? fmt.n(expUrlDetail.click_depth, 'clic', 'clics') + ' desde la home' : 'sin profundidad calculada') + (expUrlDetail.pagerank_score != null ? ' · PageRank ' + fmt.num(expUrlDetail.pagerank_score) : '') + (expUrlDetail.in_sitemap ? ' · en el sitemap' : (dudaSitemaps(job) ? ' · no está en los sitemaps leídos (no se leyeron todos: no se puede afirmar que falte)' : ' · fuera del sitemap'))"></dd>
                         <template x-if="(expUrlDetail.sitemaps || []).length">
                           <dt>Sitemap</dt>
                         </template>
@@ -7434,13 +7548,21 @@
                         <template x-if="(expUrlDetail.wordpress || []).length">
                           <dd><template x-for="(w, n) in expUrlDetail.wordpress" :key="'ewp' + n"><div x-text="textoEntidadWp(w)"></div></template></dd>
                         </template>
+                        <!-- Agrupados por tipo y con el detalle legible, como en la
+                             ficha de la URL (revision de UX del 25-oct, 2.7). -->
                         <dt>Problemas</dt>
-                        <dd>
-                          <template x-if="!(expUrlDetail.issues || []).length"><span class="green">Ninguno</span></template>
-                          <template x-for="(i, n) in [...(expUrlDetail.issues || [])].sort((a, b) => ({error:0,warning:1,info:2}[a.severity] ?? 3) - ({error:0,warning:1,info:2}[b.severity] ?? 3))" :key="n">
-                            <div><span class="sev-chip" :class="'sev-' + i.severity" x-text="fmt.severity(i.severity)"></span>
-                              <span x-text="fmt.issue(i.issue_type)"></span>
-                              <span class="text-dim text-sm" x-text="fmt.detalles(i.details) ? '· ' + fmt.detalles(i.details) : ''"></span></div>
+                        <dd data-testid="panel-problemas">
+                          <template x-if="!expProblemasAgrupados().length"><span class="green">Ninguno</span></template>
+                          <template x-for="g in expProblemasAgrupados()" :key="g.tipo">
+                            <div><span class="sev-chip" :class="'sev-' + g.severity" x-text="fmt.severity(g.severity)"></span>
+                              <span x-text="fmt.issue(g.tipo)"></span>
+                              <span class="text-dim text-sm" x-show="g.n > 1" x-text="'×' + fmt.num(g.n)"></span>
+                              <span class="text-dim text-sm" x-show="g.alcance === 'servidor' || g.alcance === 'plantilla'" x-text="g.alcance === 'servidor' ? '· de servidor' : '· de plantilla'"></span>
+                              <span class="text-dim text-sm" x-show="g.tipo === 'not_in_sitemap' && dudaSitemaps(job)" x-text="'· no concluyente'"></span>
+                              <template x-if="g.detalles.length">
+                                <div class="text-dim text-sm" x-text="g.detalles.slice(0, 3).map(d => d.texto + (d.n > 1 ? ' (×' + fmt.num(d.n) + ')' : '')).join(' · ') + (g.detalles.length > 3 ? ' · y ' + fmt.num(g.detalles.length - 3) + ' más' : '')"></div>
+                              </template>
+                            </div>
                           </template>
                         </dd>
                         <template x-for="d in expAMedida" :key="d.key">
@@ -7499,6 +7621,12 @@
                         <template x-if="!expUrlDetail.inlinks || expUrlDetail.inlinks.length === 0">
                           <div class="text-dim py-50 px-0"
                                x-text="expUrlDetail.inlinks_count === 0 ? 'Esta URL no recibe enlaces internos (página huérfana).' : (expUrlDetail.inlinks_count ? 'No se han podido leer sus enlaces entrantes (el análisis cuenta ' + fmt.num(expUrlDetail.inlinks_count) + ').' : 'Sin enlaces entrantes en la respuesta.')"></div>
+                        </template>
+                        <template x-if="(expUrlDetail.inlinks || []).length >= 200">
+                          <div class="text-sm text-dim mb-50" data-testid="panel-entrantes-tope">
+                            <span x-text="'Se ven las ' + fmt.num(expUrlDetail.inlinks.length) + ' primeras' + (expUrlDetail.inlinks_count > expUrlDetail.inlinks.length ? ' de ' + fmt.num(expUrlDetail.inlinks_count) : '') + '.'"></span>
+                            <a href="#" @click.prevent="irAEnlaces(expUrlDetail.url_hash ? { destino_hash: expUrlDetail.url_hash } : { destino: expUrlDetail.url, exacto: true }, 'enlaces')">Ver quién la enlaza</a>
+                          </div>
                         </template>
                         <template x-if="expUrlDetail.inlinks && expUrlDetail.inlinks.length > 0">
                           <table class="table fs-sm">
@@ -7567,26 +7695,26 @@
                       </div>
                     </template>
 
-                    <!-- Issues tab with details JSON -->
+                    <!-- Problemas: uno por tipo con su gravedad mas alta y el
+                         detalle legible, como la ficha de la URL (2.7; antes,
+                         una fila por incidencia con las claves en crudo). -->
                     <template x-if="expDetailTab === 'issues'">
                       <div>
-                        <template x-if="!expUrlDetail.issues || expUrlDetail.issues.length === 0">
+                        <template x-if="!expProblemasAgrupados().length">
                           <div class="text-dim py-50 px-0">Sin problemas detectados.</div>
                         </template>
-                        <template x-if="expUrlDetail.issues && expUrlDetail.issues.length > 0">
+                        <template x-if="expProblemasAgrupados().length">
                           <div class="issues-list">
-                            <template x-for="iss in expUrlDetail.issues" :key="iss.id">
-                              <div class="issue-item" :class="'issue-' + iss.severity">
+                            <template x-for="g in expProblemasAgrupados()" :key="g.tipo">
+                              <div class="issue-item" :class="'issue-' + g.severity">
                                 <div class="issue-header">
-                                  <span class="badge fs-sm" :class="'severity-' + iss.severity" x-text="fmt.severity(iss.severity)"></span>
-                                  <span class="fw-600 fs-sm" x-text="fmt.issue(iss.issue_type)"></span>
+                                  <span class="badge fs-sm" :class="'severity-' + g.severity" x-text="fmt.severity(g.severity)"></span>
+                                  <span class="fw-600 fs-sm" x-text="fmt.issue(g.tipo)"></span>
+                                  <span class="text-dim fs-sm" x-show="g.n > 1" x-text="'×' + fmt.num(g.n)"></span>
                                 </div>
-                                <template x-if="iss.details && Object.keys(iss.details).length > 0">
-                                  <div style="margin-top:.3rem;padding-left:.5rem;font-size:var(--fs-sm);color:var(--text-dim)">
-                                    <template x-for="[k,v] in Object.entries(iss.details)" :key="k">
-                                      <div><span class="fw-600" x-text="k + ':'"></span> <span x-text="String(v)"></span></div>
-                                    </template>
-                                  </div>
+                                <div class="text-dim fs-sm pl-50" x-show="g.tipo === 'not_in_sitemap' && dudaSitemaps(job)" x-text="dudaSitemaps(job)"></div>
+                                <template x-for="d in g.detalles" :key="d.texto">
+                                  <div class="text-dim fs-sm pl-50" x-text="d.texto + (d.n > 1 ? ' (×' + fmt.num(d.n) + ')' : '')"></div>
                                 </template>
                               </div>
                             </template>
@@ -7771,10 +7899,26 @@
           solo vale para este rastreo; lo que no toques se hereda tal cual.
         </div>
 
+        <!-- El tipo, siempre a la vista y siempre con uno marcado (revision de
+             UX del 25-oct, 1.6; decision 203): prueba de serie sin perfil,
+             censo con perfil. Solo un censo cuenta en la portada y la evolucion. -->
+        <div class="form-group" data-testid="nr-tipo">
+          <label>Tipo *</label>
+          <div class="flex gap-75 flex-wrap" role="radiogroup" aria-label="Tipo de rastreo">
+            <template x-for="t in [['censo', 'Censo', 'El sitio entero: cuenta en la portada, la evolución y las alertas'], ['prueba', 'Prueba', 'Para probar algo: no cuenta en la portada ni en la evolución'], ['canario', 'Canario', 'Unas pocas páginas para comprobar bloqueos y ritmo antes del censo']]" :key="t[0]">
+              <label class="checkbox-label" :title="t[2]">
+                <input type="radio" name="nr-tipo" :value="t[0]" :checked="tipoRastreoModal() === t[0]" @change="createForm.tipo = t[0]">
+                <span x-text="t[1]"></span>
+              </label>
+            </template>
+          </div>
+          <div class="form-hint" x-text="({censo: 'Censo: el sitio entero; cuenta en la portada, la evolución y las alertas.', prueba: 'Prueba: no cuenta en la portada ni en la evolución.' + (createForm.profile_id ? '' : ' Sin perfil sale como prueba salvo que elijas otra cosa.'), canario: 'Canario: unas pocas páginas para comprobar bloqueos, render y ritmo; no cuenta en la evolución.'})[tipoRastreoModal()]"></div>
+        </div>
+
         <!-- Campos siempre visibles -->
         <div class="form-group">
           <label>Nombre del trabajo *</label>
-          <input type="text" x-model="createForm.name" placeholder="Ej: midominio.com - auditoria completa">
+          <input type="text" x-model="createForm.name" placeholder="Ej.: midominio.com - auditoría completa">
         </div>
         <div class="form-group">
           <label>URLs semilla * (una por línea)<span class="ayuda" tabindex="0" role="img" aria-label="Qué son las semillas"

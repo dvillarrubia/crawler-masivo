@@ -155,3 +155,30 @@ def test_resumen_por_tipo_cuenta_paginas_y_no_repite_ejemplos(entorno, tmp_path)
     h = next(x for x in r if x["issue_type"] == "hreflang_missing_return")
     assert h["incidencias"] == 3 and h["paginas"] == 1
     assert len(h["ejemplos"]) == 1
+
+
+def test_resumen_trae_las_paginas_del_tipo_en_todas_sus_gravedades(entorno, tmp_path):
+    """Decision 202: la interfaz pinta una fila por tipo («2 aviso · 2 info») y
+    necesita las paginas DISTINTAS del tipo. La pagina 1 tiene el tipo en las
+    dos gravedades: el tipo son 3 paginas, no 2 + 2 = 4."""
+    api, jid = entorno
+    from shared.models import Issue as I
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    s = sessionmaker(bind=create_engine(f"sqlite:///{tmp_path}/s.db"))()
+    u = {h: s.query(Url).filter(Url.job_id == jid, Url.url_hash == h).one() for h in ("h1", "h2", "h3")}
+    s.add_all([
+        I(job_id=jid, url_id=u["h1"].id, issue_type="canibalizacion_por_consulta", severity="warning", details={}),
+        I(job_id=jid, url_id=u["h2"].id, issue_type="canibalizacion_por_consulta", severity="warning", details={}),
+        I(job_id=jid, url_id=u["h1"].id, issue_type="canibalizacion_por_consulta", severity="info", details={}),
+        I(job_id=jid, url_id=u["h3"].id, issue_type="canibalizacion_por_consulta", severity="info", details={}),
+    ])
+    s.commit()
+    s.close()
+    r = api.get(f"/api/jobs/{jid}/issues/resumen").json()
+    filas = [x for x in r if x["issue_type"] == "canibalizacion_por_consulta"]
+    assert sorted((x["severity"], x["paginas"]) for x in filas) == [("info", 2), ("warning", 2)]
+    assert {x["paginas_tipo"] for x in filas} == {3}
+    # Un tipo con una sola gravedad: las mismas que su fila.
+    t = next(x for x in r if x["issue_type"] == "title_too_long")
+    assert t["paginas_tipo"] == t["paginas"] == 1

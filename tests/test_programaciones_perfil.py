@@ -170,8 +170,18 @@ def test_el_worker_resuelve_la_config_igual_que_la_api():
     sobre los defaults y se saltaba los validadores de JobConfig, asi que un
     perfil de modo lista (`max_depth: 0`) programado sembraba el sitemap
     entero, y un UA de iPhone salia con huella de Chrome. Se compara la
-    funcion del worker con la de la API, caso a caso."""
+    funcion del worker con la de la API, caso a caso.
+
+    Un perfil de los casos lleva una extraccion CSS, y validarla necesita
+    parsel (`api/requirements.txt` lo trae desde la decision 104). Una imagen
+    de la API construida antes (la local del 13-oct) no lo lleva: ahi se salta
+    diciendo que hay que reconstruirla, no falla con un 422 que parece del
+    codigo (revision del 27-oct)."""
     from types import SimpleNamespace as N
+
+    pytest.importorskip(
+        "parsel", reason="esta imagen no trae parsel (api/requirements.txt lo pide desde la "
+                         "decision 104): reconstruye la imagen de la API")
 
     from api.routers.clientes import resolver_config
     from shared.programaciones import config_del_momento
