@@ -71,6 +71,9 @@
                Search Console, modelos, importar backup y tema. -->
           <a role="menuitem" href="#/ajustes" @click="menuAbierto = ''" data-testid="menu-ajustes">
             <i data-lucide="settings" class="ico-14"></i> Ajustes de la agencia</a>
+          <!-- Revisar a Jev (#8, decision 211) -->
+          <a role="menuitem" href="#/revision" @click="menuAbierto = ''" data-testid="menu-revision">
+            <i data-lucide="check-check" class="ico-14"></i> Revisar a Jev</a>
           <button role="menuitem" @click="menuAbierto = ''; salirDeLaSesion()">
             <i data-lucide="log-out" class="ico-14"></i> Cerrar sesión</button>
         </div>
@@ -632,6 +635,9 @@
                           <i data-lucide="more-horizontal" class="ico-16"></i>
                         </button>
                         <div class="menu" x-show="menuAbierto === 'prog-' + p.id" role="menu">
+                          <button role="menuitem" @click="menuAbierto = ''; lanzarProgramacionAhora(p)" data-testid="prog-lanzar">
+                            <i data-lucide="play" class="ico-14"></i>
+                            <span>Lanzar ahora<span class="menu-sub">El mismo rastreo que a su hora, sin esperar. La próxima no cambia</span></span></button>
                           <button role="menuitem" class="danger" @click="menuAbierto = ''; borrarProgramacion(p)" data-testid="prog-eliminar">
                             <i data-lucide="trash-2" class="ico-14"></i>
                             <span>Eliminar la programación<span class="menu-sub">Deja de lanzarse sola. Los rastreos que ya lanzó no se borran</span></span></button>
@@ -2166,6 +2172,100 @@
          se ve su email; de un token, el bot y el espacio; de las claves del
          entorno, solo si estan puestas. Lo que es de cada cliente (su canal,
          su propiedad de Search Console) sigue en su Configuración. -->
+    <!-- Revisar a Jev (#8, decision 211): lo que respondio sin seguridad, para
+         etiquetarlo a mano y calibrar el umbral de cada pregunta. A ciegas:
+         lo que dijo Jev se ve DESPUES de guardar. -->
+    <template x-if="view === 'revision'">
+      <div class="revision" data-testid="vista-revision" @keydown.window="teclaRevision($event)">
+        <h2 class="ajustes-titulo">Revisar a Jev</h2>
+        <p class="text-sm text-dim ajustes-intro">Lo que Jev respondió sin seguridad suficiente («incierto»). Se etiqueta a ciegas:
+          su respuesta sale después de guardar la tuya. Con estas etiquetas se calcula el umbral de cada pregunta, y hasta tenerlo
+          ninguna respuesta suya llega a un informe.</p>
+
+        <template x-if="!revision.pregunta">
+          <section class="card mb-2" data-testid="revision-resumen">
+            <div class="card-header"><h2>Preguntas</h2></div>
+            <p class="text-sm text-dim" x-show="!revision.resumen.length">Todavía no hay respuestas de Jev que revisar: salen al lanzar el análisis con IA de un rastreo.</p>
+            <div class="table-wrap" x-show="revision.resumen.length">
+              <table class="table text-sm">
+                <thead><tr><th>Pregunta</th><th>Por revisar</th><th>Etiquetadas</th><th>Coincide Jev</th><th>Umbral</th><th></th></tr></thead>
+                <tbody>
+                  <template x-for="f in revision.resumen" :key="f.pregunta">
+                    <tr>
+                      <td><strong x-text="f.pregunta"></strong><span class="badge badge-pending ml-50" x-show="f.ejemplo">de ejemplo</span>
+                        <div class="text-dim" x-text="f.descripcion"></div></td>
+                      <td x-text="fmt.num(f.por_revisar)"></td>
+                      <td x-text="fmt.num(f.etiquetadas)"></td>
+                      <td x-text="f.etiquetadas ? fmt.pct(100 * f.coinciden_con_jev / f.etiquetadas, 0) : '—'"></td>
+                      <td x-text="f.umbral == null ? 'sin umbral' : fmt.dec(f.umbral, 2)"></td>
+                      <td class="ta-r nowrap">
+                        <a class="btn btn-sm" :class="f.por_revisar ? 'btn-primary' : ''" :href="'#/revision?pregunta=' + encodeURIComponent(f.pregunta)"
+                           x-text="f.por_revisar ? 'Revisar' : 'Ver'"></a>
+                        <!-- Con las opciones del cliente, un juego por taxonomia (decision 211). -->
+                        <template x-for="v in (f.etiquetadas ? (f.opciones_del_cliente ? f.variantes : [{ variante: '' }]) : [])" :key="v.variante">
+                          <span>
+                            <a class="btn btn-sm" :href="API + '/decisiones/etiquetas/' + f.pregunta + '/juego.jsonl' + (v.variante ? '?variante=' + v.variante : '')"
+                               data-tip="El juego etiquetado, para «evaluar_decisiones.py evaluar»" x-text="v.variante ? 'Juego ' + v.variante.slice(0, 6) : 'Juego'"></a>
+                            <a class="btn btn-sm" :href="API + '/decisiones/etiquetas/' + f.pregunta + '/respuestas.jsonl' + (v.variante ? '?variante=' + v.variante : '')">Respuestas</a>
+                          </span>
+                        </template>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </template>
+
+        <template x-if="revision.pregunta">
+          <section class="card mb-2" data-testid="revision-item">
+            <div class="text-sm mb-50"><a href="#/revision">← Todas las preguntas</a>
+              <label class="ml-100 text-dim">Quién revisa <input type="text" x-model="revision.autor" placeholder="tu nombre" maxlength="128"></label></div>
+            <p class="text-dim" x-show="revision.cargando">Cargando…</p>
+            <p class="text-sm" x-show="!revision.cargando && !revisionActual" data-testid="revision-vacia">No queda nada por revisar de esta pregunta.</p>
+            <template x-if="revisionActual">
+              <div x-data="{ get it() { return revisionActual } }">
+                <h3 x-text="it.pregunta"></h3>
+                <details class="text-sm mb-50"><summary class="text-dim pointer">Lo que se le pregunta a Jev</summary>
+                  <p class="pre-wrap" x-text="it.instrucciones"></p></details>
+                <div class="text-sm mb-50" x-show="it.url">Página: <a :href="it.url" target="_blank" rel="noopener noreferrer" class="informe-url" x-text="it.url"></a></div>
+                <dl class="revision-estado">
+                  <template x-for="c in camposDeEstado(it.estado)" :key="c.clave">
+                    <div class="revision-campo"><dt class="text-dim" x-text="c.clave"></dt>
+                      <dd :class="c.largo ? 'revision-largo' : ''" x-text="c.valor"></dd></div>
+                  </template>
+                </dl>
+                <template x-if="!revision.resultado">
+                  <div>
+                    <div class="revision-opciones">
+                      <template x-for="(o, n) in it.opciones" :key="o.valor">
+                        <button class="btn" @click="etiquetarRevision(o.valor)" :data-tip="o.detalle || null" data-testid="revision-opcion">
+                          <span class="text-dim" x-text="(n + 1) + '.'"></span> <span x-text="o.texto"></span></button>
+                      </template>
+                      <button class="btn btn-sm" @click="saltarRevision()" data-testid="revision-saltar">Saltar</button>
+                    </div>
+                    <input type="text" class="mt-40 w-full" x-model="revision.nota" placeholder="Nota (opcional): por qué, si es un caso dudoso" maxlength="2000">
+                    <p class="text-dim fs-sm mt-30">Atajo: el número de la respuesta.</p>
+                  </div>
+                </template>
+                <template x-if="revision.resultado">
+                  <div class="mt-40" data-testid="revision-resultado">
+                    <p :class="revision.resultado.coincide ? 'c-green' : 'text-orange'"
+                       x-text="'Tu respuesta: ' + textoOpcionRevision(it, revision.resultado.etiqueta) + '. Jev decía: ' + textoOpcionRevision(it, revision.resultado.jev)
+                         + (revision.resultado.confianza == null ? '' : ' (confianza ' + fmt.dec(revision.resultado.confianza, 2) + ')')
+                         + (revision.resultado.coincide ? '. Coincide.' : '. No coincide.')"></p>
+                    <button class="btn btn-primary" @click="siguienteRevision()" data-testid="revision-siguiente">Siguiente</button>
+                    <span class="text-dim fs-sm">o Intro</span>
+                  </div>
+                </template>
+              </div>
+            </template>
+          </section>
+        </template>
+      </div>
+    </template>
+
     <template x-if="view === 'ajustes' && ajustes">
       <div class="ajustes" data-testid="vista-ajustes">
         <h2 class="ajustes-titulo">Ajustes de la agencia</h2>
@@ -3078,6 +3178,11 @@
               </details>
             </template>
             <div x-show="detailTab === 'overview' && bg.inspeccion" class="google-frase" x-text="bg.inspeccion"></div>
+            <!-- Lo que Search Console no cuenta (#163), junto a sus cifras. -->
+            <details x-show="detailTab === 'overview' && bg.limites.length" class="google-paginas" data-testid="google-limites">
+              <summary class="text-dim">Lo que Search Console no cuenta</summary>
+              <ul><template x-for="(x, n) in bg.limites" :key="'l' + n"><li class="text-dim" x-text="x"></li></template></ul>
+            </details>
           <template x-if="detailTab === 'overview' && job.gsc_resumen">
           <div class="google-detalle">
             <div>

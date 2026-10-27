@@ -452,6 +452,23 @@ FROM decisions WHERE run_id = 'UUID-AQUI'
 GROUP BY 1, 2, 3 ORDER BY 1, 4 DESC;
 ```
 
+### `decision_labels` — Etiqueta humana de una respuesta de Jev (#8, decisión 211)
+Lo que cuenta en un juego de evaluación. Una por estado: la escribe la pantalla «Revisar a Jev» (`api/routers/revision.py`, lógica en `shared/revision_decisiones.py`).
+
+| Columna | Tipo | Notas |
+|---|---|---|
+| id | bigint PK | |
+| decision_id | bigint FK decisions (SET NULL) | La decisión revisada; NULL si se borró su censo |
+| clave / pregunta / version_pregunta / variante | varchar / varchar / int / varchar(16) | Únicas juntas: un estado, una etiqueta por versión y opciones |
+| ambito | varchar(10) | El de la decisión |
+| estado_enviado / opciones | JSON | Copia de lo que vio Jev y de las opciones del cliente (178) |
+| respuesta_jev / confianza_jev | text / float | Copia de lo que dijo Jev |
+| etiqueta | text | En el vocabulario de la pregunta (`normalizar_etiqueta`) |
+| nota / autor | text / varchar(128) | |
+| created_at / updated_at | timestamptz | |
+
+Índices: `decision_id`, `(pregunta, version_pregunta)`.
+
 ### `gsc_consultas` — Search Console por URL, búsqueda y día (decisión 157)
 Lo que piden la canibalización por búsqueda, la curva de CTR por posición y las oportunidades (`analysis/oportunidades_gsc.py`). La descarga `shared/gsc_detalle.py` una vez al día, con relleno hacia atrás aparte de `gsc_paginas` (su estado va en `gsc_estado.detalle`).
 

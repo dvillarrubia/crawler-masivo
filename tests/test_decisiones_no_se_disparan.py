@@ -84,6 +84,14 @@ def test_ni_el_crawler_ni_el_analisis_ni_los_scripts_importan_la_capa():
         f"o desde un modulo activado por job; la importan: {culpables}")
 
 
+def test_la_revision_humana_solo_lee_el_registro():
+    """Decision 211: `shared/revision_decisiones.py` (pantalla de revision y
+    `etiquetas`) solo mira el registro de modulos, y solo desde `modulo_de`,
+    para las opciones del cliente. Nunca el cliente ni la capa que llama."""
+    imports = _imports_de_la_capa(RAIZ / "shared" / "revision_decisiones.py")
+    assert imports == [("shared.enriquecido", "modulo_de")]
+
+
 def test_el_worker_no_carga_la_capa_al_arrancar():
     """Importar el worker (lo que pasa en cada arranque) no trae la capa:
     solo la carga quien atiende la cola de enriquecido."""
@@ -138,7 +146,7 @@ def test_un_rastreo_programado_no_lanza_el_enriquecido(monkeypatch, tmp_path):
     s.commit()
     cola = _ColaQueApunta()
     worker._lanzar_programados(cola)
-    assert cola.claves == ["jobs:pending"]
+    assert cola.claves == ["jobs:programados"]
     assert s.query(EnrichmentRun).count() == 0
     s.close()
 

@@ -421,6 +421,9 @@ const fmt = {
     if (m === 'su perfil ya no existe') return 'no se lanzó: su perfil ya no existe';
     if (m === 'el perfil esta desactivado') return 'no se lanzó: el perfil está desactivado';
     if (m === 'el perfil no tiene semillas') return 'no se lanzó: el perfil no tiene semillas';
+    // decision 209
+    if (m === 'lanzada a mano') return 'lanzada a mano con «Lanzar ahora»';
+    if (m.startsWith('no se pudo encolar')) return 'no se lanzó: la cola de rastreos no respondía';
     return m;
   },
   // Una expresion cron en castellano. Solo los patrones que se usan de
@@ -940,6 +943,8 @@ function app() {
     asiPerfiles: {},          // perfil -> { nivel: 'vista', resuelta } de «Así rastreará»
     // Ajustes de la agencia (revision de UX del 25-oct, 2.5)
     ajustes: null,
+    // «Revisar a Jev» (#8, decision 211): a ciegas, lo de Jev se ve al guardar.
+    revision: { resumen: [], pregunta: '', items: [], resultado: null, nota: '', autor: '', cargando: false, enviando: false },
 
     // Detalle del trabajo
     job: null,
@@ -1268,6 +1273,8 @@ function app() {
           await this.verProduccion();
         } else if (p[0] === 'ajustes') {
           await this.verAjustes();
+        } else if (p[0] === 'revision') {
+          await this.verRevision(q.get('pregunta') || '');
         } else if (p[0] === 'rastreos') {
           if (!this.job || this.job.id !== p[1]) await this.openJob(p[1]);
           if (!this.job) return;
@@ -1388,6 +1395,7 @@ function app() {
     // del 25-oct, 2.12). Un rastreo sin cliente cuelga de Produccion.
     seccion() {
       if (this.view === 'ajustes') return 'ajustes';
+      if (this.view === 'revision') return 'revision';
       if (['clients', 'client'].includes(this.view)) return 'clientes';
       if (['detail', 'explorer', 'url-detail', 'informe'].includes(this.view) && this.job && this.job.cliente_id) return 'clientes';
       return 'produccion';
@@ -1414,6 +1422,9 @@ function app() {
       const m = [];
       const v = this.view;
       if (v === 'ajustes') return [{ texto: 'Ajustes de la agencia' }];
+      if (v === 'revision') return this.revision.pregunta
+        ? [{ texto: 'Revisar a Jev', href: '#/revision' }, { texto: this.revision.pregunta }]
+        : [{ texto: 'Revisar a Jev' }];
       if (v === 'client') {
         m.push({ texto: 'Clientes', href: '#/clientes' });
         if (this.cliente) {
@@ -3644,6 +3655,107 @@ function app() {
         this.programarError = e.message;
       }
     },
+    // ------- Revisar a Jev (#8, decision 211) -------
+    // Lo que Jev respondio sin seguridad («incierto»), para etiquetarlo a mano.
+    // A CIEGAS: la fila no trae lo que dijo Jev; se ensena al guardar, porque
+    // verlo antes empuja la etiqueta (decision 179). Con estas etiquetas se
+    // calcula el umbral de cada pregunta (`evaluar_decisiones.py etiquetas`).
+    async verRevision(pregunta) {
+      this._salirDeJob();
+      this.view = 'revision';
+      if (!this.revision.autor) {
+        try { this.revision.autor = localStorage.getItem('seo-crawler-revisor') || ''; } catch (_) { /* sin storage */ }
+      }
+      this.revision.pregunta = pregunta;
+      this.revision.resultado = null;
+      this.revision.nota = '';
+      await this.cargarResumenRevision();
+      if (pregunta) await this.cargarPendientesRevision();
+    },
+
+    async cargarResumenRevision() {
+      try {
+        this.revision.resumen = await api('/decisiones/revision/resumen');
+      } catch (e) {
+        this.revision.resumen = [];
+        this.error = 'No se pudo cargar la revisión: ' + e.message;
+      }
+    },
+
+    async cargarPendientesRevision() {
+      this.revision.cargando = true;
+      this.revision.items = [];
+      try {
+        this.revision.items = await api('/decisiones/revision?limite=20&pregunta=' + encodeURIComponent(this.revision.pregunta));
+      } catch (e) {
+        this.revision.items = [];
+        this.error = 'No se pudieron cargar las respuestas: ' + e.message;
+      } finally {
+        this.revision.cargando = false;
+      }
+    },
+
+    get revisionActual() {
+      return this.revision.resultado ? this.revision.resultado.item : (this.revision.items[0] || null);
+    },
+
+    async etiquetarRevision(valor) {
+      const item = this.revision.items[0];
+      // Dos pulsaciones seguidas mandaban dos PUT: la guardada era la segunda
+      // y la pantalla ensenaba la primera.
+      if (!item || this.revision.resultado || this.revision.enviando || this.revision.cargando) return;
+      this.revision.enviando = true;
+      try {
+        try { localStorage.setItem('seo-crawler-revisor', this.revision.autor || ''); } catch (_) { /* sin storage */ }
+        const r = await api('/decisiones/' + item.decision_id + '/etiqueta', {
+          method: 'PUT',
+          body: JSON.stringify({ etiqueta: valor, nota: this.revision.nota || null, autor: this.revision.autor || null }),
+        });
+        this.revision.resultado = { ...r, item };
+      } catch (e) {
+        this.error = 'No se pudo guardar la etiqueta: ' + e.message;
+      } finally {
+        this.revision.enviando = false;
+      }
+    },
+
+    async siguienteRevision() {
+      this.revision.resultado = null;
+      this.revision.nota = '';
+      this.revision.items = this.revision.items.slice(1);
+      if (!this.revision.items.length) {
+        await this.cargarPendientesRevision();
+        await this.cargarResumenRevision();
+      }
+    },
+
+    // Saltar no guarda nada: la fila vuelve a salir otro dia.
+    saltarRevision() {
+      if (this.revision.resultado) return this.siguienteRevision();
+      this.revision.items = this.revision.items.slice(1).concat(this.revision.items.slice(0, 1));
+      this.revision.nota = '';
+    },
+
+    teclaRevision(ev) {
+      if (this.view !== 'revision' || !this.revision.pregunta || this.dialogo || this.revision.cargando) return;
+      // Cmd/Ctrl+1 es cambiar de pestana, no etiquetar.
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      const t = ev.target && ev.target.tagName;
+      if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT' || (ev.target && ev.target.isContentEditable)) return;
+      if (this.revision.resultado && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); this.siguienteRevision(); return; }
+      const item = this.revision.items[0];
+      const n = Number(ev.key);
+      if (item && !this.revision.resultado && n >= 1 && n <= item.opciones.length) {
+        ev.preventDefault();
+        this.etiquetarRevision(item.opciones[n - 1].valor);
+      }
+    },
+
+    textoOpcionRevision(item, valor) {
+      const o = (item && item.opciones || []).find(x => x.valor === valor);
+      return o ? o.texto : (valor == null ? '—' : String(valor));
+    },
+
     async verProgramados() {
       this._salirDeJob();
       this.view = 'programados';
@@ -3918,6 +4030,23 @@ function app() {
         else await this.cargarProgramaciones();
       } catch (e) {
         this.error = 'No se pudo cambiar: ' + e.message;
+      }
+    },
+
+    // «Lanzar ahora» (decision 209): el mismo rastreo que lanzaria a su hora,
+    // sin esperar. Si hay uno vivo, el servidor dice por que no (409).
+    async lanzarProgramacionAhora(p) {
+      if (!await this.preguntar({ titulo: `Lanzar ahora «${p.nombre}»`,
+        mensaje: 'Lanza ya el rastreo que haría a su hora. La próxima ejecución no cambia.', aceptar: 'Lanzar' })) return;
+      try {
+        const r = await api('/programaciones/' + p.id + '/ejecutar', { method: 'POST' });
+        this.showToast('Lanzado: ' + r.nombre);
+        if (this.view === 'client') await this.cargarProgramacionesCliente();
+        else await this.cargarProgramaciones();
+      } catch (e) {
+        // El 409 dice por que con el texto de `ultimo_motivo`, que esta en
+        // pasado («seguía»): aqui el rastreo sigue vivo AHORA.
+        this.error = 'No se pudo lanzar: ' + fmt.motivo(e.message).replace(/^no se lanzó: /, '').replace('seguía sin terminar', 'sigue sin terminar').replace('ya tenía otro', 'ya tiene otro');
       }
     },
 
@@ -7712,9 +7841,52 @@ function bloqueBacklinks(job) {
   };
 }
 
+// Los campos del estado que vio Jev, para la revision (#8): el texto tal
+// cual y lo demas (listas, objetos) en JSON legible.
+function camposDeEstado(estado) {
+  if (!estado || typeof estado !== 'object') return [];
+  return Object.entries(estado).map(([k, v]) => ({
+    clave: k,
+    valor: typeof v === 'string' ? v : JSON.stringify(v, null, 1),
+    largo: typeof v !== 'string' || v.length > 160,
+  }));
+}
+
 // Lo que lee la plantilla mientras el x-if que la envuelve aun no ha
 // reaccionado a un job que pasa a null.
-const BLOQUE_GOOGLE_VACIO = Object.freeze({ cifras: [], conclusiones: [], inspeccion: null, textos: [], paginas: [], cortadas: false, trafico: null });
+const BLOQUE_GOOGLE_VACIO = Object.freeze({ cifras: [], conclusiones: [], inspeccion: null, textos: [], paginas: [], cortadas: false, trafico: null, limites: [] });
+
+// Lo que Search Console no cuenta, dicho junto a sus cifras (#163,
+// `docs/INVESTIGACION_SEARCH_CONSOLE.md`). Dos avisos siempre (la API no
+// separa la IA y calla las busquedas raras, con la parte MEDIDA en el sitio
+// cuando hay serie de busquedas) y dos solo si la ventana cruza las fechas
+// en que Google cambio lo que cuenta: impresiones infladas del 13-05-2025 al
+// 27-04-2026 y el fin de `num=100` en septiembre de 2025.
+function textoSinBusqueda(sb) {
+  if (!sb || !sb.clics_paginas) return 'Google anonimiza las búsquedas raras o sensibles (en muchos sitios, entre el 40 y el 50 % de los clics): las cifras por búsqueda nunca suman el total.';
+  const dias = 'del ' + fmt.dia(sb.desde) + ' al ' + fmt.dia(sb.hasta);
+  if (sb.parte < 0.01) return 'Casi todos los clics ' + dias + ' llegan con su búsqueda: aquí las cifras por búsqueda cuadran con el total.';
+  return 'El ' + fmt.pct(100 * sb.parte, 0) + ' de los clics ' + dias + ' llega sin su búsqueda'
+    + (sb.con_dias_cortados
+      ? '. La cifra mezcla dos cosas: las búsquedas que Google anonimiza (las raras o sensibles) y los días en que la descarga de búsquedas se cortó en su tope de 50.000 filas.'
+      : ': Google anonimiza las búsquedas raras o sensibles.')
+    + ' Por eso las cifras por búsqueda (canibalización, CTR por búsqueda) no suman el total.';
+}
+const GSC_INFLADAS = ['2025-05-13', '2026-04-27'];
+const GSC_NUM100 = ['2025-09-01', '2025-09-30'];
+function limitesGoogle(g) {
+  if (!g) return [];
+  const desde = g.datos_desde || g.desde, hasta = g.datos_hasta || g.hasta;
+  const cruza = ([a, b]) => !!(desde && hasta && desde <= b && hasta >= a);
+  const sb = g.oportunidades && g.oportunidades.sin_busqueda;
+  const salida = [
+    'La API de Search Console no separa los clics que vienen de AI Overviews ni de AI Mode (AI Mode cuenta dentro de Web): estas cifras no dicen qué parte llega desde las respuestas de IA.',
+    textoSinBusqueda(sb),
+  ];
+  if (cruza(GSC_INFLADAS)) salida.push('Las impresiones del 13 de mayo de 2025 al 27 de abril de 2026 están infladas por un error de Google que no corrigió el histórico: no compares impresiones ni CTR a través de esas fechas.');
+  if (cruza(GSC_NUM100)) salida.push('En septiembre de 2025 Google dejó de servir 100 resultados por página (num=100): cayeron las impresiones de escritorio y subió la posición media sin que el sitio cambiara.');
+  return salida;
+}
 
 // Todo el bloque. null si el job no trae ni Search Console ni trafico entre
 // censos (sin GSC conectado no se pinta nada).
@@ -7740,7 +7912,7 @@ function bloqueGoogle(job) {
     : null;
   // La primera frase del servidor son los totales, que ya dice la conclusion.
   const textos = t && t.comparable ? (t.textos || []).slice(1) : [];
-  return { cifras, conclusiones: conclusionTrafico(t), inspeccion, textos, ...paginasTrafico(t), trafico: t || null };
+  return { cifras, conclusiones: conclusionTrafico(t), inspeccion, textos, ...paginasTrafico(t), trafico: t || null, limites: limitesGoogle(g) };
 }
 
 // `jobs.sitemaps` (decision 126), solo en la ficha del job.
