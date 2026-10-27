@@ -137,7 +137,7 @@ Sin fecha; se va haciendo cuando se toca cada zona.
 
 - [x] UX-21 Pestañas y botones como `button` con `role="tab"`; ayudas también con foco/clic. (#129)
 - [x] UX-21 Diálogos propios en lugar de `confirm`/`alert`/`prompt`. (#129)
-- [ ] UX-21 Estilos en línea a clases (al tocar cada bloque, no en un PR gigante).
+- [x] UX-21 Estilos en línea a clases: de 922 `style=""` fijos a 108 (revisión del 25-oct, 3.8; decisión 201).
 - [x] UX-20 Tildes y términos en castellano en toda la interfaz. (#129)
 - [x] UX-18 Semántico: explicar qué da antes de pedir clave; parámetros en «Avanzado». (#129)
 - [x] UX-22 Mínimo usable en móvil: barra superior sin desbordar. (#129)
@@ -562,6 +562,37 @@ Cosas que no estaban en la auditoría y aparecieron al hacerla:
   perfil; V42: «Sí» en la ficha de URL y del censo, tildes en Semántico y en
   Reanudar; los desplegables «Sobre» y «Si» de las reglas propias ya no se
   cortan a 1440; el error de las reglas sin claves internas.
+
+### Revisión del 25-oct · 3.8 Escala de letra y estilos en línea (V43, UX-21)
+
+- [x] **Cuatro tamaños de letra, ninguno por debajo de 12 px** (decisión 201):
+  `--fs-sm` 12, `--fs-base` 14, `--fs-md` 16 y `--fs-lg` 20 px en `:root`, y
+  como excepción declarada `--fs-cifra` 24 px (la cifra grande de una tarjeta)
+  y `--fs-icono` 32 px. Había 39 tamaños distintos (de `.6rem` a `2.5rem`; con
+  `html` a 14px, `.8rem` eran 11,2 px y las insignias 9 px). Todo `font-size`
+  de `style.css`, `theme-terminal.css`, `index.html` y `entrar.html` usa una
+  variable.
+- [x] Lo que seguía por debajo sin un `font-size` pequeño: `code` y `pre` a
+  11,4 px (Chromium encoge la familia `monospace` sola), los ejes de la
+  evolución a 7-10 px pintados (el SVG se encogía en columnas de 260 px; ahora
+  320 como poco) y la etiqueta del anillo de Puntuación (11 unidades en un SVG
+  de 110 px).
+- [x] **Estilos en línea a clases**: de 922 atributos `style="..."` fijos a
+  108 (los `:style` con datos y los de una sola vez se quedan). Utilidades
+  nombradas por su valor (`mt-35`, `px-75`, `ico-14`, `fs-sm`, `c-red`) y
+  componentes cuando se repetía la combinación entera (`btn-rojo`,
+  `campo-simple`, `caja-codigo`, `fila-extremos`).
+- [x] El aspecto no cambia salvo por la escala: comparado el estilo calculado
+  de cada elemento antes y después en las 21 rutas sobre producción (solo
+  cambia lo que sale del tamaño de letra; y `justify-end` en Configuración,
+  que se usaba sin existir, ahora alinea a la derecha). Capturas a 1440 y 390
+  px en los dos temas; ninguna ruta desborda a 390. La barra lateral del
+  Explorador pasa de 170 a 190 px: «Tráfico de Google» partía en dos líneas.
+- [x] Un solo ayudante de porcentaje (`fmt.pct`; fuera `pctEs`).
+- Lo abierto: los 108 estilos en línea que quedan son de una sola vez; la
+  clase `.text-sm` de antes (sin `!important`) convive con `.fs-sm` (con él,
+  porque sustituye a un estilo en línea). Las `.caja-codigo` usaban
+  `var(--surface)`, que no existe: eran transparentes y lo siguen siendo.
 
 ### Cómo se probó
 

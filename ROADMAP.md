@@ -1172,6 +1172,14 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   frase, slug plegado, IA sin claves internas y con salida a Problemas, ayuda
   para semillas y canario, tildes y números en castellano (`fmt.dec`,
   `fmt.pct`, `fmt.pctDe`, `fmt.n`).
+- **Escala de letra y estilos en línea a clases** (revisión de UX del 25-oct,
+  3.8, decisión 201; en local, sin desplegar): cuatro tamaños de texto (12, 14,
+  16 y 20 px, más la cifra de las tarjetas y el icono como excepción) en
+  variables `--fs-*`, ninguno por debajo de 12 px en ninguna vista, tema ni
+  ancho (eran 39 tamaños y bajaban a 9 px; `code` salía a 11,4 px). Los 922
+  estilos en línea fijos de `index.html` bajan a 108: lo repetido pasa a clases
+  con el mismo contenido, comprobado elemento a elemento contra producción.
+  Un solo ayudante de porcentaje (`fmt.pct`). Solo frontend.
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 

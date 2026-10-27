@@ -762,3 +762,52 @@
    con y sin aceptar, el perfil, la recarga de la ficha con cambios a medias,
    el error de las reglas, la expresión del `:disabled` tal cual está en
    `index.html`, y los formatos de número).
+
+<a id="d201"></a>
+201. **Una escala de letra de cuatro tamaños (ninguno por debajo de 12 px) y los estilos en línea repetidos pasan a clases que dicen lo mismo**
+
+   **Problema.** Con `html` a 14px, el frontend usaba 39 tamaños de letra
+   distintos (de `.6rem` a `2.5rem`): `.8rem` eran 11,2 px, las insignias y
+   las cabeceras de tabla bajaban a 9 px, el texto de los ejes de la evolución
+   a 7 px pintado y `code`/`pre` a 11,4 px por una rareza de Chromium (una
+   familia `monospace` sola encoge el texto a 13/16). Leer «qué decide Google
+   / cómo se arregla» costaba (V43). Y `index.html` tenía 922 atributos
+   `style="..."` fijos, la mayoría repetidos (iconos de 14 px, filas flex,
+   márgenes), que nadie podía cambiar de una vez (UX-21).
+
+   **Decisión.**
+   - Cuatro tamaños de texto en `:root`: `--fs-sm` 12 px (notas, insignias,
+     cabeceras), `--fs-base` 14 px, `--fs-md` 16 px y `--fs-lg` 20 px; más dos
+     excepciones declaradas que no son texto corrido: `--fs-cifra` 24 px (la
+     cifra grande de una tarjeta) y `--fs-icono` 32 px (el icono de un estado
+     vacío y la nota del informe). Todo `font-size` del frontend usa una de
+     ellas, salvo la raíz; cada valor viejo va al más cercano (≤13 px → 12,
+     <15 → 14, <18 → 16, <22 → 20), y `.stat-value` a la cifra.
+   - `code`, `pre`, `kbd` y `samp` llevan otra familia delante de `monospace`;
+     el texto de un SVG cuenta por cómo se pinta (las columnas de la evolución
+     pasan a 320 px como poco para no encoger la gráfica, el anillo de la
+     puntuación a 14 unidades), y la barra lateral del Explorador pasa de 170 a
+     190 px para que sus entradas no partan.
+   - Los estilos en línea repetidos pasan a clases con el mismo contenido:
+     utilidades nombradas por su valor (`mt-35` = margin-top .35rem, `px-75`,
+     `w-5rem`, `ico-14`, `fs-sm`, `c-red`, `filete-orange`) y componentes con
+     nombre propio cuando se repetía la combinación entera (`btn-rojo`,
+     `campo-simple`, `caja-codigo`, `fila-extremos`). Llevan `!important`
+     porque sustituyen a un estilo en línea y deben ganar igual que él; las de
+     `display` van sin él, para que `x-show` pueda ocultar. Los `:style` que
+     dependen de datos y los fijos de una sola vez se quedan: 922 → 108.
+   - Se comprobó que el aspecto no cambia salvo por la escala comparando el
+     estilo calculado de cada elemento, antes y después, en las 21 rutas de la
+     revisión sobre producción: solo cambian lo que deriva del tamaño de letra
+     (`letter-spacing` y huecos en `em`, márgenes `auto`) y un
+     `justify-content: flex-end` que la clase `justify-end` ya pedía en
+     Configuración sin que existiera.
+   - Un solo ayudante de porcentaje: `fmt.pct` (se quita `pctEs`; con un
+     decimal fijo, «2,2 %», y «—» si no hay dato).
+
+   Tests: `tests/test_escala_letra_frontend.py` (14 vistas a 1440 y 390 px en
+   los dos temas: ningún texto visible calcula menos de 12 px, el de los SVG
+   con su escala; todo `font-size` usa la escala; los estilos en línea fijos
+   por debajo de la mitad y sus clases definidas; un solo ayudante de
+   porcentaje).
+

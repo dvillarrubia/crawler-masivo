@@ -16,7 +16,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157, 161, 168, 190 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165, 188, 191, 192, 197 |
-| [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151, 189, 194, 196, 199, 200 |
+| [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151, 189, 194, 196, 199, 200, 201 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
 | [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 177, 178, 179, 180, 181, 182, 184, 185 |
 | [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34), su edición y prueba en vivo, y segmentos de negocio | 104, 125, 166 |
@@ -227,6 +227,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 198 | Los grupos de la Limpieza van por texto repetido (líneas en al menos la mitad de una muestra), no por páginas, con el editor bajo su fila | [`contenido`](contenido.md#d198) |
 | 199 | Cada entrada de la barra del Explorador cuenta lo mismo que abre, con «0» cuando es cero (`total` de `/urls` con su filtro; en un ámbito, páginas con algún problema, no incidencias); «Páginas HTML» (internas 2xx, la cifra de la tarjeta) y «Todo el HTML» son dos entradas | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d199) |
 | 200 | Lo editado en la ficha del cliente (y en Ajustes) se guarda con una barra fija «Cambios sin guardar · Guardar» y salir con cambios pregunta; eliminar va dentro de «⋯»; el aceptar de las preguntas ya no sale desactivado | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d200) |
+| 201 | Una escala de letra de cuatro tamaños en `:root` (12, 14, 16 y 20 px; cifra e icono como excepción), ninguno por debajo de 12 px, y los estilos en línea repetidos pasan a clases con el mismo contenido (con `!important`, salvo `display`) | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d201) |
 
 ## Anadir una decision
 

@@ -7298,7 +7298,7 @@ function baseAlerta(al) {
 function textoRepetidoGrupo(g) {
   if (!g || g.repetido_parte == null) return 'sin medir';
   if (!g.repetido_parte) return 'nada';
-  return (g.repetido_parte < 0.01 ? 'menos del 1 %' : pctEs(100 * g.repetido_parte, 0)) + ' · ' + fmt.num(g.repetido_chars_medio) + ' caracteres por página';
+  return (g.repetido_parte < 0.01 ? 'menos del 1 %' : fmt.pct(100 * g.repetido_parte, 0)) + ' · ' + fmt.num(g.repetido_chars_medio) + ' caracteres por página';
 }
 // Lo que quitan las lineas propuestas frente a la cifra del grupo: la cifra
 // es de todas las repetidas y las propuestas tienen tope (40). Se mide sobre
@@ -7306,7 +7306,7 @@ function textoRepetidoGrupo(g) {
 function notaLineasLimpieza(g) {
   if (!g || !(g.lineas_repetidas || []).length || g.repetido_parte_lineas == null) return '';
   const n = g.lineas_repetidas.length, total = g.lineas_repetidas_total || n;
-  const parte = g.repetido_parte_lineas < 0.01 ? 'menos del 1 %' : pctEs(100 * g.repetido_parte_lineas, 0);
+  const parte = g.repetido_parte_lineas < 0.01 ? 'menos del 1 %' : fmt.pct(100 * g.repetido_parte_lineas, 0);
   if (total > n) return `Hay ${fmt.num(total)} líneas repetidas; aquí van las ${fmt.num(n)} que más texto ocupan, que son el ${parte} del texto.`;
   return n > 1 ? `Quitar estas ${fmt.num(n)} líneas deja el texto un ${parte} más corto.` : `Quitar esta línea deja el texto un ${parte} más corto.`;
 }
@@ -7346,10 +7346,6 @@ function rangoDias(desde, hasta) {
   return 'del ' + a.getDate() + ' ' + mes(a) + ano(a) + ' al ' + fin;
 }
 
-function pctEs(x, dec = 1) {
-  return Number(x).toLocaleString('es-ES', { maximumFractionDigits: dec }) + ' %';
-}
-
 // La frase del trafico entre censos: si los clics suben o bajan, cuanto, y la
 // ventana de cada cifra. Sin comparacion, o esperando a los datos, lo dice y
 // no saca conclusiones de los 90 dias solos.
@@ -7370,7 +7366,7 @@ function conclusionTrafico(t) {
     salida.push({ nivel: '', texto: 'Sin clics en el periodo anterior (' + rangoDias(va[0], va[1]) + '): no hay porcentaje que dar. Ahora, ' + nue + '.' });
   } else {
     const p = 100 * t.variacion;
-    const verbo = Math.abs(p) < 1 ? 'Los clics se mantienen' : (p < 0 ? 'Los clics bajan un ' : 'Los clics suben un ') + pctEs(Math.abs(p), 0);
+    const verbo = Math.abs(p) < 1 ? 'Los clics se mantienen' : (p < 0 ? 'Los clics bajan un ' : 'Los clics suben un ') + fmt.pct(Math.abs(p), 0);
     salida.push({ nivel: t.general ? 'orange' : '',
       texto: verbo + dias + ': ' + fmt.num(t.clics_nuevo) + ' ' + rangoDias(vn[0], vn[1]) + ' frente a ' + ant + '.' });
   }
@@ -7420,7 +7416,7 @@ function bloqueGoogle(job) {
     const ventana = rangoDias(desde, hasta);
     cifras.push({ etiqueta: 'Clics', valor: fmt.num(g.clics), ventana });
     cifras.push({ etiqueta: 'Impresiones', valor: fmt.num(g.impresiones), ventana });
-    cifras.push({ etiqueta: 'CTR medio', valor: g.impresiones ? pctEs(100 * g.clics / g.impresiones) : '—', ventana });
+    cifras.push({ etiqueta: 'CTR medio', valor: g.impresiones ? fmt.pct(100 * g.clics / g.impresiones) : '—', ventana });
   }
   const ins = g && g.inspeccion;
   const inspeccion = ins && ins.inspeccionadas
