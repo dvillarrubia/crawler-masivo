@@ -96,6 +96,25 @@ def test_las_tarjetas_cuentan_solo_paginas_html_internas_con_2xx(entorno):
     assert d["no_indexables"] == 1         # 3; la 4 esta sin analizar
 
 
+def test_paginas_con_error_cuenta_urls_distintas(tmp_path, entorno):
+    """La tarjeta «Páginas con error» (revision de UX del 25-oct, 1.11):
+    URLs distintas con algun error, no incidencias. Con dos errores mas en la
+    pagina que ya tenia uno y uno en otra, son 2 paginas."""
+    api, jid = entorno
+    assert api.get(f"/api/jobs/{jid}/stats").json()["paginas_con_error"] == 1
+    from shared.database import get_session as gs
+    ses = next(api.app.dependency_overrides[gs]())
+    u1, u3 = (ses.query(Url).filter(Url.job_id == jid, Url.url_hash == h).one() for h in ("h1", "h3"))
+    ses.add_all([
+        Issue(job_id=jid, url_id=u3.id, issue_type="broken_internal_link", severity="error", details={}),
+        Issue(job_id=jid, url_id=u3.id, issue_type="status_4xx", severity="error", details={}),
+        Issue(job_id=jid, url_id=u1.id, issue_type="status_4xx", severity="error", details={}),
+    ])
+    ses.commit()
+    ses.close()
+    assert api.get(f"/api/jobs/{jid}/stats").json()["paginas_con_error"] == 2
+
+
 def test_problemas_salen_por_gravedad(entorno):
     api, jid = entorno
     items = api.get(f"/api/jobs/{jid}/issues").json()["items"]
@@ -136,3 +155,30 @@ def test_resumen_por_tipo_cuenta_paginas_y_no_repite_ejemplos(entorno, tmp_path)
     h = next(x for x in r if x["issue_type"] == "hreflang_missing_return")
     assert h["incidencias"] == 3 and h["paginas"] == 1
     assert len(h["ejemplos"]) == 1
+
+
+def test_resumen_trae_las_paginas_del_tipo_en_todas_sus_gravedades(entorno, tmp_path):
+    """Decision 202: la interfaz pinta una fila por tipo («2 aviso · 2 info») y
+    necesita las paginas DISTINTAS del tipo. La pagina 1 tiene el tipo en las
+    dos gravedades: el tipo son 3 paginas, no 2 + 2 = 4."""
+    api, jid = entorno
+    from shared.models import Issue as I
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    s = sessionmaker(bind=create_engine(f"sqlite:///{tmp_path}/s.db"))()
+    u = {h: s.query(Url).filter(Url.job_id == jid, Url.url_hash == h).one() for h in ("h1", "h2", "h3")}
+    s.add_all([
+        I(job_id=jid, url_id=u["h1"].id, issue_type="canibalizacion_por_consulta", severity="warning", details={}),
+        I(job_id=jid, url_id=u["h2"].id, issue_type="canibalizacion_por_consulta", severity="warning", details={}),
+        I(job_id=jid, url_id=u["h1"].id, issue_type="canibalizacion_por_consulta", severity="info", details={}),
+        I(job_id=jid, url_id=u["h3"].id, issue_type="canibalizacion_por_consulta", severity="info", details={}),
+    ])
+    s.commit()
+    s.close()
+    r = api.get(f"/api/jobs/{jid}/issues/resumen").json()
+    filas = [x for x in r if x["issue_type"] == "canibalizacion_por_consulta"]
+    assert sorted((x["severity"], x["paginas"]) for x in filas) == [("info", 2), ("warning", 2)]
+    assert {x["paginas_tipo"] for x in filas} == {3}
+    # Un tipo con una sola gravedad: las mismas que su fila.
+    t = next(x for x in r if x["issue_type"] == "title_too_long")
+    assert t["paginas_tipo"] == t["paginas"] == 1

@@ -646,3 +646,16 @@ def test_un_backup_de_formato_1_resuelve_el_cliente_por_su_texto(tmp_path):
     job = s.get(Job, r["new_job_id"])
     assert s.get(Client, job.cliente_id).slug == "progym"
     s.close()
+
+
+def test_el_tipo_se_elige_al_lanzar(entorno):
+    """Decision 203: el modal manda el tipo y queda marcado; sin mandarlo,
+    como antes (se deduce del nombre: los scripts no lo mandan)."""
+    api, _ = entorno
+    r = api.post("/api/jobs", json={"name": "acme a mano", "seeds": ["https://x.com/"], "tipo": "prueba"})
+    assert r.status_code == 201
+    assert r.json()["tipo"] == "prueba" and r.json()["tipo_efectivo"] == "prueba"
+    r = api.post("/api/jobs", json={"name": "acme a mano", "seeds": ["https://x.com/"]})
+    assert r.json()["tipo"] is None and r.json()["tipo_efectivo"] == "censo"
+    assert api.post("/api/jobs", json={"name": "j", "seeds": ["https://x.com/"],
+                                       "tipo": "lista"}).status_code == 422

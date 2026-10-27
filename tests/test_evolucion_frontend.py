@@ -107,3 +107,53 @@ def test_la_tendencia_del_panel_no_cruza_un_cambio_de_version():
     assert nada is None and corta == "" and larga is True
     # Cortada en el cambio de version: dos tramos y un enlace gris discontinuo.
     assert partida.count('class="evo-linea"') == 2 and partida.count("discontinua") == 1
+
+
+def test_el_ultimo_tramo_va_en_rojo_si_empeora():
+    """Revision de UX del 25-oct, 1.13: con «mejor: baja», subir el ultimo
+    tramo es empeorar; sin `mejor` no se juzga."""
+    pts = [{"job_id": "a", "fecha": "2026-10-01", "comparable": True, "errores": 35},
+           {"job_id": "b", "fecha": "2026-10-08", "comparable": True, "errores": 41}]
+    peor = _evaluar("() => modeloGrafica(" + json.dumps(pts) + ", 'errores', {mejor: 'baja'}).tramos.map(t => t.sentido)")
+    assert peor == ["empeora"]
+    mejor = _evaluar("() => modeloGrafica(" + json.dumps(pts) + ", 'errores', {mejor: 'sube'}).tramos.map(t => t.sentido)")
+    assert mejor == ["mejora"]
+    assert _evaluar("() => modeloGrafica(" + json.dumps(pts) + ", 'errores').tramos[0].sentido") is None
+    svg = _evaluar("() => svgGrafica(modeloGrafica(" + json.dumps(pts) + ", 'errores', {mejor: 'baja'}))")
+    assert 'class="evo-linea empeora"' in svg
+
+
+def test_cada_tramo_lleva_su_sentido_y_el_plano_es_neutro():
+    """Revision de UX del 25-oct, 3.1: no solo el ultimo tramo; uno que no
+    cambia no se pinta de verde ni de rojo."""
+    pts = [{"job_id": c, "fecha": f"2026-10-0{i + 1}", "comparable": True, "errores": v}
+           for i, (c, v) in enumerate([("a", 50), ("b", 40), ("c", 40), ("d", 45)])]
+    sentidos = _evaluar("() => modeloGrafica(" + json.dumps(pts) + ", 'errores', {mejor: 'baja'}).tramos.map(t => t.sentido || null)")
+    assert sentidos == ["mejora", None, "empeora"]
+
+
+def test_el_eje_no_exagera_una_variacion_pequena():
+    """3.197 → 3.222 indexables (+0,8 %) ya no va de suelo a techo: el eje
+    abarca al menos un 20 % del valor mas alto, sin bajar de 0."""
+    pts = [{"job_id": "a", "fecha": "2026-10-01", "comparable": True, "indexables": 3197},
+           {"job_id": "b", "fecha": "2026-10-08", "comparable": True, "indexables": 3222}]
+    m = _evaluar("() => modeloGrafica(" + json.dumps(pts) + ", 'indexables', {mejor: 'sube'})")
+    # 3.222 − 20 % = 2.577,6, redondeado hacia abajo a la centena: 2.500.
+    assert m["max"] == 3222 and m["min"] == 2500
+    salto = m["puntos"][0]["y"] - m["puntos"][1]["y"]
+    assert 0 < salto < (m["abajo"] - m["arriba"]) * 0.05
+    # Enteros pequenos: el suelo va de 1 en 1, sin decimales (41 → 32).
+    cuatro = [dict(p, indexables=v) for p, v in zip(pts, (35, 41))]
+    assert _evaluar("() => modeloGrafica(" + json.dumps(cuatro) + ", 'indexables').min") == 32
+    pocos = [dict(p, indexables=v) for p, v in zip(pts, (1, 3))]
+    assert _evaluar("() => modeloGrafica(" + json.dumps(pocos) + ", 'indexables').min") == 1  # 1 → 3 ya abarca de sobra
+    ceros = [dict(p, indexables=0) for p in pts]
+    assert _evaluar("() => modeloGrafica(" + json.dumps(ceros) + ", 'indexables').min") == 0
+
+
+def test_la_sparkline_del_panel_colorea_por_sentido_con_mejor():
+    r = _evaluar("() => [sparkline([89, 85, 85, 90], [], {mejor: 'baja'}), sparkline([89, 85])]")
+    con, sin = r
+    assert con.count("evo-linea mejora") == 1 and con.count("evo-linea empeora") == 1
+    assert con.count('class="evo-linea"') == 1          # el tramo plano, neutro
+    assert "mejora" not in sin and "empeora" not in sin

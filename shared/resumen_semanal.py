@@ -36,6 +36,10 @@ TERMINADOS = ("completed", "failed", "stalled", "cancelled")
 # semana.
 GRACIA = timedelta(hours=12)
 
+# Junto a unos totales sin «No incluida en el sitemap» (decision 205).
+SIN_SITEMAP = ("sin contar «No incluida en el sitemap»: no se leyeron todos los "
+               "sitemaps y su diferencia no se puede afirmar")
+
 CIFRAS = ("urls", "indexables", "errores", "urls_con_error")
 ETIQUETAS = {"urls": "URLs", "indexables": "indexables", "errores": "errores",
              "urls_con_error": "URLs con error"}
@@ -134,6 +138,19 @@ def _como_uuid(v):
         return None
 
 
+def _referencia_de(db, comp):
+    """El censo con el que se comparo, o None si no esta (o no se puede leer)."""
+    from shared.models import Job
+
+    ref_id = _como_uuid((comp or {}).get("comparado_con"))
+    if ref_id is None:
+        return None
+    try:
+        return db.get(Job, ref_id)
+    except Exception:  # noqa: BLE001 - lo que no se puede comprobar no se afirma
+        return None
+
+
 def _resumen_de_rastreo(db, job) -> dict[str, Any]:
     comp = job.comparacion if isinstance(job.comparacion, dict) else None
     propias = job.alertas_cliente if isinstance(getattr(job, "alertas_cliente", None), dict) else {}
@@ -157,11 +174,22 @@ def _resumen_de_rastreo(db, job) -> dict[str, Any]:
         salida["trafico"] = trafico["textos"]
     inc = (comp or {}).get("incidencias") if comp else None
     if isinstance(inc, dict) and inc.get("comparable"):
+        # «No incluida en el sitemap» no se puede afirmar si cualquiera de los
+        # dos censos leyo sus sitemaps a medias, ni su diferencia: fuera de los
+        # totales y dicho con `sin_sitemap` (decision 205). Un censo de
+        # referencia que ya no esta no se puede comprobar: tampoco se afirma.
+        from shared.sitemaps_lectura import lectura_dudosa, sin_tipos_de_sitemap
+
+        dudoso = lectura_dudosa(getattr(job, "sitemaps", None))
+        if not dudoso:
+            ref = _referencia_de(db, comp)
+            dudoso = ref is None or lectura_dudosa(getattr(ref, "sitemaps", None))
+        totales = sin_tipos_de_sitemap(inc, dudoso)
         salida["incidencias"] = {
-            "nuevas": (inc.get("nuevas") or {}).get("total"),
-            "resueltas": (inc.get("resueltas") or {}).get("total")
-            if inc.get("resueltas") else None,
-            "siguen": (inc.get("siguen") or {}).get("total"),
+            "nuevas": totales["nuevas"],
+            "resueltas": totales["resueltas"] if inc.get("resueltas") else None,
+            "siguen": totales["siguen"],
+            "sin_sitemap": totales["sin_sitemap"],
         }
     elif isinstance(inc, dict):
         salida["incidencias_motivo"] = inc.get("motivo")
@@ -326,7 +354,8 @@ def texto(c: dict[str, Any]) -> str:
         if inc:
             partes.append(f"{_num(inc.get('nuevas'))} incidencias nuevas"
                           + (f", {_num(inc['resueltas'])} resueltas"
-                             if inc.get("resueltas") is not None else ""))
+                             if inc.get("resueltas") is not None else "")
+                          + (f" ({SIN_SITEMAP})" if inc.get("sin_sitemap") else ""))
         lineas.append("")
         lineas.append(f"_{p['nombre']}_ · {p['rastreos']} rastreo(s): " + ("; ".join(partes) or "sin cifras"))
     vivos = c.get("incidentes_vivos") or []

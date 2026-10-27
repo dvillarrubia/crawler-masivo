@@ -17,9 +17,10 @@ from shared.database import init_db
 
 from api import dependencies
 from api.auth import AutenticacionMiddleware, desactivada, token_configurado
+from api.cabeceras import CabecerasSeguridadMiddleware
 from api.mcp_despacho import DespachoMcp, EstadoMcp
 from api.routers import (
-    almacenamiento, cleaning, clientes, compartido, credenciales, enriquecido, extraccion, jobs, programaciones,
+    ajustes, almacenamiento, cleaning, clientes, compartido, credenciales, enriquecido, extraccion, jobs, programaciones,
     results, robots_prueba, segmentos, semantic, sesion, uso,
 )
 
@@ -107,6 +108,11 @@ if _ORIGENES:
 # de OAuth llevan su propia autenticacion (token del conector), no la de `/api`.
 app.add_middleware(DespachoMcp, estado=estado_mcp)
 
+# Cabeceras de seguridad (decision 208). La ultima en anadirse es la mas
+# externa, asi que envuelve a todas: las respuestas de `/api`, las de 401 de la
+# autenticacion, el MCP y los estaticos llevan las cabeceras.
+app.add_middleware(CabecerasSeguridadMiddleware)
+
 # Routers
 app.include_router(jobs.router)
 app.include_router(results.router)
@@ -123,6 +129,7 @@ app.include_router(sesion.router)
 app.include_router(credenciales.router)
 app.include_router(compartido.router)
 app.include_router(robots_prueba.router)  # decision 171
+app.include_router(ajustes.router)  # decision 196
 
 
 @app.get("/health", tags=["system"])

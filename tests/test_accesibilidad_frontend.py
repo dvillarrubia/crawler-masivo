@@ -1,7 +1,6 @@
 """La interfaz de la accesibilidad con axe (decision 174), ejecutando
-`frontend/app.js` en Chromium: las claves del modal solo se mandan si se
-cambian (como las demas sondas, para seguir heredando del cliente y el
-perfil), el nombre del impacto y el ambito del Explorador con los dos tipos.
+`frontend/app.js` en Chromium: las claves del formulario solo se mandan si
+se cambian (decision 196: para seguir heredando del cliente y el perfil), el nombre del impacto y el ambito del Explorador con los dos tipos.
 La tarjeta del Resumen se comprueba con su marcado (`data-testid`).
 
 Necesita Chromium: se salta si no esta.
@@ -42,13 +41,16 @@ def _evaluar(expr: str):
 
 
 def _config(cuerpo: str = "") -> dict:
-    return _evaluar("() => { const f = _freshForm(); " + cuerpo + " return _configDesdeForm(f); }")
+    """Lo que mandaria un rastreo con el formulario de configuracion (decision
+    196): solo lo que fija ese nivel (`propia`)."""
+    return _evaluar("() => { const i = cfgNuevo('rastreo', {base: {crawl_behavior: {axe_muestra: 0, "
+                    "axe_por_plantilla: 1}}}); " + cuerpo + " return i.propia; }")
 
 
 def test_sin_tocarlo_no_se_manda_y_cambiado_si():
-    cb = _config()["crawl_behavior"]
-    assert "axe_muestra" not in cb and "axe_por_plantilla" not in cb
-    cb = _config("f.axe_muestra = '30'; f.axe_por_plantilla = 2;")["crawl_behavior"]
+    assert "crawl_behavior" not in _config()
+    cb = _config("cfgCambiar(i, 'crawl_behavior.axe_muestra', '30');"
+                 " cfgCambiar(i, 'crawl_behavior.axe_por_plantilla', '2');")["crawl_behavior"]
     assert cb["axe_muestra"] == 30 and cb["axe_por_plantilla"] == 2
 
 

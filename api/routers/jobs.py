@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 
@@ -11,7 +12,7 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Upload
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from shared.cola import encolar
+from shared.cola import en_orden, encolar
 from shared.database import get_session
 from shared.models import Job, Url, Issue, Link
 
@@ -29,6 +30,7 @@ from api.schemas import (
 )
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
+logger = logging.getLogger(__name__)
 
 
 def _reloj() -> float:
@@ -40,6 +42,28 @@ def _reloj() -> float:
     cuelga en vez de fallar; me paso al escribir el test del presupuesto.
     """
     return time.monotonic()
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/cola  --  el orden real de salida de la cola de rastreos
+# ---------------------------------------------------------------------------
+# Antes de las rutas `/{job_id}`: con el id tipado como UUID, «cola» acabaria
+# en un 422 en vez de llegar aqui.
+@router.get("/cola")
+def get_cola():
+    """Los ids que esperan en Redis, del primero en salir al ultimo.
+
+    La vista Produccion dice «el 2.º en la cola» con este orden, que es el que
+    usa el worker (FIFO, `shared/cola.py`), y no con `created_at`: una
+    reanudacion vuelve al final aunque el job se creara hace dias (revision de
+    UX del 25-oct, 2.12). Sin Redis se dice que no se sabe (`disponible`
+    false) en vez de devolver una cola vacia, que se leeria «no espera nadie».
+    """
+    try:
+        orden = en_orden(get_redis())
+    except Exception:
+        return {"disponible": False, "orden": []}
+    return {"disponible": True, "orden": orden}
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +198,7 @@ def create_job(
         client_id=cliente.slug if cliente else payload.client_id,
         cliente_id=cliente.id if cliente else None,
         profile_id=perfil.id if perfil else None,
+        tipo=payload.tipo,
         status="pending",
         config=config,
     )
@@ -318,7 +343,25 @@ def get_job(
     job = db.query(Job).filter(Job.id == job_id).first()
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    return _con_cliente(db, [job], JobDetailResponse)[0]
+    return _textos_de_trafico_al_dia(_con_cliente(db, [job], JobDetailResponse)[0])
+
+
+def _textos_de_trafico_al_dia(resp):
+    """Las frases del trafico entre censos, redactadas al servirlas (decision
+    197), como ya hacia la ficha del cliente (`/clients/{id}/trafico`): las
+    guardadas en `comparacion.trafico.textos` son las del dia del analisis, y
+    un censo viejo seguiria diciendo dos veces la misma pagina. Best-effort:
+    si algo falla, salen las guardadas."""
+    try:
+        comp = resp.comparacion
+        t = comp.get("trafico") if isinstance(comp, dict) else None
+        if isinstance(t, dict):
+            from shared.trafico_entre_censos import textos
+
+            resp.comparacion = {**comp, "trafico": {**t, "textos": textos(t)}}
+    except Exception:
+        logger.exception("No se pudieron redactar los textos del trafico")
+    return resp
 
 
 # ---------------------------------------------------------------------------
@@ -349,6 +392,15 @@ def update_job(
         job.tipo = cambios["tipo"]
     if "cliente_id" in cambios:
         nuevo = cambios["cliente_id"]
+        # Un perfil es de un cliente: al cambiarlo de cliente, el perfil del
+        # anterior se suelta. Si no, «Nuevo rastreo» y «Programar» desde este
+        # rastreo mandaban el cliente nuevo con el perfil viejo y el servidor
+        # contestaba 422 (revision de la fase 1.4 de UX, 25-oct).
+        if job.profile_id is not None:
+            from shared.models import CrawlProfile
+            perfil = db.get(CrawlProfile, job.profile_id)
+            if perfil is None or nuevo is None or perfil.cliente_id != nuevo:
+                job.profile_id = None
         if nuevo is None:
             job.cliente_id = None
         else:

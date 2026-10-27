@@ -68,6 +68,9 @@ order of priority:
   la entidad en la ficha de la URL). Falta verlo en un censo WordPress entero de
   produccion, el hallazgo 4 (sitemap frente a contenido, descartado por ahora: ver la
   161) y, si se quiere, exportar «Solo en WordPress» en CSV.
+- Limpieza (decision 198): agrupar por plantilla (`firma_de_ruta`) en vez de por
+  forma de URL, guardar las reglas en el cliente para no repetirlas cada semana y
+  un boton para volver a analizar el censo despues de limpiar (hoy, a mano).
 
 ## Reference Documents
 

@@ -199,6 +199,9 @@ class Incidente(Base):
     abierto_en = Column(DateTime(timezone=True), default=_utcnow)
     visto_en = Column(DateTime(timezone=True), nullable=True)
     cerrado_en = Column(DateTime(timezone=True), nullable=True)
+    # Por que se cerro sin un rastreo que lo comprobara (decision 188):
+    # «serie_pausada» o «serie_borrada». NULL = lo cerro `cerrado_job_id`.
+    motivo_cierre = Column(String(32), nullable=True)
     actualizado_en = Column(DateTime(timezone=True), default=_utcnow)
     # Sin aviso hasta ese dia (incluido); el incidente se sigue llevando.
     silenciado_hasta = Column(Date, nullable=True)
@@ -387,11 +390,18 @@ class EnlaceCliente(Base):
 class Programacion(Base):
     """Un rastreo que se repite: cuando toca y que lanzar.
 
-    Lleva sus propias `seeds` y `config` en vez de apuntar a
-    `projects/<cliente>/config.json`: esos ficheros viven en la maquina de
-    quien lanza los rastreos y la imagen del worker no los tiene. Asi la
-    programacion es autosuficiente y se crea con el mismo cuerpo que un
-    `POST /api/jobs`.
+    Dos formas (decision 193, revision de UX del 25-oct, 2.2):
+
+    - **Colgada de un perfil** (`hereda_perfil`): en cada disparo hereda lo
+      del MOMENTO, cliente -> perfil -> lo propio de la programacion. Las
+      semillas son las del perfil (`seeds` queda vacia) y `config` guarda solo
+      lo propio (p. ej. un tope de URLs), no una copia. Cambiar el perfil o el
+      cliente llega al siguiente censo.
+    - **Copia fija** (las de antes): lleva sus propias `seeds` y `config`
+      completas, copiadas del rastreo del que se creo. Siguen funcionando
+      igual hasta que `scripts/migrar_programaciones_a_perfiles.py` las cuelga
+      de un perfil. No apuntan a `projects/<cliente>/config.json`: esos
+      ficheros viven en la maquina de quien lanza y el worker no los tiene.
     """
 
     __tablename__ = "programaciones"
@@ -412,6 +422,10 @@ class Programacion(Base):
     )
     seeds = Column(JSON, nullable=False)
     config = Column(JSON, nullable=True)
+    # Si hereda del perfil en cada disparo (decision 193). Falso en las de
+    # copia fija: asi las viejas no cambian de comportamiento sin migrarlas.
+    hereda_perfil = Column(Boolean, nullable=False, default=False,
+                           server_default=sql_text("false"))
 
     # Expresion de cinco campos (`m h dom mes dsem`) y la zona en la que se
     # lee: un "todos los lunes a las 3:00" sin zona se desplaza una hora en

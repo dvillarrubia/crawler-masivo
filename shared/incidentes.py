@@ -108,6 +108,16 @@ def actualizar(db, job, comparacion: dict[str, Any] | None, propias: dict[str, A
     serie = serie_de_job(job)
     if serie is None:
         return None
+    # Un rastreo de una programacion que se pauso o se borro mientras corria
+    # no abre nada ni avisa: sus incidentes se cerraron al pausarla (decision
+    # 188) y, si se abrieran ahora, no los cerraria nadie. Lo que pudiera haber
+    # vivo se cierra con el mismo motivo.
+    motivo = _serie_sin_rastreos(db, serie)
+    if motivo:
+        cerrar_serie(db, serie, motivo, ahora)
+        db.flush()
+        logger.info("Job %s: la serie %s ya no rastrea (%s); no abre incidentes", job.id, serie, motivo)
+        return []
     if not _es_el_mas_reciente(db, job, serie):
         logger.info("Job %s: hay un rastreo posterior en %s; no toca los incidentes", job.id, serie)
         return []
@@ -171,6 +181,53 @@ def actualizar(db, job, comparacion: dict[str, Any] | None, propias: dict[str, A
     return [a for a in nuevas if clave_de_alerta(a) not in silenciados]
 
 
+SERIE_PAUSADA, SERIE_BORRADA = "serie_pausada", "serie_borrada"
+
+
+def _serie_sin_rastreos(db, serie: str) -> str | None:
+    """SERIE_PAUSADA o SERIE_BORRADA si la serie es una programacion pausada o
+    que ya no existe; None si sigue (o es la de un perfil, que se puede lanzar
+    a mano mientras exista: un perfil borrado ya no da rastreos con su serie)."""
+    import uuid as _uuid
+
+    from shared.models import Programacion
+
+    tipo, _, ident = serie.partition(":")
+    if tipo != "programacion":
+        return None
+    try:
+        prog = db.get(Programacion, _uuid.UUID(ident))
+    except ValueError:
+        return None
+    if prog is None:
+        return SERIE_BORRADA
+    return None if prog.activa else SERIE_PAUSADA
+
+
+def cerrar_serie(db, serie: str, motivo: str, ahora: datetime | None = None) -> int:
+    """Cierra los incidentes vivos de una serie que ya no va a rastrear nadie
+    (decision 188): se pauso o se borro su programacion, o se borro su perfil.
+    Sin esto quedaban abiertos para siempre, porque solo los cierra un rastreo
+    de su serie (el criterio de arriba) y no iba a haber ninguno. El cierre
+    dice por que (`motivo_cierre`) y no lleva rastreo: no afirma que el fallo
+    se fuera. Si la serie vuelve (se reactiva) y el fallo sigue, el siguiente
+    rastreo abre otro incidente y avisa. Devuelve cuantos cerro; no hace
+    commit."""
+    from shared.models import Incidente
+
+    ahora = ahora or datetime.now(timezone.utc)
+    n = 0
+    for inc in db.query(Incidente).filter(Incidente.serie == serie, Incidente.estado.in_(VIVOS)):
+        inc.estado = CERRADO
+        inc.cerrado_en = ahora
+        inc.motivo_cierre = motivo
+        inc.actualizado_en = ahora
+        n += 1
+    if n:
+        logger.info("Serie %s: %d incidentes cerrados (%s)", serie, n, motivo)
+    return n
+
+
 def a_dict(i) -> dict[str, Any]:
     return {
         "id": str(i.id), "cliente_id": str(i.cliente_id) if i.cliente_id else None,
@@ -181,6 +238,7 @@ def a_dict(i) -> dict[str, Any]:
         "ultimo_job_id": str(i.ultimo_job_id) if i.ultimo_job_id else None,
         "cerrado_job_id": str(i.cerrado_job_id) if i.cerrado_job_id else None,
         "abierto_en": i.abierto_en, "visto_en": i.visto_en, "cerrado_en": i.cerrado_en,
+        "motivo_cierre": getattr(i, "motivo_cierre", None),
         "actualizado_en": i.actualizado_en,
         "silenciado_hasta": i.silenciado_hasta.isoformat() if isinstance(i.silenciado_hasta, date) else None,
     }

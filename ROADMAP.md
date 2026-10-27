@@ -344,7 +344,8 @@ página— solo existe tras el render.
 
 ### Informe para el cliente en PDF (18 de octubre)
 
-En la ficha de un rastreo, Exportar → **Informe para el cliente** abre una
+En la ficha de un rastreo, el botón **Informe para el cliente** (antes
+dentro de Exportar; revisión de UX del 25-oct) abre una
 página lista para imprimir o guardar como PDF. Lleva la nota del sitio y por
 qué, las cifras, lo que ha cambiado desde el rastreo anterior, las diez cosas
 que hay que arreglar primero (cada una con qué es, qué decide Google y cómo se
@@ -448,6 +449,28 @@ mensual: **«¿cómo va este sitio desde que lo llevamos?»**.
   «sube» ni «baja»: el salto puede ser nuestro, no del sitio.
 - **Portada en tabla**: cada cliente con su último censo, sus errores y la
   tendencia de errores en una línea pequeña.
+- **La ficha del cliente en cuatro pestañas** (revisión de UX del 25-oct, 2.1):
+  **Estado** al entrar (último censo con páginas, indexables y páginas con
+  error; los cinco primeros problemas por prioridad, cada uno con sus URLs;
+  qué ha cambiado frente al censo anterior y las alertas abiertas),
+  **Historial** (tráfico de Google, gráficas y tabla de evolución), **Alertas**
+  (solo las alertas) y **Configuración** (perfiles, datos del cliente y reglas
+  de alertas). Un solo botón «Nuevo rastreo», con el cliente ya puesto.
+- **Una sola referencia para «frente al anterior»** (2.3): la tabla, las
+  gráficas, la tarjeta del censo y sus alertas comparan con el mismo censo, el
+  anterior de la misma programación, y lo dicen con su fecha («frente al 19
+  oct»). Antes la tabla restaba la fila de debajo, que con dos programaciones
+  era de la otra serie (85 ▲2 en la tabla, 85 ▼4 en la gráfica).
+- **«Alertas» es una sola cifra**: las abiertas (las que saltaron y ningún
+  rastreo posterior ha visto resueltas), igual en la portada, en Estado y en
+  la pestaña. Antes la portada decía «3 alertas» y «5 incidentes» a la vez.
+  Las de una comparación concreta se dicen con su verbo y su fecha («frente
+  al 14 oct: saltaron 3 alertas»), y «Ver las cerradas» enseña adónde fueron.
+  Sin ninguna abierta, la portada dice las que saltó el último censo (un
+  censo sin perfil ni programación no las abre) y lo sube en la lista.
+  `/serie` trae `fecha_anterior` para nombrar una referencia que no está en
+  la serie; «Qué ha cambiado» enseña los avisos de la comparación (versiones
+  distintas del crawler).
 
 Las cifras de cada rastreo se guardan al terminar (sin leer los enlaces), así
 que la ficha no recorre los censos. Los rastreos anteriores se rellenan con
@@ -990,6 +1013,201 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
 - [#122](https://github.com/dvillarrubia/crawler-masivo/issues/122) **El cliente como entrada**: portada por cliente, con su
   último censo y sus alertas.
 - [#123](https://github.com/dvillarrubia/crawler-masivo/issues/123) **Pulido**: teclado, tildes, diálogos propios, móvil.
+- **URLs dentro de la ficha del censo** (revisión de UX del 25-oct, 2.6,
+  hecho el 26-oct): el Explorador es la pestaña **URLs** y, con la ficha de
+  cada URL, conserva la cabecera del censo (compacta) y las pestañas. Sin
+  botón «Volver»: la miga «URLs» y la pestaña vuelven a la última consulta con
+  sus filtros y su página. Queda pendiente que el panel lateral de una fila
+  sea una versión recortada de la misma ficha de URL (hoy es otro componente).
+- **Producción** (revisión de UX del 25-oct, 2.12; hecho): la barra queda en
+  Clientes · Producción, con lo que corre (barra, total estimado y hora de fin
+  cuando hay base), lo que espera con su puesto real en la cola
+  (`GET /api/jobs/cola`), los próximos disparos y los rastreos sin cliente;
+  Programados y Todos los rastreos son apartados suyos. Detalle en
+  `docs/AUDITORIA_UX.md`.
+- **Ficha de URL que explica qué le pasa** (revisión de UX del 25-oct, 2.7,
+  hecho el 26-oct; V27 y V28): los problemas de la URL agrupados por tipo,
+  con qué es, el detalle legible y sin repetir, qué decide Google, cómo se
+  arregla, «es de plantilla / del servidor: se arregla una vez» y «Ver las N
+  páginas con este problema» (la pestaña URLs filtrada). Tarjeta «Google (90
+  días)» con clics, impresiones y posición media de Search Console y la
+  canonical que elige Google según su última inspección (campo
+  `google_inspeccion` de la ficha, decisión 189); sin datos, una frase que
+  dice por qué. Tras la revisión: el detalle ya no saca claves internas
+  (la canibalización dice con qué URL compite y con qué parte), la N del
+  enlace es la misma que lista URLs, la canonical de Google solo se compara
+  con la del censo si la inspección es de sus fechas (y «ya la sigue» en vez
+  de «cambiará» cuando ya coincide), y con Search Console parcial las cifras
+  dicen desde cuándo son.
+- **Problemas con la diferencia frente al anterior y por secciones**
+  (revisión de UX del 25-oct, 2.10; en local, sin desplegar): cada tipo dice
+  «+12», «−5», «nuevo» o «igual» frente al censo con el que se comparó, con las
+  cifras guardadas de la comparación, y por qué no cuando no se puede afirmar
+  (otro alcance, truncado, versión del análisis distinta: decisión 191). Con
+  segmentos de negocio (125), las secciones son el primer nivel de Problemas;
+  sin ellos, queda como estaba.
+- **Soft 404 de plantilla como aviso agrupado** (2.11, decisión 190; en local):
+  `soft_404_plantilla`, una fila por host con las plantillas que responden 200
+  a una URL que no existe. El Resumen deja de decir «0 páginas» en verde junto a
+  esas plantillas. Los censos ya analizados lo tendrán al re-analizarse.
+- **Enlaces con filtros en el servidor** (revisión de UX del 25-oct, 2.8,
+  decisión 195; V24 y V25; en local, sin desplegar): destino, página que
+  enlaza, texto, interno/externo, follow, posición y estado y código del
+  destino, filtrados sobre `links.job_id` o sobre el Parquet del censo
+  archivado con el mismo resultado; vista por destino (páginas que lo enlazan,
+  anclas y estado) con «Quién la enlaza»; los destinos rotos primero; el
+  estado de la sonda externa por fin en pantalla, y «Externas» del Explorador
+  con los destinos externos enlazados en vez de «0». Endpoints
+  `GET /links` (con filtros), `/links/destinos` y `/links/resumen`. En un
+  rastreo en marcha, conteos en una pasada, guardados 30 s y con tope de 20 s
+  (503 claro); «es exactamente» con o sin barra final; atrás vuelve de «Quién
+  la enlaza» a los destinos. Pendiente: el CSV con los filtros de la vista.
+- **El perfil como única unidad** (revisión de UX del 25-oct, 2.2; decisión 193;
+  en local, sin desplegar): una programación nueva cuelga de un perfil
+  (`hereda_perfil`) y en cada disparo el worker lee el cliente y el perfil de
+  ese momento, en vez de la copia congelada del rastreo del que se creó. La
+  serie y los incidentes son los del perfil. Programados con cliente y perfil,
+  «Editar», «Nueva programación» y aviso de repetidas; cada perfil dice cuándo
+  se repite y se programa desde él. Las viejas siguen igual hasta pasar
+  `scripts/migrar_programaciones_a_perfiles.py --confirmar` (simulación por
+  defecto), que en Lopesan deja un perfil «Sitio completo» con las tres
+  programaciones y una sola serie. Revisado el 26-oct: el worker resuelve la
+  config igual que la API (modo lista sin sitemap, UA y huella, defaults que
+  valen `None`; un test los compara caso a caso) y «Crear un perfil con este
+  rastreo» guarda su configuración, no solo las semillas. **Pendiente:**
+  ejecutarlo en producción tras desplegar (antes, la simulación) y pausar la
+  programación que sobre.
+- **Alta de cliente guiada** (2.14; decisión 194; en local): nombre y dominio,
+  perfil «Sitio principal» creado solo y «Siguiente paso» con lanzar canario,
+  lanzar censo o programar cada semana.
+- **Configuración en tres niveles** (revisión de UX del 25-oct, 2.4; decisión
+  196; en local, sin desplegar): el mismo formulario para el cliente, el perfil
+  y Nuevo rastreo, sin JSON a mano (queda en «Avanzado»). Cada campo dice si
+  viene del cliente, del perfil o es de serie, o si se ha cambiado ahí, con
+  «volver al heredado»; se valida con los límites de `JobConfig`. «Así
+  rastreará» enseña la config con la que saldría el próximo rastreo y de dónde
+  viene cada valor (`config-resuelta` con borrador), con avisos que solo
+  afirman lo que se sabe: el del WAF, si un rastreo anterior del mismo sitio
+  (no de un competidor) se paró por un bloqueo o tuvo muros, rebajado si
+  después hubo rastreos limpios. Nuevo rastreo (también el botón de la ficha)
+  trae el cliente y su perfil y lo avanzado plegado; sin cliente lo avisa.
+  Configuración del cliente en secciones plegables con índice. El JSON de
+  «Avanzado» se aplica solo, y cabeceras y cookies dicen el nivel de cada
+  clave (revisión del 26-oct).
+- **Ajustes de la agencia** (2.5; decisión 196; en local): bot de Slack,
+  llaves de Search Console, si están las claves de los modelos y su tope,
+  importar backup y tema, fuera de la ficha de cada cliente. **Pendiente:** las
+  claves de Gemini del análisis semántico siguen en la base de datos (forma
+  anterior a la decisión 141); moverlas al servidor como las llaves de GSC.
+- **Pestaña IA** (revisión de UX del 25-oct, 2.9; hecho en local): el análisis
+  enriquecido deja la cabecera del censo y «Avanzado › Enriquecido» y pasa a
+  una pestaña propia, «IA», con lo ya preguntado, la respuesta de cada vez y
+  «Nueva consulta…». El lanzador avisa si ya se preguntó lo mismo en ese censo,
+  pregunta por defecto a las candidatas de cada módulo (explica en llano a
+  cuáles y dice a cuántas),
+  pide la «clave de autorización», habla del gasto del mes «en todos los
+  clientes» y pliega llamadas, memoria, tokens, presupuesto y tope global en
+  «Opciones avanzadas». Problemas enseña «Revisado con IA» en la canibalización
+  y en los candidatos a soft 404; la ficha de una URL, lo que dijo la IA de
+  ella. «Avanzado» pasa a «Más» con nombre fijo (V34). Solo frontend.
+- **Validar migración como acción aparte** (revisión de UX del 25-oct, 2.13,
+  decisión 192; en local, sin desplegar): un asistente desde el menú «…» del
+  censo o desde Comparar, con los dos censos (por tipo, de cualquier dominio del
+  cliente), los casos comunes sin regex (dominio, carpeta, trozo, extensión,
+  barra final) con 5 URLs reales de muestra y si están en el censo de después,
+  las regex plegadas en «Avanzado» y el resultado del `GET /diff` de siempre
+  (cuántas URLs viejas tienen pareja y cuáles no). Comparar queda para el
+  seguimiento: sin la casilla, abre al instante con la comparación guardada y
+  calcula el detalle después (V21; las incidencias guardadas, solo si los dos
+  censos siguen con la versión del análisis con la que se compararon), y el
+  desplegable va por tipo (V22). Solo frontend.
+- **Una escala de color** (revisión de UX del 25-oct, 3.1; en local, sin
+  desplegar): rojo = error, naranja = aviso, azul = info, gris = neutro y verde
+  solo para «bien»; enlaces, botón principal, texto gris y avisos pasan 4,5:1
+  en los dos temas (comprobado en Chromium). Las alertas de la pestaña no salen
+  en verde, cancelado es gris y las gráficas de evolución pintan cada tramo
+  según mejore o empeore, con un eje que no exagera. Solo frontend.
+- **Móvil y barra del Explorador** (revisión de UX del 25-oct, 3.2 y 3.4,
+  decisión 199; en local, sin desplegar): a 390 px la portada de clientes,
+  todos los rastreos y la evolución del cliente son tarjetas (estado, si ha
+  terminado, errores y alertas) con el patrón de Enlaces, y ninguna ruta
+  desborda (medido en las 21; `tests/test_movil_frontend.py`). En la pestaña
+  URLs la barra lateral pasa a un desplegable con sus cifras; en escritorio la
+  búsqueda va primero y ancha, «Agrupar ▾» es un solo botón, la URL queda fija
+  al desplazar, las columnas de serie empiezan por indexable, enlaces
+  entrantes y clics de Google (si hay Search Console), y todas las entradas de
+  la barra llevan su cifra («0» si es cero). «Páginas HTML» (la cifra de la
+  tarjeta) y «Todo el HTML» son dos entradas (V30); cada ámbito abre las
+  páginas que cuenta, y un censo sin analizar no dice «0» en lo que el análisis
+  no ha calculado. Solo frontend.
+- **Bloque «Google» y Resumen que no afirma de más** (revisión de UX del
+  25-oct, 3.3 y 3.6, decisión 197; en local, sin desplegar): en el Resumen y en
+  el Estado del cliente, clics, impresiones y CTR medio con la ventana de los
+  datos al lado, una frase que dice si los clics suben o bajan y con la fecha
+  de cada cifra (o que la comparación espera a Search Console), y las páginas
+  que más cambian una vez cada una, con enlace a su ficha. El servidor escribe
+  una sola frase para la misma página en dos grupos (V46) y la ficha del
+  rastreo redacta las frases al servirla. En el Resumen: TLS que caduca en 30
+  días o menos en naranja con los días (V19), «Hosts más frecuentes» en una
+  frase cuando uno se lleva casi todo, sitemaps con las URLs aparte de los
+  índices y los ficheros vacíos dichos, que matizan «No incluida en el
+  sitemap» también en Problemas (V13), y cada alerta dice sobre qué páginas se
+  cuenta (V20).
+- **Limpieza por texto repetido** (revisión de UX del 25-oct, 3.6, decisión
+  198; en local): una frase dice para qué sirve y que luego hay que volver a
+  analizar; los grupos van por el texto que se repite en una muestra (lo que
+  más gana la limpieza primero) y el editor se abre bajo su fila con «Quitar
+  esta línea». Falta agrupar por plantilla y guardar las reglas en el cliente.
+  Tras la revisión del 27-oct, lo repetido se mide sobre el texto que leen los
+  análisis (antes, sobre el markdown, y las reglas no quitaban nada de él), se
+  proponen hasta 40 líneas con la parte del texto que quitan, y la ficha de
+  una página del bloque «Google» se busca por URL exacta (`?url_exacta=`):
+  /es decía «no está en este censo» porque la contienen 1.272 URLs.
+- **Un botón principal por vista y menos jerga** (revisión de UX del 25-oct,
+  3.5 y 3.9; decisión 200; en local, sin desplegar): barra fija «Cambios sin
+  guardar · Guardar» en la configuración del cliente (cómo se rastrea, datos,
+  integraciones, reglas) y en Ajustes, que pregunta antes de salir; «Eliminar»
+  dentro de «⋯» en perfiles, programaciones y reglas; pie fijo en los modales;
+  el aceptar de las preguntas ya no sale desactivado. Reglas de alertas en
+  frase, slug plegado, IA sin claves internas y con salida a Problemas, ayuda
+  para semillas y canario, tildes y números en castellano (`fmt.dec`,
+  `fmt.pct`, `fmt.pctDe`, `fmt.n`).
+- **Escala de letra y estilos en línea a clases** (revisión de UX del 25-oct,
+  3.8, decisión 201; en local, sin desplegar): cuatro tamaños de texto (12, 14,
+  16 y 20 px, más la cifra de las tarjetas y el icono como excepción) en
+  variables `--fs-*`, ninguno por debajo de 12 px en ninguna vista, tema ni
+  ancho (eran 39 tamaños y bajaban a 9 px; `code` salía a 11,4 px). Los 922
+  estilos en línea fijos de `index.html` bajan a 108: lo repetido pasa a clases
+  con el mismo contenido, comprobado elemento a elemento contra producción.
+  Un solo ayudante de porcentaje (`fmt.pct`). Tras la revisión, `.mono`
+  vuelve a ganar en los campos de texto (cron, GSC, Slack), las etiquetas de
+  «Qué arreglar primero» caben en dos líneas y los `h5`/`h6` del markdown
+  suben a 12 px. Solo frontend.
+- **Revisión final de la fase 3** (decisión 205; en local, sin desplegar):
+  «No incluida en el sitemap» sale de «N incidencias nuevas y M resueltas»
+  del Estado, del informe, de Slack y de Problemas, dicho, si cualquiera de
+  los dos censos leyó sus sitemaps a medias (antes solo Problemas y solo el
+  censo actual). Además: la portada ya no pasa a páginas en la fila del
+  último cliente abierto bajo «errores (incidencias)», la flecha del
+  Historial compara en la misma unidad, «Revisado con IA» de la ficha vuelve
+  a ir en líneas y el enlace de Google del Estado abre la ficha aunque el
+  censo ya estuviera cargado.
+- **Cierre de la fase 3 tras la auditoría del 27-oct** (decisiones 202, 203
+  y 204; en local, sin desplegar): las cifras de errores son páginas en la
+  portada, el Historial y su gráfica (la tarjeta decía 72 y la tabla 85);
+  Problemas, una fila por tipo con «39 aviso · 157 info» y las páginas del
+  tipo solo si se saben; el contador de Problemas son tipos de error o aviso;
+  «Indexables» de URLs cuenta lo mismo que la tarjeta; «Qué arreglar primero»
+  va primero, en cinco filas y sin barra que mida otra cosa. «No incluida en
+  el sitemap» sale como no concluyente en Problemas, la ficha y el panel, y
+  fuera de la diferencia con el censo anterior, mientras no se lean todos los
+  sitemaps. Tipo obligatorio al lanzar (prueba sin perfil) y «topado en N
+  URLs» en la portada. Alertas agrupadas por regla con «Ver las N páginas» y
+  las info en «Cambios a favor». Panel de URLs con «200 de 4.720» enlaces, los
+  problemas agrupados y en castellano; frases de Google con sus páginas;
+  Semántico que dice que no usa el Search Console del cliente y no deja
+  analizar sin clave; textos y números (V42); una API anterior ya no enseña
+  «Method Not Allowed» ni «undefined».
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 

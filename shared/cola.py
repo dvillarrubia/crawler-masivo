@@ -38,6 +38,24 @@ def siguiente(conexion, timeout: int):
     return job_id
 
 
+def en_orden(conexion) -> list[str]:
+    """Los jobs que esperan, del primero en salir al ultimo, sin repetidos.
+
+    Para decir en la interfaz «el 2.º en la cola» con el orden REAL de salida
+    y no con `created_at`: una reanudacion o un job recuperado tras un
+    reinicio se ponen al final aunque se crearan hace dias (revision de UX
+    del 25-oct, 2.12). Un id repetido (un job reencolado dos veces) cuenta
+    por su primera aparicion, que es la que el worker sacara antes.
+    """
+    vistos: list[str] = []
+    for valor in conexion.lrange(COLA_JOBS, 0, -1) or []:
+        texto = valor.decode() if isinstance(valor, bytes) else str(valor)
+        texto = texto.strip()
+        if texto and texto not in vistos:
+            vistos.append(texto)
+    return vistos
+
+
 def pendientes(conexion) -> int:
     """Cuantos jobs esperan. Para logs y para la interfaz."""
     try:

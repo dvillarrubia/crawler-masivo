@@ -161,6 +161,124 @@ def _fusionar_en(destino: dict, capa: dict, ruta: str = "") -> None:
             destino[clave] = copy.deepcopy(valor)
 
 
+_FALTA = object()
+
+
+def diferencia_de_config(base: dict | None, objetivo: dict | None, _ruta: str = "") -> dict:
+    """Lo minimo que hay que poner encima de `base` para llegar a `objetivo`:
+    `fusionar_config(base, diferencia_de_config(base, objetivo)) == objetivo`.
+
+    Es lo que guarda la migracion de programaciones a perfiles (decision 193):
+    de una copia congelada de la config entera se queda solo lo que de verdad
+    difiere de lo heredado, para que los cambios del cliente sigan llegando.
+    Con las mismas reglas que `fusionar_config`: un dict se baja clave a clave,
+    una regla con nombre (`DICTS_DE_REGLAS`) va ENTERA, una lista se sustituye
+    y lo que `objetivo` no tiene se quita con `None`.
+    """
+    base = base or {}
+    objetivo = objetivo or {}
+    salida: dict = {}
+    en_reglas = _ruta.rstrip(".") in DICTS_DE_REGLAS
+    for clave, valor in objetivo.items():
+        antes = base.get(clave, _FALTA)
+        if valor is None:
+            if antes is not _FALTA:
+                salida[clave] = None
+        elif not en_reglas and isinstance(valor, dict) and isinstance(antes, dict):
+            sub = diferencia_de_config(antes, valor, f"{_ruta}{clave}.")
+            if sub:
+                salida[clave] = sub
+        elif valor != antes:
+            salida[clave] = copy.deepcopy(valor)
+    for clave in base:
+        if clave not in objetivo:
+            salida[clave] = None
+    return salida
+
+
+# Dicts que se leen como UN valor al decir de donde viene: una cabecera, una
+# cookie, un tope o una regla con nombre no tienen «campos» que heredar por
+# separado en la interfaz (decision 196).
+DICTS_COMO_VALOR = DICTS_DE_REGLAS + (
+    "topes_por_carpeta", "http.custom_headers", "http.cookies")
+
+
+def origen_de_config(*capas: tuple[str, dict | None]) -> dict[str, str]:
+    """De que capa sale cada clave de la configuracion resuelta (decision 196).
+
+    `capas` va de la mas general a la mas concreta: `("cliente", {...})`,
+    `("perfil", {...})`, `("rastreo", {...})`. Devuelve `{"ruta.con.puntos":
+    nombre de la capa}` para cada hoja que fija alguna capa; la mas concreta
+    gana. Un `None` explicito tambien cuenta: esa capa ha QUITADO lo heredado
+    y lo que queda es el valor de serie, pero lo ha decidido ella. Lo que no
+    sale aqui es el valor de serie de `JobConfig`.
+
+    Mismas reglas que `fusionar_config`: un dict se baja clave a clave, salvo
+    los de `DICTS_COMO_VALOR`, que cuentan enteros.
+    """
+    salida: dict[str, str] = {}
+
+    def bajar(capa: dict, nombre: str, ruta: str) -> None:
+        for clave, valor in capa.items():
+            aqui = f"{ruta}{clave}"
+            if isinstance(valor, dict) and aqui not in DICTS_COMO_VALOR:
+                bajar(valor, nombre, aqui + ".")
+            else:
+                salida[aqui] = nombre
+
+    for nombre, capa in capas:
+        if capa:
+            bajar(capa, nombre, "")
+    return salida
+
+
+def origen_por_clave(*capas: tuple[str, dict | None]) -> dict[str, dict[str, str]]:
+    """De que capa sale cada CLAVE de los dicts que `origen_de_config` cuenta
+    enteros (cabeceras, cookies, topes, reglas con nombre).
+
+    `fusionar_config` los fusiona clave a clave: con `X-A` en el cliente y
+    `X-B` en el perfil salen las dos, y decir «del perfil» de las dos mandaba
+    a quitar `X-A` a un sitio donde no esta (revision del 26-oct de la
+    decision 196). Mismas reglas que la fusion: un `None` quita la clave, y
+    en `topes_por_carpeta` dos grafias de la misma regla son la misma clave
+    (gana la de la capa mas concreta). Solo salen los dicts que no quedan
+    vacios: `{"http.custom_headers": {"X-A": "cliente", "X-B": "perfil"}}`.
+    """
+    salida: dict[str, dict[str, str]] = {}
+    for ruta in DICTS_COMO_VALOR:
+        normal = _normalizador(ruta)
+        quien: dict[str, str] = {}
+        for nombre, capa in capas:
+            sub = capa or {}
+            for parte in ruta.split("."):
+                sub = sub.get(parte) if isinstance(sub, dict) else None
+            if sub is None and capa and _tiene_ruta(capa, ruta):
+                quien = {}  # la capa quita el dict entero
+                continue
+            if not isinstance(sub, dict):
+                continue
+            for clave, valor in sub.items():
+                if normal is not None:
+                    for vieja in [k for k in quien if normal(k) == normal(clave)]:
+                        quien.pop(vieja)
+                if valor is None:
+                    quien.pop(clave, None)
+                else:
+                    quien[clave] = nombre
+        if quien:
+            salida[ruta] = quien
+    return salida
+
+
+def _tiene_ruta(capa: dict, ruta: str) -> bool:
+    sub = capa
+    for parte in ruta.split("."):
+        if not isinstance(sub, dict) or parte not in sub:
+            return False
+        sub = sub[parte]
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Cliente a partir de un texto (compatibilidad con `client_id`)
 # ---------------------------------------------------------------------------

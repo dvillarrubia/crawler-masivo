@@ -150,49 +150,33 @@ def test_texto_de_la_entidad():
 
 
 # ---------------------------------------------------------- formulario ----
-def _lanzado(cuerpo: str):
-    return _evaluar("() => { const f = _freshForm(); " + cuerpo + " return _configDesdeForm(f); }")
+# El modo del adaptador en el formulario de configuracion (decision 196): solo
+# se manda si se cambia en este nivel; igual a lo heredado no se fija.
+def _wp(base_modo: str, cuerpo: str = ""):
+    return _evaluar(
+        "() => { const i = cfgNuevo('rastreo', {base: {adapters: {wordpress: {modo: '" + base_modo + "',"
+        " max_peticiones: 200}}}, origen: {'adapters.wordpress.modo': 'perfil'}}); " + cuerpo
+        + " return {ve: cfgEfectivo(i, 'adapters.wordpress.modo'), propia: i.propia}; }")
 
 
-def test_sin_tocar_la_casilla_no_se_manda():
-    assert "adapters" not in _lanzado("")
+def test_sin_tocarlo_no_se_manda():
+    assert _wp("auto")["propia"] == {}
 
 
-def test_desmarcarla_manda_off_y_volver_a_marcarla_no_manda_nada():
-    assert _lanzado("f.wp_analizar = false;")["adapters"] == {"wordpress": {"modo": "off"}}
-    assert "adapters" not in _lanzado("f.wp_analizar = false; f.wp_analizar = true;")
+def test_apagarlo_manda_off_y_volver_a_lo_heredado_no_manda_nada():
+    assert _wp("auto", "cfgCambiar(i, 'adapters.wordpress.modo', 'off');")["propia"] == {
+        "adapters": {"wordpress": {"modo": "off"}}}
+    assert _wp("auto", "cfgCambiar(i, 'adapters.wordpress.modo', 'off');"
+                       " cfgCambiar(i, 'adapters.wordpress.modo', 'auto');")["propia"] == {}
 
 
-def test_lo_heredado_se_pinta_y_no_se_repite():
-    r = _evaluar(
-        "() => { const f = _freshForm(); f.cliente_id = 'c1';"
-        " _formDesdeConfig(f, {adapters: {wordpress: {modo: 'off', max_peticiones: 200}}});"
-        " const sin = _configDesdeForm(f); const marcada = f.wp_analizar; f.wp_analizar = true;"
-        " return [marcada, sin, _configDesdeForm(f)]; }")
-    marcada, sin_tocar, encendida = r
-    assert marcada is False
-    assert "adapters" not in sin_tocar
+def test_lo_heredado_se_ve_y_no_se_repite():
+    r = _wp("off")
+    assert r["ve"] == "off" and r["propia"] == {}
     # Encenderlo frente al perfil SI se manda; solo `modo`: la fusion del
     # servidor es profunda y los topes del perfil siguen.
-    assert encendida["adapters"] == {"wordpress": {"modo": "auto"}}
-
-
-def test_on_heredado_y_marcada_no_se_manda():
-    c = _evaluar(
-        "() => { const f = _freshForm(); f.cliente_id = 'c1';"
-        " _formDesdeConfig(f, {adapters: {wordpress: {modo: 'on'}}}); return [f.wp_analizar,"
-        " _configDesdeForm(f)]; }")
-    assert c[0] is True and "adapters" not in c[1]
-
-
-def test_al_quitar_el_cliente_lo_que_se_ve_es_lo_que_se_lanza():
-    """Heredado `off` y luego «Sin cliente»: la casilla sigue sin marcar y,
-    sin cliente, el servidor no hereda nada: hay que mandar el `off`."""
-    c = _evaluar(
-        "() => { const f = _freshForm(); f.cliente_id = 'c1';"
-        " _formDesdeConfig(f, {adapters: {wordpress: {modo: 'off'}}});"
-        " f.cliente_id = ''; return _configDesdeForm(f); }")
-    assert c["adapters"] == {"wordpress": {"modo": "off"}}
+    assert _wp("off", "cfgCambiar(i, 'adapters.wordpress.modo', 'auto');")["propia"] == {
+        "adapters": {"wordpress": {"modo": "auto"}}}
 
 
 # ------------------------------------------------- teclado del Explorador ----

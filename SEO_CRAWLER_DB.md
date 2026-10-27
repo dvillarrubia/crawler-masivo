@@ -84,6 +84,8 @@ docker exec -it crawlermasivo-postgres-1 psql -U crawler -d crawler_db
 
 `programaciones` tiene tambien `cliente_id` y `profile_id` (FK, SET NULL): los jobs que dispara salen colgados de ese cliente y perfil.
 
+`programaciones.hereda_perfil` (bool, NOT NULL, DEFAULT false; decision 193): si es verdadero, la programacion cuelga de su perfil y en cada disparo el worker lee el perfil y el cliente de ESE momento (semillas del perfil; config = defaults <- cliente <- perfil <- `programaciones.config`, que entonces guarda solo lo propio de la programacion) y `seeds` queda `[]`. Falso = copia fija de siempre (`seeds` y `config` completas, copiadas del rastreo del que se creo). Las que ya habia quedan en falso; `scripts/migrar_programaciones_a_perfiles.py [--confirmar]` las cuelga de un perfil (crea o reutiliza uno con las mismas semillas) y une su serie: sus jobs reciben `profile_id` y sus incidentes pasan de `programacion:<id>` a `perfil:<id>` (`motivo_cierre='serie_unida'` si el perfil ya tenia uno vivo igual). Borrar un perfil borra sus programaciones con `hereda_perfil`; las de copia fija solo pierden el `profile_id`. Migracion: `migrar_clientes()` en `init_db.py`.
+
 ### `urls` — Todas las URLs crawleadas
 | Columna | Tipo | Descripcion |
 |---|---|---|

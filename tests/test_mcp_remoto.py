@@ -252,7 +252,12 @@ def api_real(monkeypatch):
 
 
 def test_la_api_real_sirve_el_mcp_con_su_propia_autenticacion(api_real):
-    assert api_real.app.user_middleware[0].cls.__name__ == "DespachoMcp"  # por fuera de todo
+    clases = [m.cls.__name__ for m in api_real.app.user_middleware]
+    # Las cabeceras de seguridad (decision 208) van por fuera de todo para cubrir
+    # tambien las respuestas del MCP; el MCP, justo dentro, sigue antes que la
+    # autenticacion de `/api`, asi que `/mcp` se despacha con su propia auth.
+    assert clases[0] == "CabecerasSeguridadMiddleware"
+    assert clases[1] == "DespachoMcp"
     with TestClient(api_real.app, base_url=BASE) as c:
         m = c.get("/.well-known/oauth-authorization-server")
         assert m.status_code == 200 and m.json()["issuer"].rstrip("/") == BASE

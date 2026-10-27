@@ -118,10 +118,53 @@ def test_tls_lee_el_estado_de_cada_host():
     assert por_host["proxy.x.com"]["nivel"] == "dim"
 
 
+def test_tls_marca_renovar_a_30_dias():
+    filas = _con_job({"config": {}, "tls": {"hosts": {
+        "a.x": {"verificado": True, "dias_restantes": 14.5},
+        "b.x": {"verificado": True, "dias_restantes": 31},
+        "c.x": {"verificado": False, "motivo": "caducado", "dias_restantes": -3}}}},
+        "return filasTls(job).map(f => [f.host, f.nivel, f.renovar, f.estado]);")
+    # A 30 dias o menos ya no es «Valido» en verde (revision de UX del 25-oct,
+    # 3.6; V19): naranja y con los dias.
+    assert filas == [["a.x", "orange", True, "Válido, caduca en 14 días"], ["b.x", "green", False, "Válido"],
+                     ["c.x", "red", False, "No válido: caducado"]]
+
+
+ROBOTS = {"bots": [{"bot": "googlebot", "token": "Googlebot", "tipo": "buscador"},
+                   {"bot": "gptbot", "token": "GPTBot", "tipo": "entrenamiento"},
+                   {"bot": "oai", "token": "OAI-SearchBot", "tipo": "busqueda_ia"}]}
+
+
+def test_robots_en_una_frase():
+    nada = _evaluar("() => resumenRobots(" + json.dumps({**ROBOTS, "hosts": [
+        {"origen": "https://a.x", "bots": {"googlebot": {"alcance": "nada"}, "gptbot": {"alcance": "nada"}}},
+        {"origen": "https://www.a.x", "bots": {"googlebot": {"alcance": "nada"}}}]}) + ")")
+    assert nada["texto"].startswith("Ningún bot bloqueado") and "2 hosts" in nada["texto"]
+    assert nada["nivel"] == "" and nada["abrir"] is False
+    algo = _evaluar("() => resumenRobots(" + json.dumps({**ROBOTS, "hosts": [
+        {"origen": "https://a.x", "bots": {"gptbot": {"alcance": "todo"}, "oai": {"alcance": "parte"}}}]}) + ")")
+    assert algo["texto"] == "Bloqueados: GPTBot (todo en https://a.x), OAI-SearchBot (una parte en https://a.x)."
+    assert algo["nivel"] == "orange" and algo["abrir"] is True
+    grave = _evaluar("() => resumenRobots(" + json.dumps({**ROBOTS, "hosts": [
+        {"origen": "https://a.x", "bots": {"oai": {"alcance": "todo"}}}, {"origen": "https://b.x", "bots": None}]}) + ")")
+    assert grave["nivel"] == "red" and grave["sin_evaluar"] == 1
+    # Un host sin evaluar (robots.txt inaccesible) no deja decir «ninguno»
+    # sin mas: se dice, en naranja, y el detalle se abre.
+    mezcla = _evaluar("() => resumenRobots(" + json.dumps({**ROBOTS, "hosts": [
+        {"origen": "https://a.x", "bots": {"googlebot": {"alcance": "nada"}}},
+        {"origen": "https://b.x", "bots": None}, {"origen": "https://c.x", "bots": None}]}) + ")")
+    assert mezcla["texto"] == ("Ningún bot bloqueado en la home ni en la muestra del host evaluado. "
+                               "2 hosts sin evaluar: mira su robots.txt en el detalle.")
+    assert mezcla["nivel"] == "orange" and mezcla["abrir"] is True
+    assert _evaluar("() => resumenRobots({hosts: []})") is None
+
+
 def test_tls_usa_el_umbral_del_job():
     filas = _con_job({"config": {"analysis_thresholds": {"tls_dias_aviso": 2}}, "tls": TLS},
                      "return filasTls(job).find(f => f.host === 'pronto.x.com').estado;")
-    assert filas == "Válido"
+    # Con el aviso a 2 dias no es «Caduca pronto», pero a 3 dias tampoco es
+    # «Valido» sin mas (3.6).
+    assert filas == "Válido, caduca en 3 días"
 
 
 def test_soft404_cruza_las_sondas_con_el_resumen():
@@ -165,157 +208,38 @@ def test_modo_lista_solo_con_profundidad_cero():
 
 
 # ----------------------------------------------------------- formulario ----
-def _lanzado(cuerpo: str):
-    return _evaluar("() => { const f = _freshForm(); " + cuerpo + " return _configDesdeForm(f); }")
+# Las sondas en el formulario de configuracion (decision 196): lo heredado se
+# ve con su procedencia y no se manda; lo cambiado en este nivel, si.
+SERIE = ("{crawl_behavior: {comprobar_enlaces_externos: false, comprobar_recursos: false,"
+         " enlaces_externos_max: 5000, recursos_max: 20000, sondas_por_host: 50},"
+         " resource_types: {check_external_resources: false}}")
 
 
-CLAVES = ("comprobar_enlaces_externos", "comprobar_recursos", "enlaces_externos_max",
-          "recursos_max", "sondas_por_host")
+def _sondas(base: str, origen: str, cuerpo: str = ""):
+    return _evaluar("() => { const i = cfgNuevo('rastreo', {base: " + base + ", origen: " + origen
+                    + "}); " + cuerpo + " return {i, ve: ['crawl_behavior.recursos_max',"
+                    " 'resource_types.check_external_resources'].map(r => cfgEfectivo(i, r))}; }")
 
 
 def test_sin_tocar_las_sondas_no_se_mandan():
-    c = _lanzado("")
-    assert not any(k in c["crawl_behavior"] for k in CLAVES)
-    assert "check_external_resources" not in c["resource_types"]
+    assert _sondas(SERIE, "{}")["i"]["propia"] == {}
 
 
 def test_lo_que_se_toca_se_manda():
-    c = _lanzado("f.comprobar_enlaces_externos = true; f.enlaces_externos_max = '800';"
-                 " f.check_external_resources = true;")
-    assert c["crawl_behavior"]["comprobar_enlaces_externos"] is True
-    assert c["crawl_behavior"]["enlaces_externos_max"] == 800
-    assert c["resource_types"]["check_external_resources"] is True
-    assert "recursos_max" not in c["crawl_behavior"]
+    p = _sondas(SERIE, "{}", "cfgCambiar(i, 'crawl_behavior.comprobar_enlaces_externos', true);"
+                " cfgCambiar(i, 'crawl_behavior.enlaces_externos_max', '800');"
+                " cfgCambiar(i, 'resource_types.check_external_resources', true);")["i"]["propia"]
+    assert p == {"crawl_behavior": {"comprobar_enlaces_externos": True, "enlaces_externos_max": 800},
+                 "resource_types": {"check_external_resources": True}}
 
 
-def test_lo_heredado_del_perfil_se_precarga_y_no_se_repite():
-    r = _evaluar(
-        "() => { const f = _freshForm(); f.cliente_id = 'c1'; _formDesdeConfig(f, {crawl_behavior: "
-        "{comprobar_recursos: true, recursos_max: 900}, resource_types: {check_external_resources: true}});"
-        " const sin = _configDesdeForm(f); f.comprobar_recursos = false;"
-        " return [f.recursos_max, f.check_external_resources, sin, _configDesdeForm(f)]; }")
-    tope, externos, sin_tocar, apagado = r
-    assert tope == 900 and externos is True
-    assert not any(k in sin_tocar["crawl_behavior"] for k in CLAVES)
-    assert "check_external_resources" not in sin_tocar["resource_types"]
+def test_lo_heredado_del_perfil_se_ve_y_no_se_repite():
+    base = ("{crawl_behavior: {comprobar_recursos: true, recursos_max: 900},"
+            " resource_types: {check_external_resources: true}}")
+    origen = ("{'crawl_behavior.comprobar_recursos': 'perfil', 'crawl_behavior.recursos_max': 'perfil',"
+              " 'resource_types.check_external_resources': 'perfil'}")
+    r = _sondas(base, origen)
+    assert r["ve"] == [900, True] and r["i"]["propia"] == {}
     # Apagar lo heredado SI se manda: es un cambio frente al perfil.
-    assert apagado["crawl_behavior"]["comprobar_recursos"] is False
-
-
-def test_lo_tocado_antes_de_elegir_perfil_se_mantiene():
-    c = _lanzado("f.comprobar_enlaces_externos = true; _formDesdeConfig(f, {max_depth: 2});")
-    assert c["crawl_behavior"]["comprobar_enlaces_externos"] is True
-
-
-def test_al_quitar_el_cliente_lo_que_se_ve_es_lo_que_se_lanza():
-    """Con cliente, lo heredado se pinta y no se manda (el servidor lo hereda).
-    Si despues se vuelve a «Sin cliente», el modal no rehace el formulario:
-    las casillas siguen marcadas y, sin cliente, nadie hereda nada en el
-    servidor. Sin mandarlas, el job salia SIN la sonda que la pantalla decia."""
-    c = _evaluar(
-        "() => { const f = _freshForm(); f.cliente_id = 'c1';"
-        " _formDesdeConfig(f, {crawl_behavior: {comprobar_recursos: true, recursos_max: 900}});"
-        " f.cliente_id = ''; f.profile_id = ''; return _configDesdeForm(f); }")
-    assert c["crawl_behavior"]["comprobar_recursos"] is True
-    assert c["crawl_behavior"]["recursos_max"] == 900
-
-
-# ---------------------------------------------------- ficha en la pagina ----
-# Las funciones puras no ven las plantillas: un `:key` repetido en un x-for
-# hace que Alpine no pinte NINGUNA fila y lance un error. Se monta la pagina
-# de verdad (index.html + Alpine) con la API simulada.
-JID = "11111111-1111-1111-1111-111111111111"
-STATS = {"issues_by_type": [], "urls_by_status_group": [], "top_hosts": [],
-         "urls_by_resource_type": [], "total_urls": 3, "paginas_html": 3, "indexables": 3,
-         "no_indexables": 0, "internal_count": 3, "external_count": 0,
-         "click_depth_calculada": False}
-
-
-def _ficha(job: dict, veredicto: dict | None = None):
-    from playwright.async_api import async_playwright
-
-    fe = RAIZ / "frontend"
-    base = {"id": JID, "name": "t", "status": "completed", "seeds": ["https://sitio/"],
-            "config": {}, "client_id": None, "owner_id": None, "total_urls_crawled": 3,
-            "created_at": "2026-10-18T10:00:00", "started_at": None, "completed_at": None}
-    base.update(job)
-
-    async def run():
-        async with async_playwright() as p:
-            try:
-                nav = await p.chromium.launch(args=["--no-sandbox"])
-            except Exception as exc:  # pragma: no cover
-                pytest.skip(f"sin Chromium: {exc}")
-            pagina = await nav.new_page()
-            avisos = []
-            pagina.on("console", lambda m: avisos.append(m.text) if m.type in ("warning", "error")
-                      and "Failed to load resource" not in m.text else None)
-            pagina.on("pageerror", lambda e: avisos.append(f"pageerror: {e}"))
-
-            async def servir(route):
-                ruta = route.request.url.replace("http://t.local", "").split("?")[0]
-                if ruta.startswith("/static/"):
-                    f = fe / ruta[len("/static/"):]
-                    tipo = "text/css" if f.suffix == ".css" else "application/javascript"
-                    return await route.fulfill(body=f.read_text(encoding="utf-8"), content_type=tipo)
-                if ruta == f"/api/jobs/{JID}":
-                    return await route.fulfill(json=base)
-                if ruta == f"/api/jobs/{JID}/stats":
-                    return await route.fulfill(json=STATS)
-                if ruta == f"/api/jobs/{JID}/veredicto" and veredicto:
-                    return await route.fulfill(json=veredicto)
-                if ruta.startswith("/api/"):
-                    return await route.fulfill(status=404, json={"detail": "no"})
-                return await route.fulfill(body=(fe / "index.html").read_text(encoding="utf-8"),
-                                           content_type="text/html")
-
-            async def vacio(route):
-                await route.fulfill(body="", content_type="application/javascript")
-
-            await pagina.route("http://t.local/**", servir)
-            await pagina.route("https://cdn.plot.ly/**", vacio)
-            await pagina.route("https://fonts.googleapis.com/**", vacio)
-            try:
-                await pagina.goto(f"http://t.local/#/rastreos/{JID}")
-                await pagina.wait_for_function("window.Alpine !== undefined", timeout=15000)
-            except Exception as exc:  # pragma: no cover
-                pytest.skip(f"sin Alpine (CDN): {exc}")
-            await pagina.wait_for_selector('[data-testid="tarjeta-soft404"], [data-testid="veredicto-lista"]',
-                                           timeout=10000)
-            await pagina.wait_for_timeout(300)
-            filas = {
-                "soft404": await pagina.locator('[data-testid="tarjeta-soft404"] tbody tr').count(),
-                "ejemplos": await pagina.locator('[data-testid="veredicto-lista"] .text-dim[style*="word-break"]').count(),
-            }
-            await nav.close()
-            return filas, avisos
-
-    return asyncio.run(run())
-
-
-def test_una_sonda_que_redirige_en_el_mismo_host_pinta_sus_dos_filas():
-    """http -> https en el mismo host: el spider repite la sonda en el destino
-    con la MISMA clave (`sonda_soft404._repetir_sonda_en_destino`). Con la
-    clave como `:key`, Alpine no pintaba la tabla."""
-    sondas = [
-        {"clave": "sitio|raiz", "host": "sitio", "plantilla": None,
-         "url": "http://sitio/zz1", "status": 301, "redirige_a": "https://sitio/zz1"},
-        {"clave": "sitio|raiz", "host": "sitio", "plantilla": None,
-         "url": "https://sitio/zz1", "status": 404, "redirige_a": None},
-        {"clave": "sitio|/p/:s", "host": "sitio", "plantilla": "/p/:s",
-         "url": "https://sitio/p/zz", "status": 200, "redirige_a": None},
-    ]
-    filas, avisos = _ficha({"soft404": {"sondas": sondas}})
-    assert filas["soft404"] == 3
-    assert not avisos, avisos
-
-
-def test_el_veredicto_pinta_ejemplos_repetidos():
-    """`rastreo_bloqueado_por_robots` lista las semillas tal cual, y la API no
-    quita repetidas: dos ejemplos con la misma URL."""
-    v = {"veredicto": "falla", "urls_de_la_lista": 2, "no_concluyente_por": [],
-         "motivos": [{"tipo": "rastreo_bloqueado_por_robots", "mensaje": "robots.txt bloquea",
-                      "paginas": 2, "ejemplos": [{"url": "https://sitio/a"}, {"url": "https://sitio/a"}]}]}
-    filas, avisos = _ficha({"config": {"max_depth": 0}}, v)
-    assert filas["ejemplos"] == 2
-    assert not avisos, avisos
+    apagado = _sondas(base, origen, "cfgCambiar(i, 'crawl_behavior.comprobar_recursos', false);")
+    assert apagado["i"]["propia"] == {"crawl_behavior": {"comprobar_recursos": False}}

@@ -512,3 +512,92 @@ def test_un_fallo_al_avisar_no_deshace_la_comparacion(s, enviados, monkeypatch):
     assert T.completar_pendientes(s, c.id) == 1
     t = s.get(JobM, jb.id).comparacion["trafico"]
     assert t["comparable"] is True and t["aviso"]["estado"] == "por_enviar"
+
+
+# --- Decision 197: la misma pagina en dos grupos, una sola frase -------------
+def _grupo(cambio, texto, urls, dif, paginas=None):
+    return {"cambio": cambio, "texto": texto, "paginas": len(urls) if paginas is None else paginas,
+            "clics_antes": 29, "clics_despues": 29 + dif, "diferencia": dif,
+            "ejemplos": [{"url": u, "clics_antes": 29, "clics_despues": 29 + dif} for u in urls],
+            "plantillas": []}
+
+
+def _r(caidas=(), subidas=()):
+    return {"comparable": True, "ventana_anterior": ["2026-10-06", "2026-10-12"],
+            "ventana_nueva": ["2026-10-13", "2026-10-19"], "clics_anterior": 42443, "clics_nuevo": 41481,
+            "variacion": -0.023, "general": False, "caidas": list(caidas), "subidas": list(subidas),
+            "rupturas": [], "estacional": None}
+
+
+def test_la_misma_pagina_en_dos_grupos_sale_una_vez():
+    """Lopesan, 21-oct: /es cambia la indexabilidad y el canonical y gana 109
+    clics; salia dos veces «1 pagina gano 109 clics»."""
+    es = ["https://www.lopesan.com/es"]
+    lineas = T.textos(_r(subidas=[
+        _grupo("noindex", "cambia la indexabilidad", es, 109),
+        _grupo("canonical", "cambia el canonical", es, 109),
+        _grupo("h1", "cambia el H1", ["https://x.com/a", "https://x.com/b"], 71),
+    ]))
+    assert lineas[1:] == [
+        "1 página ganó 109 clics; coincide con que en ella cambia la indexabilidad y cambia el canonical.",
+        "2 páginas ganaron 71 clics; coincide con que en ellas cambia el H1.",
+    ]
+
+
+def test_no_se_juntan_si_no_se_sabe_que_son_las_mismas():
+    """Con mas paginas que ejemplos, los mismos 5 ejemplos no dicen que el
+    resto coincida: dos frases, como antes."""
+    cinco = [f"https://x.com/{i}" for i in range(5)]
+    lineas = T.textos(_r(caidas=[
+        _grupo("title", "cambia el title", cinco, -300, paginas=40),
+        _grupo("h1", "cambia el H1", cinco, -300, paginas=40),
+    ]))
+    assert len(lineas) == 3
+    # Ni lo que no nombra un cambio de la pagina (sin cambio, trasvase).
+    lineas = T.textos(_r(caidas=[
+        _grupo("sin_cambio", "sin cambio técnico en el rastreo", ["https://x.com/a"], -40),
+        _grupo("title", "cambia el title", ["https://x.com/a"], -40),
+    ]))
+    assert len(lineas) == 3
+
+
+def test_la_ficha_del_rastreo_redacta_las_frases_al_servirlas(tmp_path):
+    """Las guardadas son las del dia del analisis: GET /api/jobs/{id} las
+    redacta otra vez, como la ficha del cliente."""
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api.routers import jobs
+    from shared.database import get_session
+
+    engine = create_engine(f"sqlite:///{tmp_path}/t.db")
+    Base.metadata.create_all(engine)
+    Sesion = sessionmaker(bind=engine, expire_on_commit=False)
+    es = ["https://www.lopesan.com/es"]
+    trafico = {**_r(subidas=[_grupo("noindex", "cambia la indexabilidad", es, 109),
+                             _grupo("canonical", "cambia el canonical", es, 109)]),
+               "textos": ["vieja 1", "vieja 2", "vieja 3"]}
+    ses = Sesion()
+    j = Job(id=uuid.uuid4(), name="j", status="completed", seeds=["https://x.com/"], config={},
+            comparacion={"comparado_con": None, "trafico": trafico})
+    ses.add(j)
+    ses.commit()
+    jid = j.id
+    ses.close()
+    app = FastAPI()
+    app.include_router(jobs.router)
+
+    def _sesion():
+        x = Sesion()
+        try:
+            yield x
+        finally:
+            x.close()
+
+    app.dependency_overrides[get_session] = _sesion
+    r = TestClient(app).get(f"/api/jobs/{jid}")
+    assert r.status_code == 200, r.text
+    assert r.json()["comparacion"]["trafico"]["textos"] == T.textos(trafico)
+    assert len(r.json()["comparacion"]["trafico"]["textos"]) == 2

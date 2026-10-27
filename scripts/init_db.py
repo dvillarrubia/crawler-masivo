@@ -180,6 +180,8 @@ def main() -> None:
         conn.execute(text("ALTER TABLE page_content ADD COLUMN IF NOT EXISTS content_text_original TEXT"))
         conn.execute(text("ALTER TABLE page_content ADD COLUMN IF NOT EXISTS content_markdown_original TEXT"))
         conn.execute(text("ALTER TABLE page_content ADD COLUMN IF NOT EXISTS cleaned_at TIMESTAMPTZ"))
+        # Por que se cerro un incidente sin rastreo (decision 188).
+        conn.execute(text("ALTER TABLE incidentes ADD COLUMN IF NOT EXISTS motivo_cierre VARCHAR(32)"))
         # El texto tras el h1 (decision 187).
         conn.execute(text("ALTER TABLE page_content ADD COLUMN IF NOT EXISTS texto_tras_h1 TEXT"))
         conn.commit()
@@ -220,6 +222,11 @@ def migrar_clientes() -> None:
         "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS profile_id UUID",
         "ALTER TABLE programaciones ADD COLUMN IF NOT EXISTS cliente_id UUID",
         "ALTER TABLE programaciones ADD COLUMN IF NOT EXISTS profile_id UUID",
+        # Decision 193: si hereda del perfil en cada disparo. Falso en las que
+        # ya hay (copia fija), que siguen igual hasta migrarlas a mano con
+        # scripts/migrar_programaciones_a_perfiles.py. Tabla de pocas filas.
+        "ALTER TABLE programaciones ADD COLUMN IF NOT EXISTS hereda_perfil "
+        "BOOLEAN NOT NULL DEFAULT FALSE",
         # Mismos nombres que generaria create_all en una instalacion nueva, para
         # no acabar con el indice dos veces.
         "CREATE INDEX IF NOT EXISTS ix_jobs_cliente_id ON jobs (cliente_id)",

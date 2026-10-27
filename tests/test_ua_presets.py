@@ -59,10 +59,9 @@ def test_los_presets_se_leen_del_frontend():
 
 
 def test_cada_preset_tiene_etiqueta_y_opcion_en_el_formulario():
-    select = INDEX[INDEX.index('x-model="createForm.user_agent_preset"'):]
-    select = select[:select.index("</select>")]
-    opciones = set(re.findall(r'<option value="([a-z_]+)"', select))
-    assert opciones == set(PRESETS) | {"custom"}
+    # El desplegable del formulario de configuracion (decision 196) sale de
+    # UA_LABELS: una etiqueta por preset, y «Personalizado».
+    assert "Object.entries(UA_LABELS)" in INDEX
     assert set(ETIQUETAS) == set(PRESETS) | {"custom"}
 
 
@@ -166,4 +165,4 @@ def test_un_preset_evergreen_guardado_con_otra_version_sigue_siendo_ese_preset()
     # Un preset fijo con otra version de Chrome NO casa: solo se relajan los
     # evergreen, asi que chrome_win y edge_win siguen distinguiendose.
     assert sin_version(PRESETS["chrome_win"]) != sin_version(PRESETS["edge_win"])
-    assert "presetDeUserAgent(cfg.user_agent)" in APP_JS
+    assert "presetDeUserAgent(v)" in APP_JS  # el formulario de configuracion (decision 196)

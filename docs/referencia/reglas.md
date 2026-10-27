@@ -10,6 +10,10 @@
 
 - **Scrapy corre como subproceso** por job, con los settings por `-s`; nunca en
   el proceso del worker (el reactor de Twisted no reinicia). Decisiones 1-2.
+- **Una programación colgada de un perfil se resuelve en el worker** con la
+  config del momento y los defaults de `shared/config_por_defecto.json` (el
+  worker no lleva Pydantic): un campo nuevo en `JobConfig` obliga a regenerarla
+  (lo vigila un test), y la mezcla se valida al escribir, no al disparar. 193.
 - **El UA y la huella TLS son el mismo navegador**: salen de `shared/perfiles.py`
   (`IMPERSONATE_POR_DEFECTO` -> `UA_POR_DEFECTO`), nunca un `chrome124` literal. 132.
 - **Las cabeceras, cookies y Basic del job solo van a los hosts de las semillas**,
@@ -46,6 +50,10 @@
 - **`links` solo guarda aristas del grafo**: lo que Google no puede seguir
   (`javascript:`, `onclick`, `<span href>`) va en `enlaces_no_rastreables`. 106.
 - **Un `noindex` o una pagina que no da 200 no reparten enlazado.** 38, 57.
+- **El estado del destino de un enlace se decide en `api/enlaces.py`**
+  (`grupo_interno`, `grupo_sonda`): lo que nadie comprobó es `sin_dato`, no
+  «bien», y un filtro nuevo de Enlaces va en las dos fuentes (`links` y
+  Parquet) con su caso en `tests/test_enlaces_filtros.py`. 195.
 - Lo de leer `links` (filtrar por job, `SUM(repeticiones)`, censos archivados)
   esta en `CLAUDE.md` porque lo rompe cualquier consulta.
 

@@ -127,6 +127,30 @@ def test_patch_asigna_cliente_y_tipo_sin_tocar_lo_rastreado(entorno):
     assert api.patch(f"/api/jobs/{jid}", json={"cliente_id": str(uuid.uuid4())}).status_code == 422
 
 
+def test_cambiar_de_cliente_suelta_el_perfil_del_anterior(entorno):
+    """Revision de la fase 1.4 de UX (25-oct): con el perfil de otro cliente,
+    «Nuevo rastreo» desde este rastreo acababa en un 422."""
+    from shared.models import CrawlProfile
+
+    api, Sesion, acme, ids = entorno
+    s = Sesion()
+    otro = Client(nombre="Otro", slug="otro", dominios=["y.com"])
+    s.add(otro)
+    s.flush()
+    perfil = CrawlProfile(cliente_id=acme, nombre="principal", seeds=["https://x.com/"])
+    s.add(perfil)
+    s.flush()
+    s.get(Job, ids["nuevo"]).profile_id = perfil.id
+    s.commit()
+    otro_id, perfil_id = otro.id, perfil.id
+    s.close()
+    # Al mismo cliente: el perfil se queda.
+    assert api.patch(f"/api/jobs/{ids['nuevo']}", json={"cliente_id": str(acme)}).json()["profile_id"] == str(perfil_id)
+    # A otro: se suelta.
+    d = api.patch(f"/api/jobs/{ids['nuevo']}", json={"cliente_id": str(otro_id)}).json()
+    assert d["cliente_id"] == str(otro_id) and d["profile_id"] is None
+
+
 def test_la_serie_cuenta_filas_y_va_de_nuevo_a_viejo(entorno):
     api, _, acme, ids = entorno
     serie = api.get(f"/api/clients/{acme}/serie").json()
@@ -135,6 +159,25 @@ def test_la_serie_cuenta_filas_y_va_de_nuevo_a_viejo(entorno):
     assert nuevo["urls"] == 5                        # filas, no total_urls_crawled (=1)
     assert nuevo["paginas_html"] == 5 and nuevo["indexables"] == 5 and nuevo["errores"] == 2
     assert serie[1]["tipo"] == "canario"
+
+
+def test_la_serie_lleva_la_fecha_de_su_referencia(entorno):
+    """Revision de UX del 25-oct, 2.3: la ficha del cliente dice «frente al
+    19 oct» aunque el censo con el que se comparo no este en la serie."""
+    api, Sesion, acme, ids = entorno
+    otro = uuid.uuid4()
+    s = Sesion()
+    s.get(Job, ids["nuevo"]).comparacion = {
+        "comparable": True, "comparado_con": str(otro), "alertas": [],
+        "fecha_anterior": "2026-10-19T09:00:48+00:00"}
+    s.commit()
+    s.close()
+    serie = api.get(f"/api/clients/{acme}/serie").json()
+    nuevo = next(x for x in serie if x["id"] == str(ids["nuevo"]))
+    assert nuevo["comparado_con"] == str(otro) and nuevo["alertas"] == 0
+    assert nuevo["fecha_anterior"] == "2026-10-19T09:00:48+00:00"
+    # Sin comparacion, sin fecha.
+    assert next(x for x in serie if x["id"] == str(ids["viejo"]))["fecha_anterior"] is None
 
 
 def test_el_panel_compara_censo_con_censo(entorno):

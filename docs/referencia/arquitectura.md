@@ -31,7 +31,9 @@
 ## Frontend
 
 - Rutas en el hash (`#/rastreos/<id>/problemas?gravedad=error`,
-  `#/clientes/<id>`…; `_ruta()` / `_irARuta()` en `app.js`).
+  `#/clientes/<id>`…; `_ruta()` / `_irARuta()` en `app.js`). La ficha del
+  cliente: `#/clientes/<id>` es Estado, y `/historial`, `/alertas` y
+  `/configuracion` sus otras pestanas (`rastreos` abre Historial).
 - `incidencias.js` es el catalogo de cada tipo de incidencia (que es, que decide
   Google, como se arregla): un tipo nuevo del analizador lleva su entrada ahi.
 - Plan y estado de la interfaz en `docs/AUDITORIA_UX.md`.
