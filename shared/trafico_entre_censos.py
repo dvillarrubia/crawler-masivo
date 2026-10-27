@@ -497,6 +497,43 @@ def _fecha(iso: str, con_ano: bool = False) -> str:
     return datetime.fromisoformat(iso).strftime("%d/%m/%Y" if con_ano else "%d/%m")
 
 
+# Grupos que no nombran un cambio de la pagina: se escriben con su propia frase
+# y no se juntan con otros.
+_SIN_JUNTAR = frozenset({"trasvase", "recibe_trasvase", "sin_cambio", "sin_dato_anterior"})
+
+
+def _y(partes: list[str]) -> str:
+    return partes[0] if len(partes) == 1 else ", ".join(partes[:-1]) + " y " + partes[-1]
+
+
+def _juntar_misma_pagina(grupos: list[dict]) -> list[dict]:
+    """Los grupos con EXACTAMENTE las mismas paginas, en uno (decision 197).
+
+    Una pagina con dos cambios esta en los dos grupos (decision 158), y salia
+    «1 pagina gano 109 clics; cambia la indexabilidad» y debajo «1 pagina gano
+    109 clics; cambia el canonical»: la misma /es de Lopesan dos veces, leida
+    como dos paginas. Solo se juntan si se sabe que son las mismas: todas sus
+    paginas estan en `ejemplos` (como mucho MAX_EJEMPLOS) y el conjunto es el
+    mismo. Dos grupos de 40 paginas con los mismos 5 ejemplos no se juntan: lo
+    que no se sabe no se afirma."""
+    salida: list[dict] = []
+    por_paginas: dict[frozenset, dict] = {}
+    for g in grupos:
+        urls = frozenset(e.get("url") for e in g.get("ejemplos") or [])
+        completo = (g.get("cambio") not in _SIN_JUNTAR and urls
+                    and len(urls) == g.get("paginas") == len(g.get("ejemplos") or []))
+        if completo and urls in por_paginas:
+            unido = por_paginas[urls]
+            unido["_textos"].append(g["texto"])
+            unido["texto"] = _y(unido["_textos"])
+            continue
+        g = {**g, "_textos": [g.get("texto", "")]}
+        if completo:
+            por_paginas[urls] = g
+        salida.append(g)
+    return salida
+
+
 def textos(r: dict[str, Any]) -> list[str]:
     """Las frases del trafico entre censos: las mismas en la interfaz y en
     Slack. Nunca dicen «por»: dicen «coincide con»."""
@@ -541,7 +578,7 @@ def textos(r: dict[str, Any]) -> list[str]:
     def clics(n):
         return _cuantos(n, "clic", "clics")
 
-    for g in r.get("caidas") or []:
+    for g in _juntar_misma_pagina(r.get("caidas") or []):
         if g["cambio"] == "trasvase":
             lineas.append(f"{paginas(g)} {verbo(g, 'bajó', 'bajaron')} {clics(-g['diferencia'])} que pasan a su "
                           "canonical o a la misma URL con o sin barra final, que gana al menos la mitad: el "
@@ -555,7 +592,7 @@ def textos(r: dict[str, Any]) -> list[str]:
         else:
             lineas.append(f"{paginas(g)} {verbo(g, 'perdió', 'perdieron')} {clics(-g['diferencia'])}; coincide "
                           f"con que en {verbo(g, 'ella', 'ellas')} {g['texto']} entre los dos rastreos.")
-    for g in subidas_escritas:
+    for g in _juntar_misma_pagina(subidas_escritas):
         lineas.append(f"{paginas(g)} {verbo(g, 'ganó', 'ganaron')} {clics(g['diferencia'])}; coincide con que "
                       f"en {verbo(g, 'ella', 'ellas')} {g['texto']}.")
     for x in r.get("rupturas") or []:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 
@@ -29,6 +30,7 @@ from api.schemas import (
 )
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
+logger = logging.getLogger(__name__)
 
 
 def _reloj() -> float:
@@ -340,7 +342,25 @@ def get_job(
     job = db.query(Job).filter(Job.id == job_id).first()
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    return _con_cliente(db, [job], JobDetailResponse)[0]
+    return _textos_de_trafico_al_dia(_con_cliente(db, [job], JobDetailResponse)[0])
+
+
+def _textos_de_trafico_al_dia(resp):
+    """Las frases del trafico entre censos, redactadas al servirlas (decision
+    197), como ya hacia la ficha del cliente (`/clients/{id}/trafico`): las
+    guardadas en `comparacion.trafico.textos` son las del dia del analisis, y
+    un censo viejo seguiria diciendo dos veces la misma pagina. Best-effort:
+    si algo falla, salen las guardadas."""
+    try:
+        comp = resp.comparacion
+        t = comp.get("trafico") if isinstance(comp, dict) else None
+        if isinstance(t, dict):
+            from shared.trafico_entre_censos import textos
+
+            resp.comparacion = {**comp, "trafico": {**t, "textos": textos(t)}}
+    except Exception:
+        logger.exception("No se pudieron redactar los textos del trafico")
+    return resp
 
 
 # ---------------------------------------------------------------------------

@@ -1884,12 +1884,28 @@ class CleaningRule(BaseModel):
     value: str = Field(..., min_length=1, max_length=2000)
 
 
+class CleaningLineaRepetida(BaseModel):
+    texto: str
+    paginas: int
+
+
 class CleaningGroupInfo(BaseModel):
     group_key: str
     pages: int
     cleaned_pages: int
     avg_content_length: int
     sample_urls: list[str]
+    # Texto repetido en una muestra del grupo (decision 198). None si no se
+    # midio (grupo de menos de 3 paginas o fuera de los mas grandes).
+    repetido_parte: float | None = None
+    repetido_chars_medio: int | None = None
+    repetido_muestra: int | None = None
+    lineas_repetidas: list[CleaningLineaRepetida] = []
+    # Cuantas lineas repetidas hay en total y que parte del texto quitan las
+    # de `lineas_repetidas` (las de mas peso, con tope): la cifra del grupo es
+    # de todas y «Quitar todas estas lineas» solo de las que se mandan.
+    lineas_repetidas_total: int | None = None
+    repetido_parte_lineas: float | None = None
 
 
 class CleaningPreviewRequest(BaseModel):

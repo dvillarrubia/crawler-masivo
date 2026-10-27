@@ -907,6 +907,31 @@
                   </div>
                 </div>
 
+                <!-- Google en el ultimo censo (revision de UX del 25-oct, 3.3):
+                     las mismas cifras y la misma frase que su Resumen. Sin
+                     Search Console no se pinta. -->
+                <template x-if="estadoCliente && estadoCliente.job && bloqueGoogle(estadoCliente.job)">
+                  <div class="card mb-2 text-sm google-bloque" data-testid="estado-google" x-data="{ get bg() { return bloqueGoogle(estadoCliente && estadoCliente.job) || BLOQUE_GOOGLE_VACIO } }">
+                    <div class="card-header"><h2>Google</h2>
+                      <a class="text-sm" :href="'#/rastreos/' + estadoCliente.jobId">Ver en el censo</a></div>
+                    <div class="google-cifras" x-show="bg.cifras.length">
+                      <template x-for="c in bg.cifras" :key="c.etiqueta">
+                        <div class="google-cifra">
+                          <div class="google-valor" x-text="c.valor"></div>
+                          <div class="text-dim"><span x-text="c.etiqueta"></span> · <span x-text="c.ventana"></span></div>
+                        </div>
+                      </template>
+                    </div>
+                    <template x-for="(c, n) in bg.conclusiones" :key="'c' + n">
+                      <p class="google-frase" :class="c.nivel === 'dim' ? 'text-dim' : c.nivel" x-text="c.texto"></p>
+                    </template>
+                    <ul class="google-lista" x-show="bg.textos.length">
+                      <template x-for="(x, n) in bg.textos" :key="'t' + n"><li x-text="x"></li></template>
+                    </ul>
+                    <div x-show="bg.inspeccion" class="google-frase" x-text="bg.inspeccion"></div>
+                  </div>
+                </template>
+
                 <div class="estado-rejilla">
                   <!-- Los cinco primeros problemas, por prioridad (la consulta de
                        «Que arreglar primero» del Resumen del censo) -->
@@ -2768,17 +2793,52 @@
              censo de la comparacion automatica). Encima
              de las pestanas quedan la cabecera, los avisos criticos y las
              tarjetas. -->
-        <!-- Search Console en la ventana del rastreo (decision 142). -->
-        <template x-if="job.gsc_resumen && detailTab === 'overview'">
-          <div class="card mb-2 text-sm" data-testid="gsc-resumen">
-            <div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap">
-              <strong>Tráfico de Google (Search Console)</strong>
-              <span class="text-dim" x-text="'del ' + fmt.dia(job.gsc_resumen.desde) + ' al ' + fmt.dia(job.gsc_resumen.hasta)"></span>
+        <!-- Bloque «Google» (revision de UX del 25-oct, 3.3; V46): en el
+             Resumen, las tres cifras de Search Console con la fecha de su
+             ventana, la frase del trafico frente al censo anterior y las
+             paginas que mas cambian, una vez cada una y con su ficha; en
+             Comparar, solo lo del trafico entre censos. Era dos tarjetas
+             (decisiones 142 y 158) con la misma pagina dos veces. -->
+        <template x-if="(detailTab === 'overview' && bloqueGoogle(job)) || (detailTab === 'diff' && job.comparacion && job.comparacion.trafico && (!diffOtro || diffOtro === job.comparacion.comparado_con))">
+          <div class="card mb-2 text-sm google-bloque" data-testid="google-bloque" x-data="{ get bg() { return bloqueGoogle(job) || BLOQUE_GOOGLE_VACIO } }">
+            <div class="google-cab">
+              <h2 x-text="detailTab === 'overview' ? 'Google' : 'Tráfico de Google frente al rastreo anterior'"></h2>
+              <span class="text-dim" x-show="detailTab === 'overview'">Search Console</span>
             </div>
-            <div style="margin-top:.3rem">
-              <strong x-text="fmt.num(job.gsc_resumen.clics)"></strong> clics y
-              <strong x-text="fmt.num(job.gsc_resumen.impresiones)"></strong> impresiones;
-              <span x-text="job.gsc_resumen.clics ? Math.round(100 * job.gsc_resumen.clics_en_urls_del_censo / job.gsc_resumen.clics) + ' % de los clics en URLs de este rastreo' : ''"></span>
+            <div class="google-cifras" x-show="detailTab === 'overview' && bg.cifras.length" data-testid="google-cifras">
+              <template x-for="c in bg.cifras" :key="c.etiqueta">
+                <div class="google-cifra">
+                  <div class="google-valor" x-text="c.valor"></div>
+                  <div class="text-dim"><span x-text="c.etiqueta"></span> · <span x-text="c.ventana"></span></div>
+                </div>
+              </template>
+            </div>
+            <template x-for="(c, n) in bg.conclusiones" :key="'c' + n">
+              <p class="google-frase" :class="c.nivel === 'dim' ? 'text-dim' : c.nivel" x-text="c.texto" data-testid="google-conclusion"></p>
+            </template>
+            <ul class="google-lista" x-show="bg.textos.length">
+              <template x-for="(x, n) in bg.textos" :key="'t' + n"><li x-text="x"></li></template>
+            </ul>
+            <template x-if="bg.paginas.length">
+              <details class="google-paginas" data-testid="google-paginas">
+                <summary class="text-dim" x-text="'Las páginas que más cambian (' + fmt.num(bg.paginas.length) + ')'"></summary>
+                <ul>
+                  <template x-for="p in bg.paginas" :key="p.url">
+                    <li>
+                      <span class="google-clics" :class="p.despues < p.antes ? 'orange' : ''" x-text="fmt.num(p.antes) + ' → ' + fmt.num(p.despues) + ' clics'"></span>
+                      <a href="#" class="informe-url" @click.prevent="abrirFichaPorUrl(p.url)" :title="'Abrir la ficha de ' + p.url" x-text="p.url"></a>
+                      <div class="text-dim" x-text="p.cambios.join(' · ')"></div>
+                    </li>
+                  </template>
+                </ul>
+                <p class="text-dim" x-show="bg.cortadas">Hasta cinco páginas por motivo: los totales de arriba cuentan todas.</p>
+              </details>
+            </template>
+            <div x-show="detailTab === 'overview' && bg.inspeccion" class="google-frase" x-text="bg.inspeccion"></div>
+          <template x-if="detailTab === 'overview' && job.gsc_resumen">
+          <div class="google-detalle">
+            <div>
+              <span x-text="job.gsc_resumen.clics ? fmt.num(Math.round(100 * job.gsc_resumen.clics_en_urls_del_censo / job.gsc_resumen.clics)) + ' % de los clics van a URLs de este rastreo' : ''"></span>
               <span x-show="job.gsc_resumen.clics_en_variantes" x-text="'· ' + fmt.num(job.gsc_resumen.clics_en_variantes) + ' en variantes con parámetros'"></span>
             </div>
             <div x-show="job.gsc_resumen.urls_fuera_del_censo" style="margin-top:.3rem">
@@ -2850,32 +2910,7 @@
               </div>
             </template>
           </div>
-        </template>
-        <!-- Trafico de Google entre los dos rastreos, por lo que cambio (decision 158). -->
-        <template x-if="job.comparacion && job.comparacion.trafico && (detailTab === 'overview' || (detailTab === 'diff' && (!diffOtro || diffOtro === job.comparacion.comparado_con)))">
-          <div class="card mb-2 text-sm" data-testid="trafico-entre-censos">
-            <strong>Tráfico de Google frente al rastreo anterior</strong>
-            <ul style="margin:.3rem 0 0;padding-left:1.1rem">
-              <template x-for="t in job.comparacion.trafico.textos || [job.comparacion.trafico.motivo]" :key="t">
-                <li x-text="t"></li>
-              </template>
-            </ul>
-            <template x-for="sentido in [['Caídas', job.comparacion.trafico.caidas], ['Subidas', job.comparacion.trafico.subidas]].filter(s => (s[1] || []).length)" :key="sentido[0]">
-              <details>
-                <summary class="text-dim" style="cursor:pointer" x-text="sentido[0] + ' según lo que cambió (una página puede estar en dos grupos)'"></summary>
-                <template x-for="g in sentido[1]" :key="g.cambio">
-                  <div style="margin-top:.4rem">
-                    <span x-text="fmt.num(g.paginas) + ' páginas · ' + (g.diferencia > 0 ? '+' : '') + fmt.num(g.diferencia) + ' clics · ' + g.texto"></span>
-                    <span class="text-dim" x-show="(g.plantillas || []).length" x-text="' (' + (g.plantillas || []).join(', ') + ')'"></span>
-                    <ul style="margin:.2rem 0 0;padding-left:1.1rem">
-                      <template x-for="e in g.ejemplos" :key="e.url">
-                        <li><span x-text="fmt.num(e.clics_antes) + ' → ' + fmt.num(e.clics_despues)"></span> · <span class="informe-url" x-text="e.url"></span></li>
-                      </template>
-                    </ul>
-                  </div>
-                </template>
-              </details>
-            </template>
+          </template>
           </div>
         </template>
         <!-- Solo en el Resumen: en Comparar las alertas guardadas ya salen al
@@ -2885,8 +2920,7 @@
                :style="'border-left:3px solid ' + fmt.colorSeveridad(job.comparacion.alertas[0].severidad)">
             <div class="text-sm">
               <strong>Ha cambiado algo respecto al rastreo anterior.</strong>
-              Comparado con <span x-text="job.comparacion.nombre_anterior"></span>
-              (<span x-text="(job.comparacion.fecha_anterior || '').slice(0,10)"></span>).
+              Comparado con <span x-text="job.comparacion.nombre_anterior"></span><!-- La fecha solo si el nombre no la lleva: salia «· 2026-10-14 (2026-10-14)» (3.6, V20). --><span x-show="!(job.comparacion.nombre_anterior || '').includes((job.comparacion.fecha_anterior || '').slice(0,10))" x-text="' (' + fmt.dia(job.comparacion.fecha_anterior) + ')'"></span>.
             </div>
             <template x-for="al in job.comparacion.alertas" :key="al.regla + (al.extraccion || '')">
               <div :style="'margin-top:.5rem;padding-left:.6rem;border-left:2px solid '
@@ -2895,9 +2929,12 @@
                   <strong x-text="fmt.tituloAlerta(al)"></strong>
                   <span style="white-space:nowrap;font-variant-numeric:tabular-nums">
                     <strong x-text="fmt.num(al.paginas)"></strong>
-                    <span class="text-dim" x-text="' de ' + fmt.num(al.de) + ' · ' + al.pct + '%'"></span>
+                    <span class="text-dim" x-text="' de ' + fmt.num(al.de) + ' · ' + pctEs(al.pct)"></span>
                   </span>
                 </div>
+                <!-- Sobre que se cuenta cada cifra (revision de UX del 25-oct,
+                     3.6; V20): «1.013 de 3.153» no decia de que 3.153. -->
+                <div class="text-dim" style="font-size:.78rem" x-show="baseAlerta(al)" x-text="baseAlerta(al)"></div>
                 <div class="text-sm" x-text="al.que_decide_google"></div>
                 <div class="text-dim" style="font-size:.78rem" x-show="fmt.detalleAlerta(al)" x-text="fmt.detalleAlerta(al)"></div>
                 <!-- Por segmento de negocio (decision 127): «el 100 % de las
@@ -2907,7 +2944,7 @@
               </div>
             </template>
             <div class="text-dim" style="font-size:.78rem;margin-top:.5rem" x-show="detailTab !== 'diff'">
-              El detalle, con ejemplos y plantillas, en la pestaña <a href="#" @click.prevent="switchTab('diff')">Comparar</a>.
+              Las páginas de cada una, con ejemplos y plantillas: <a href="#" @click.prevent="switchTab('diff')">ver el detalle en Comparar</a>.
             </div>
           </div>
         </template>
@@ -3836,12 +3873,15 @@
               </div>
             </div>
 
-            <div class="card" style="grid-column:1/-1">
-              <div class="card-header"><h2>Hosts mas frecuentes</h2></div>
-              <template x-if="stats.top_hosts.length === 0">
-                <div class="text-dim text-sm">Sin datos todavía</div>
+            <!-- Con un solo host no dice nada, y con uno que se lleva casi todo
+                 basta una frase (revision de UX del 25-oct, 3.6; V19). -->
+            <template x-if="(stats.top_hosts || []).length > 1">
+            <div class="card" style="grid-column:1/-1" data-testid="hosts-frecuentes">
+              <div class="card-header"><h2>Hosts más frecuentes</h2></div>
+              <template x-if="hostDominante(stats.top_hosts)">
+                <div class="text-sm" x-text="hostDominante(stats.top_hosts)"></div>
               </template>
-              <div class="bar-chart">
+              <div class="bar-chart" x-show="!hostDominante(stats.top_hosts)">
                 <template x-for="h in stats.top_hosts.slice(0, 10)" :key="h.host">
                   <div class="bar-row">
                     <div class="bar-label" :title="h.host" x-text="h.host"></div>
@@ -3853,6 +3893,7 @@
                 </template>
               </div>
             </div>
+            </template>
 
             <!-- Que bloquea cada bot por host (decision 129): la home y una
                  muestra por plantilla, con el robots.txt guardado. -->
@@ -4002,9 +4043,9 @@
                         <td :class="t.nivel === 'dim' ? 'text-dim' : t.nivel" x-text="t.estado"></td>
                         <td x-text="t.emisor || '—'"></td>
                         <td x-text="t.caduca ? fmt.dia(t.caduca) : '—'"></td>
-                        <td :class="t.renovar && t.nivel === 'green' ? 'orange' : ''"
-                            :title="t.renovar && t.nivel === 'green' ? 'Faltan 30 días o menos: conviene renovarlo' : ''"
-                            x-text="t.dias == null ? '—' : fmt.num(t.dias) + (t.renovar && t.nivel === 'green' ? ' · renovar' : '')"></td>
+                        <td :class="t.renovar ? 'orange' : ''"
+                            :title="t.renovar ? 'Faltan 30 días o menos: conviene renovarlo' : ''"
+                            x-text="t.dias == null ? '—' : fmt.num(t.dias)"></td>
                         <td x-text="t.version || '—'"></td>
                       </tr>
                     </template>
@@ -4081,13 +4122,22 @@
             <template x-if="resumenSitemaps(job)">
               <div class="card chk" data-testid="tarjeta-sitemaps" x-data="{ get sm() { return resumenSitemaps(job) }, abierto: false }">
                 <div class="card-header"><h2>Sitemaps</h2>
-                  <span class="text-sm text-dim" x-text="fmt.num(sm.leidos) + ' de ' + fmt.num(sm.pedidos) + (sm.pedidos === 1 ? ' fichero leído' : ' ficheros leídos')"></span></div>
-                <div class="text-sm">
-                  <span x-text="fmt.num(sm.devueltas) + ' entradas' + (sm.declaradas && sm.declaradas !== sm.devueltas ? ' de ' + fmt.num(sm.declaradas) + ' declaradas' : '')"></span>
-                  <span class="text-dim" x-show="sm.formatos.length" x-text="' · ' + sm.formatos.map(([f, n]) => f + (n > 1 ? ' ×' + n : '')).join(', ')"></span>
+                  <span class="text-sm text-dim" x-text="fmt.num(sm.leidos) + ' de ' + fmt.num(sm.pedidos) + (sm.pedidos === 1 ? ' fichero descargado' : ' ficheros descargados')"></span></div>
+                <!-- URLs de los urlset e indices aparte: «64 entradas de 459
+                     declaradas» sumaba los 395 hijos de un indice como URLs
+                     (revision de UX del 25-oct, 3.6; V13). -->
+                <div class="text-sm" data-testid="sitemaps-cifras">
+                  <strong x-text="fmt.num(sm.urls) + (sm.urls === 1 ? ' URL' : ' URLs')"></strong>
+                  <span x-text="'en ' + fmt.num(sm.conUrls) + (sm.conUrls === 1 ? ' fichero' : ' ficheros')"></span><span x-show="sm.indices" x-text="'; ' + (sm.indices === 1 ? '1 índice' : fmt.num(sm.indices) + ' índices') + ' con ' + fmt.num(sm.hijos) + (sm.hijos === 1 ? ' fichero' : ' ficheros')"></span>.
                 </div>
-                <div x-show="sm.parcial" class="text-sm orange">Lectura parcial: hubo ficheros sin leer o cortados, así que «fuera del sitemap» no se puede afirmar para todo el sitio.</div>
+                <div x-show="sm.ilegibles" class="text-sm orange" data-testid="sitemaps-ilegibles"
+                     x-text="fmt.num(sm.ilegibles) + ' de ' + fmt.num(sm.pedidos) + (sm.ilegibles === 1 ? ' fichero respondió 200 ' : ' ficheros respondieron 200 ') + (sm.vacios === sm.ilegibles ? (sm.ilegibles === 1 ? 'vacío' : 'vacíos') : 'sin un sitemap que se pueda leer') + ': no se sabe qué URLs declaran.'"></div>
+                <div x-show="sm.parcial" class="text-sm orange">Lectura parcial: hubo ficheros sin leer o cortados.</div>
                 <div x-show="sm.fallidos" class="text-sm orange" x-text="fmt.num(sm.fallidos) + (sm.fallidos === 1 ? ' fichero no respondió 200' : ' ficheros no respondieron 200')"></div>
+                <div x-show="sm.dudoso" class="text-sm" data-testid="sitemaps-duda">
+                  Por eso «No incluida en el sitemap» no se puede afirmar: la página puede estar en un fichero que no se leyó.
+                  <a href="#" @click.prevent="verTipoDeIncidencia('not_in_sitemap', ''); switchTab('issues')">Ver en Problemas</a>
+                </div>
                 <div x-show="sm.recortadas" class="text-sm text-dim" x-text="'Se guardaron ' + fmt.num(sm.guardadas) + ' entradas (tope ' + fmt.num(sm.tope) + '): la ficha de una URL puede no decir de qué fichero viene.'"></div>
                 <a href="#" class="text-sm" x-show="sm.ficheros.length" @click.prevent="abierto = !abierto" x-text="abierto ? 'Ocultar ficheros' : 'Ver ficheros'"></a>
                 <div class="table-wrap" x-show="abierto"><table class="tbl" style="font-size:.8rem">
@@ -4486,6 +4536,9 @@
                   <span x-text="ISSUE_INFO[issueFilters.issue_type].que"></span></div>
                 <div class="text-sm"><span class="text-dim">Qué decide Google:</span> <span x-text="ISSUE_INFO[issueFilters.issue_type].google"></span></div>
                 <div class="text-sm"><span class="text-dim">Cómo se arregla:</span> <span x-text="ISSUE_INFO[issueFilters.issue_type].arreglo"></span></div>
+                <!-- Sin leer todos los sitemaps, «no incluida» no se afirma
+                     (revision de UX del 25-oct, 3.6; V13). Solo presentacion. -->
+                <div class="text-sm orange" x-show="issueFilters.issue_type === 'not_in_sitemap' && dudaSitemaps(job)" x-text="dudaSitemaps(job)" data-testid="problemas-duda-sitemap"></div>
               </div>
             </template>
 
@@ -5305,10 +5358,12 @@
         <!-- ===== PESTANA: LIMPIEZA ===== -->
         <template x-if="detailTab === 'cleaning'">
           <div>
-            <!-- Nota informativa -->
-            <div style="display:flex;align-items:flex-start;gap:.5rem;padding:.6rem 1rem;background:var(--surface);border-radius:8px;margin-bottom:1rem;border-left:3px solid var(--blue);font-size:.85rem">
-              <i data-lucide="info" style="width:15px;height:15px;flex-shrink:0;margin-top:.15rem;color:var(--blue)"></i>
-              <span>Proceso opcional a posteriori. Los originales se conservan &mdash; puedes revertir en cualquier momento. Si una regla eliminaría más del 60% del contenido de una página, esa página se salta automáticamente.</span>
+            <!-- Para que sirve y que toca despues (revision de UX del 25-oct,
+                 3.6; V45): antes solo decia «Proceso opcional a posteriori». -->
+            <div class="card limpieza-intro text-sm" data-testid="limpieza-intro">
+              <p><strong>Quitar el texto que repite la plantilla</strong> (menús, pies, avisos de cookies) del contenido extraído, para que los duplicados, las páginas con pocas palabras y el semántico miren solo lo propio de cada página.</p>
+              <p class="text-dim">No cambia nada del sitio ni lo rastreado: el original se guarda y se puede revertir. Si una regla quitaría más del 60&nbsp;% de una página, esa página se salta.</p>
+              <p><strong>Después hay que volver a analizar el censo</strong> para que Problemas lo tenga en cuenta (hoy se pide al equipo técnico) y relanzar el análisis de la pestaña Semántico.</p>
             </div>
 
             <template x-if="cleaningError">
@@ -5318,14 +5373,17 @@
               <p class="text-sm" style="color:var(--green);margin-bottom:.75rem" x-text="cleaningMessage"></p>
             </template>
 
-            <!-- Grupos -->
+            <!-- Grupos, los de mas texto repetido primero (decision 198), con
+                 el editor de reglas debajo de la fila elegida: antes iba al
+                 final de 39 filas y habia que bajar a buscarlo. -->
             <div class="card" style="margin-bottom:1rem">
               <div class="card-header">
-                <h2>Grupos</h2>
+                <h2>Grupos por forma de URL</h2>
                 <button class="btn btn-sm" @click="loadCleaningGroups()" :disabled="cleaningGroupsLoading" style="display:flex;align-items:center;gap:.25rem">
                   <i data-lucide="refresh-cw" style="width:12px;height:12px"></i> Actualizar
                 </button>
               </div>
+              <p class="text-sm text-dim" style="margin:-.3rem 0 .6rem" x-text="textoOrdenLimpieza(cleaningGroups)"></p>
               <template x-if="cleaningGroupsLoading">
                 <div class="loading-overlay"><div class="spinner"></div> Cargando grupos...</div>
               </template>
@@ -5334,122 +5392,145 @@
               </template>
               <template x-if="!cleaningGroupsLoading && cleaningGroups.length > 0">
                 <div class="table-wrap">
-                  <table>
+                  <table data-testid="limpieza-grupos">
                     <thead>
                       <tr>
-                        <th data-tip="Patron de forma de URL que agrupa páginas con estructura similar">Forma de URL</th>
-                        <th data-tip="Número de páginas del grupo">Páginas</th>
-                        <th data-tip="Páginas del grupo con limpieza aplicada">Limpiadas</th>
-                        <th data-tip="Longitud media del contenido en caracteres">Long. media</th>
-                        <th data-tip="URL de ejemplo del grupo">Ejemplo</th>
+                        <th data-tip="Las páginas con la misma forma de ruta: {s} es un tramo de texto y {n} uno que empieza por número">Forma de URL</th>
+                        <th>Páginas</th>
+                        <th x-show="limpiezaConRepetido(cleaningGroups)" data-tip="Parte del texto de una muestra del grupo que son líneas repetidas en al menos la mitad de sus páginas">Texto repetido</th>
+                        <!-- Solo si alguna esta limpiada: «0» en todas no decia nada (V45). -->
+                        <th x-show="limpiezaConLimpiadas(cleaningGroups)">Limpiadas</th>
+                        <th>Ejemplo</th>
                       </tr>
                     </thead>
-                    <tbody>
-                      <template x-for="g in cleaningGroups" :key="g.group_key">
-                        <tr @click="selectCleaningGroup(g)" style="cursor:pointer" :class="cleaningSelectedGroup === g.group_key && 'row-selected'">
+                    <template x-for="g in cleaningGroups" :key="g.group_key">
+                      <tbody>
+                        <tr @click="selectCleaningGroup(g)" style="cursor:pointer" :class="cleaningSelectedGroup === g.group_key && 'row-selected'"
+                            :aria-expanded="cleaningSelectedGroup === g.group_key ? 'true' : 'false'">
                           <td style="font-family:monospace;font-size:.8rem" x-text="g.group_key"></td>
                           <td x-text="fmt.num(g.pages)"></td>
-                          <td x-text="fmt.num(g.cleaned_pages)"></td>
-                          <td x-text="fmt.num(g.avg_content_length)"></td>
+                          <td x-show="limpiezaConRepetido(cleaningGroups)" x-text="textoRepetidoGrupo(g)"
+                              :class="g.repetido_parte == null ? 'text-dim' : ''"></td>
+                          <td x-show="limpiezaConLimpiadas(cleaningGroups)" x-text="g.cleaned_pages ? fmt.num(g.cleaned_pages) : '—'"></td>
                           <td style="max-width:300px" :title="g.sample_urls?.[0] || ''">
                             <div class="truncate text-dim text-sm" x-text="g.sample_urls?.[0] || '—'"></div>
                           </td>
                         </tr>
-                      </template>
-                    </tbody>
+                        <template x-if="cleaningSelectedGroup === g.group_key">
+                          <tr class="limpieza-editor" data-testid="limpieza-editor">
+                            <td colspan="5"><div class="limpieza-editor-cuerpo">
+                              <template x-if="(g.lineas_repetidas || []).length">
+                                <div>
+                                  <div class="text-sm"><strong>Lo que más se repite</strong>
+                                    <span class="text-dim" x-text="'en ' + fmt.num(g.repetido_muestra) + ' páginas de muestra'"></span></div>
+                                  <div class="text-sm text-dim" style="margin:.2rem 0 .3rem;white-space:normal" x-show="notaLineasLimpieza(g)" x-text="notaLineasLimpieza(g)"></div>
+                                  <ul class="limpieza-repetidas">
+                                    <template x-for="l in (cleaningVerTodasLineas ? g.lineas_repetidas : g.lineas_repetidas.slice(0, 8))" :key="l.texto">
+                                      <li>
+                                        <span class="text-dim text-sm" style="white-space:nowrap" x-text="fmt.num(l.paginas) + ' de ' + fmt.num(g.repetido_muestra)"></span>
+                                        <code x-text="l.texto"></code>
+                                        <button class="btn btn-sm" @click.stop="anadirLineaLimpieza(l.texto)" :disabled="cleaningRules.some(r => r.type === 'line_exact' && r.value === l.texto)">Quitar esta línea</button>
+                                      </li>
+                                    </template>
+                                  </ul>
+                                  <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:-.4rem 0 .75rem">
+                                    <button class="btn btn-sm" x-show="g.lineas_repetidas.length > 8" @click.stop="cleaningVerTodasLineas = !cleaningVerTodasLineas"
+                                            x-text="cleaningVerTodasLineas ? 'Ver solo las 8 primeras' : 'Ver las ' + fmt.num(g.lineas_repetidas.length)"></button>
+                                    <button class="btn btn-sm" x-show="g.lineas_repetidas.length > 1"
+                                            @click.stop="g.lineas_repetidas.forEach(l => anadirLineaLimpieza(l.texto))"
+                                            x-text="'Quitar las ' + fmt.num(g.lineas_repetidas.length) + ' líneas'"></button>
+                                  </div>
+                                </div>
+                              </template>
+                              <div class="text-sm" style="margin-bottom:.4rem"><strong>Reglas para este grupo</strong></div>
+                              <template x-for="(rule, idx) in cleaningRules" :key="idx">
+                                <div class="limpieza-regla">
+                                  <select x-model="rule.type" style="width:auto;padding:.35rem .5rem;font-size:.8rem">
+                                    <option value="line_exact">Línea exacta</option>
+                                    <option value="line_prefix">Línea que empieza por</option>
+                                    <option value="line_contains">Línea que contiene</option>
+                                    <option value="cut_from_line">Cortar desde línea que contiene</option>
+                                    <option value="remove_substring">Quitar texto literal</option>
+                                    <option value="regex">Expresión regular</option>
+                                  </select>
+                                  <input type="text" x-model="rule.value" placeholder="Valor de la regla">
+                                  <button class="btn btn-sm btn-danger" @click="removeCleaningRule(idx)" title="Quitar regla">&#10005;</button>
+                                </div>
+                              </template>
+                              <button class="btn btn-sm" @click="addCleaningRule()" style="margin-bottom:1rem">+ Añadir regla</button>
+
+                              <div style="display:flex;gap:1rem;align-items:end;flex-wrap:wrap;margin-bottom:1rem">
+                                <div>
+                                  <label class="text-dim text-sm">Aplicar a</label>
+                                  <select x-model="cleaningTargets" style="display:block;margin-top:.2rem;width:auto;padding:.35rem .5rem;font-size:.8rem">
+                                    <option value="text">Texto</option>
+                                    <option value="markdown">Markdown</option>
+                                    <option value="both">Ambos</option>
+                                  </select>
+                                </div>
+                                <div style="flex:1;min-width:220px">
+                                  <label class="text-dim text-sm">Solo las URLs que casen con (expresión regular, opcional)</label>
+                                  <input type="text" x-model="cleaningUrlRegex" placeholder="^https://ejemplo\.com/blog/" style="display:block;margin-top:.2rem;width:100%">
+                                </div>
+                              </div>
+
+                              <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+                                <button class="btn btn-sm" @click="previewCleaning()" :disabled="cleaningPreviewLoading || cleaningApplying || cleaningReverting" style="display:flex;align-items:center;gap:.25rem">
+                                  <template x-if="cleaningPreviewLoading"><span class="spinner" style="width:12px;height:12px"></span></template>
+                                  Vista previa
+                                </button>
+                                <button class="btn btn-sm btn-primary" @click="applyCleaning()" :disabled="cleaningApplying || cleaningPreviewLoading || cleaningReverting" style="display:flex;align-items:center;gap:.25rem">
+                                  <template x-if="cleaningApplying"><span class="spinner" style="width:12px;height:12px"></span></template>
+                                  Aplicar al grupo
+                                </button>
+                                <button class="btn btn-sm btn-danger" @click="revertCleaning()" x-show="g.cleaned_pages" :disabled="cleaningReverting || cleaningApplying || cleaningPreviewLoading" style="display:flex;align-items:center;gap:.25rem">
+                                  <template x-if="cleaningReverting"><span class="spinner" style="width:12px;height:12px"></span></template>
+                                  Revertir grupo
+                                </button>
+                              </div>
+
+                              <!-- Vista previa, junto a sus reglas -->
+                              <template x-if="cleaningPreview">
+                                <div style="margin-top:1rem">
+                                  <p class="text-sm" style="margin-bottom:.75rem">
+                                    <strong x-text="fmt.num(cleaningPreview.total_chars_removed)"></strong> caracteres quitados en total en la muestra.
+                                    <template x-if="cleaningPreview.pages_skipped_safety > 0">
+                                      <span style="color:var(--orange)" x-text="fmt.num(cleaningPreview.pages_skipped_safety) + ' páginas se saltarían por quitar más del 60 %'"></span>
+                                    </template>
+                                  </p>
+                                  <template x-if="cleaningPreview.samples.length === 0">
+                                    <div class="empty"><h3>Ninguna página de la muestra cambia con estas reglas</h3></div>
+                                  </template>
+                                  <template x-for="s in cleaningPreview.samples" :key="s.url">
+                                    <div style="margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid var(--border)">
+                                      <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem;flex-wrap:wrap">
+                                        <a :href="s.url" target="_blank" rel="noopener" class="text-sm truncate" style="max-width:60%" :title="s.url" x-text="s.url"></a>
+                                        <span class="text-sm" style="padding:.1rem .5rem;border-radius:10px;background:var(--red-bg);color:var(--red);font-weight:600"
+                                              x-text="'−' + fmt.num(s.chars_removed) + ' caracteres (' + pctEs(s.removed_pct ?? 0) + ')'"></span>
+                                      </div>
+                                      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:.75rem">
+                                        <div>
+                                          <div class="text-dim text-sm" style="margin-bottom:.25rem">Antes</div>
+                                          <pre style="max-height:220px;overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:.5rem;font-size:.72rem;font-family:monospace;white-space:pre-wrap;word-break:break-word" x-text="s.before_excerpt"></pre>
+                                        </div>
+                                        <div>
+                                          <div class="text-dim text-sm" style="margin-bottom:.25rem">Después</div>
+                                          <pre style="max-height:220px;overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:.5rem;font-size:.72rem;font-family:monospace;white-space:pre-wrap;word-break:break-word" x-text="s.after_excerpt"></pre>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </template>
+                                </div>
+                              </template>
+                            </div></td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </template>
                   </table>
                 </div>
               </template>
             </div>
-
-            <!-- Reglas -->
-            <template x-if="cleaningSelectedGroup">
-              <div class="card" style="margin-bottom:1rem">
-                <div class="card-header">
-                  <h2>Reglas &mdash; <span style="font-family:monospace;font-size:.85rem;font-weight:400" x-text="cleaningSelectedGroup"></span></h2>
-                </div>
-                <template x-for="(rule, idx) in cleaningRules" :key="idx">
-                  <div style="display:flex;gap:.5rem;margin-bottom:.5rem;align-items:center">
-                    <select x-model="rule.type" style="width:auto;padding:.35rem .5rem;font-size:.8rem">
-                      <option value="line_exact">Línea exacta</option>
-                      <option value="line_prefix">Línea que empieza por</option>
-                      <option value="line_contains">Línea que contiene</option>
-                      <option value="cut_from_line">Cortar desde línea que contiene</option>
-                      <option value="remove_substring">Quitar texto literal</option>
-                      <option value="regex">Expresión regular</option>
-                    </select>
-                    <input type="text" x-model="rule.value" placeholder="Valor de la regla" style="flex:1">
-                    <button class="btn btn-sm btn-danger" @click="removeCleaningRule(idx)" title="Quitar regla">&#10005;</button>
-                  </div>
-                </template>
-                <button class="btn btn-sm" @click="addCleaningRule()" style="margin-bottom:1rem">+ Añadir regla</button>
-
-                <div style="display:flex;gap:1rem;align-items:end;flex-wrap:wrap;margin-bottom:1rem">
-                  <div>
-                    <label class="text-dim text-sm">Aplicar a</label>
-                    <select x-model="cleaningTargets" style="display:block;margin-top:.2rem;width:auto;padding:.35rem .5rem;font-size:.8rem">
-                      <option value="text">Texto</option>
-                      <option value="markdown">Markdown</option>
-                      <option value="both">Ambos</option>
-                    </select>
-                  </div>
-                  <div style="flex:1;min-width:220px">
-                    <label class="text-dim text-sm">Filtro regex de URL (opcional)</label>
-                    <input type="text" x-model="cleaningUrlRegex" placeholder="^https://ejemplo\.com/blog/" style="display:block;margin-top:.2rem;width:100%">
-                  </div>
-                </div>
-
-                <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-                  <button class="btn btn-sm" @click="previewCleaning()" :disabled="cleaningPreviewLoading || cleaningApplying || cleaningReverting" style="display:flex;align-items:center;gap:.25rem">
-                    <template x-if="cleaningPreviewLoading"><span class="spinner" style="width:12px;height:12px"></span></template>
-                    Vista previa
-                  </button>
-                  <button class="btn btn-sm btn-primary" @click="applyCleaning()" :disabled="cleaningApplying || cleaningPreviewLoading || cleaningReverting" style="display:flex;align-items:center;gap:.25rem">
-                    <template x-if="cleaningApplying"><span class="spinner" style="width:12px;height:12px"></span></template>
-                    Aplicar al grupo
-                  </button>
-                  <button class="btn btn-sm btn-danger" @click="revertCleaning()" :disabled="cleaningReverting || cleaningApplying || cleaningPreviewLoading" style="display:flex;align-items:center;gap:.25rem">
-                    <template x-if="cleaningReverting"><span class="spinner" style="width:12px;height:12px"></span></template>
-                    Revertir grupo
-                  </button>
-                </div>
-              </div>
-            </template>
-
-            <!-- Vista previa -->
-            <template x-if="cleaningPreview">
-              <div class="card" style="margin-bottom:1rem">
-                <div class="card-header"><h2>Vista previa</h2></div>
-                <p class="text-sm" style="margin-bottom:.75rem">
-                  <strong x-text="fmt.num(cleaningPreview.total_chars_removed)"></strong> caracteres eliminados en total en la muestra.
-                  <template x-if="cleaningPreview.pages_skipped_safety > 0">
-                    <span style="color:var(--orange)" x-text="fmt.num(cleaningPreview.pages_skipped_safety) + ' páginas se saltarían por la válvula de seguridad (>60% eliminado)'"></span>
-                  </template>
-                </p>
-                <template x-if="cleaningPreview.samples.length === 0">
-                  <div class="empty"><h3>Ninguna página de la muestra cambia con estas reglas</h3></div>
-                </template>
-                <template x-for="s in cleaningPreview.samples" :key="s.url">
-                  <div style="margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid var(--border)">
-                    <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem;flex-wrap:wrap">
-                      <a :href="s.url" target="_blank" rel="noopener" class="text-sm truncate" style="max-width:60%" :title="s.url" x-text="s.url"></a>
-                      <span class="text-sm" style="padding:.1rem .5rem;border-radius:10px;background:var(--red-bg);color:var(--red);font-weight:600"
-                            x-text="'-' + fmt.num(s.chars_removed) + ' chars (' + (s.removed_pct ?? 0).toFixed(1) + '%)'"></span>
-                    </div>
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
-                      <div>
-                        <div class="text-dim text-sm" style="margin-bottom:.25rem">Antes</div>
-                        <pre style="max-height:220px;overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:.5rem;font-size:.72rem;font-family:monospace;white-space:pre-wrap;word-break:break-word" x-text="s.before_excerpt"></pre>
-                      </div>
-                      <div>
-                        <div class="text-dim text-sm" style="margin-bottom:.25rem">Después</div>
-                        <pre style="max-height:220px;overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:.5rem;font-size:.72rem;font-family:monospace;white-space:pre-wrap;word-break:break-word" x-text="s.after_excerpt"></pre>
-                      </div>
-                    </div>
-                  </div>
-                </template>
-              </div>
-            </template>
 
             <!-- Historial -->
             <div class="card">
@@ -5467,7 +5548,7 @@
                         <th>Reglas</th>
                         <th>Páginas actualizadas</th>
                         <th>Saltadas</th>
-                        <th>Chars eliminados</th>
+                        <th>Caracteres quitados</th>
                       </tr>
                     </thead>
                     <tbody>

@@ -123,8 +123,11 @@ def test_tls_marca_renovar_a_30_dias():
         "a.x": {"verificado": True, "dias_restantes": 14.5},
         "b.x": {"verificado": True, "dias_restantes": 31},
         "c.x": {"verificado": False, "motivo": "caducado", "dias_restantes": -3}}}},
-        "return filasTls(job).map(f => [f.host, f.nivel, f.renovar]);")
-    assert filas == [["a.x", "green", True], ["b.x", "green", False], ["c.x", "red", False]]
+        "return filasTls(job).map(f => [f.host, f.nivel, f.renovar, f.estado]);")
+    # A 30 dias o menos ya no es «Valido» en verde (revision de UX del 25-oct,
+    # 3.6; V19): naranja y con los dias.
+    assert filas == [["a.x", "orange", True, "Válido, caduca en 14 días"], ["b.x", "green", False, "Válido"],
+                     ["c.x", "red", False, "No válido: caducado"]]
 
 
 ROBOTS = {"bots": [{"bot": "googlebot", "token": "Googlebot", "tipo": "buscador"},
@@ -159,7 +162,9 @@ def test_robots_en_una_frase():
 def test_tls_usa_el_umbral_del_job():
     filas = _con_job({"config": {"analysis_thresholds": {"tls_dias_aviso": 2}}, "tls": TLS},
                      "return filasTls(job).find(f => f.host === 'pronto.x.com').estado;")
-    assert filas == "Válido"
+    # Con el aviso a 2 dias no es «Caduca pronto», pero a 3 dias tampoco es
+    # «Valido» sin mas (3.6).
+    assert filas == "Válido, caduca en 3 días"
 
 
 def test_soft404_cruza_las_sondas_con_el_resumen():

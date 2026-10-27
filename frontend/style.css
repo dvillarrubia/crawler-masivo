@@ -2004,3 +2004,34 @@ a.tab{display:flex;align-items:center;gap:.35rem;white-space:nowrap;flex-shrink:
      verde claro no se leia). */
   .tabla-tarjetas tr{background:var(--bg-card)}
 }
+/* Bloque «Google» del Resumen y del Estado del cliente (revision de UX del 25-oct, 3.3) */
+.google-cab{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem}
+.google-cab h2{font-size:1rem;margin:0}
+.google-cifras{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.75rem;margin:.2rem 0 .6rem}
+.google-valor{font-size:1.3rem;font-weight:700;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.google-frase{margin:.3rem 0}
+.google-lista{margin:.3rem 0 0;padding-left:1.1rem}
+.google-paginas{margin-top:.4rem}
+.google-paginas > summary{cursor:pointer}
+.google-paginas ul{list-style:none;margin:.3rem 0 0;padding:0;display:flex;flex-direction:column;gap:.35rem}
+.google-paginas li{min-width:0}
+.google-paginas a{overflow-wrap:anywhere}
+.google-clics{font-variant-numeric:tabular-nums;margin-right:.4rem;white-space:nowrap}
+.google-detalle{margin-top:.6rem;padding-top:.5rem;border-top:1px solid var(--border)}
+@media (max-width:640px){
+  .google-cifras{grid-template-columns:1fr 1fr}
+  .google-valor{font-size:1.1rem}
+}
+
+/* Limpieza (3.6): el editor de cada regla bajo su fila */
+.limpieza-intro{margin:0 0 1rem}
+.limpieza-intro p{margin:.2rem 0}
+.limpieza-editor > td{background:var(--bg-hover);padding:.75rem 1rem}
+/* La tabla es mas ancha que la pantalla (la columna Ejemplo): el editor se
+   queda pegado a la izquierda y del ancho visible, no del de la tabla. */
+.limpieza-editor-cuerpo{position:sticky;left:1rem;max-width:min(100%,calc(100vw - 6.5rem))}
+.limpieza-repetidas{list-style:none;margin:.3rem 0 .75rem;padding:0;display:flex;flex-direction:column;gap:.3rem}
+.limpieza-repetidas li{display:flex;gap:.5rem;align-items:baseline;min-width:0}
+.limpieza-repetidas code{flex:1;min-width:0;overflow-wrap:anywhere;white-space:pre-wrap;font-size:.78rem}
+.limpieza-regla{display:flex;gap:.5rem;margin-bottom:.5rem;align-items:center;flex-wrap:wrap}
+.limpieza-regla input{flex:1 1 14rem;min-width:0}
