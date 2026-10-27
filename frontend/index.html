@@ -3013,6 +3013,11 @@
               </details>
             </template>
             <div x-show="detailTab === 'overview' && bg.inspeccion" class="google-frase" x-text="bg.inspeccion"></div>
+            <!-- Lo que Search Console no cuenta (#163), junto a sus cifras. -->
+            <details x-show="detailTab === 'overview' && bg.limites.length" class="google-paginas" data-testid="google-limites">
+              <summary class="text-dim">Lo que Search Console no cuenta</summary>
+              <ul><template x-for="(x, n) in bg.limites" :key="'l' + n"><li class="text-dim" x-text="x"></li></template></ul>
+            </details>
           <template x-if="detailTab === 'overview' && job.gsc_resumen">
           <div class="google-detalle">
             <div>

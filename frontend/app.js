@@ -7629,7 +7629,34 @@ function paginasDeFraseTrafico(texto, t) {
 
 // Lo que lee la plantilla mientras el x-if que la envuelve aun no ha
 // reaccionado a un job que pasa a null.
-const BLOQUE_GOOGLE_VACIO = Object.freeze({ cifras: [], conclusiones: [], inspeccion: null, textos: [], paginas: [], cortadas: false, trafico: null });
+const BLOQUE_GOOGLE_VACIO = Object.freeze({ cifras: [], conclusiones: [], inspeccion: null, textos: [], paginas: [], cortadas: false, trafico: null, limites: [] });
+
+// Lo que Search Console no cuenta, dicho junto a sus cifras (#163,
+// `docs/INVESTIGACION_SEARCH_CONSOLE.md`). Dos avisos siempre (la API no
+// separa la IA y calla las busquedas raras, con la parte MEDIDA en el sitio
+// cuando hay serie de busquedas) y dos solo si la ventana cruza las fechas
+// en que Google cambio lo que cuenta: impresiones infladas del 13-05-2025 al
+// 27-04-2026 y el fin de `num=100` en septiembre de 2025.
+const GSC_INFLADAS = ['2025-05-13', '2026-04-27'];
+const GSC_NUM100 = ['2025-09-01', '2025-09-30'];
+function limitesGoogle(g) {
+  if (!g) return [];
+  const desde = g.datos_desde || g.desde, hasta = g.datos_hasta || g.hasta;
+  const cruza = ([a, b]) => !!(desde && hasta && desde <= b && hasta >= a);
+  const sb = g.oportunidades && g.oportunidades.sin_busqueda;
+  const salida = [
+    'La API de Search Console no separa los clics que vienen de AI Overviews ni de AI Mode (AI Mode cuenta dentro de Web): estas cifras no dicen qué parte llega desde las respuestas de IA.',
+    sb && sb.clics_paginas
+      ? fmt.pct(100 * sb.parte, 0) + ' de los clics del ' + fmt.dia(sb.desde) + ' al ' + fmt.dia(sb.hasta)
+        + ' llega sin su búsqueda: Google anonimiza las búsquedas raras o sensibles'
+        + (sb.con_dias_cortados ? ' y algún día de búsquedas se cortó en su tope de 50.000 filas' : '')
+        + '. Por eso las cifras por búsqueda (canibalización, CTR por búsqueda) no suman el total.'
+      : 'Google anonimiza las búsquedas raras o sensibles (en muchos sitios, entre el 40 y el 50 % de los clics): las cifras por búsqueda nunca suman el total.',
+  ];
+  if (cruza(GSC_INFLADAS)) salida.push('Las impresiones del 13 de mayo de 2025 al 27 de abril de 2026 están infladas por un error de Google que no corrigió el histórico: no compares impresiones ni CTR a través de esas fechas.');
+  if (cruza(GSC_NUM100)) salida.push('En septiembre de 2025 Google dejó de servir 100 resultados por página (num=100): cayeron las impresiones de escritorio y subió la posición media sin que el sitio cambiara.');
+  return salida;
+}
 
 // Todo el bloque. null si el job no trae ni Search Console ni trafico entre
 // censos (sin GSC conectado no se pinta nada).
@@ -7655,7 +7682,7 @@ function bloqueGoogle(job) {
     : null;
   // La primera frase del servidor son los totales, que ya dice la conclusion.
   const textos = t && t.comparable ? (t.textos || []).slice(1) : [];
-  return { cifras, conclusiones: conclusionTrafico(t), inspeccion, textos, ...paginasTrafico(t), trafico: t || null };
+  return { cifras, conclusiones: conclusionTrafico(t), inspeccion, textos, ...paginasTrafico(t), trafico: t || null, limites: limitesGoogle(g) };
 }
 
 // `jobs.sitemaps` (decision 126), solo en la ficha del job.

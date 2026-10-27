@@ -189,6 +189,7 @@ def avisar(an) -> dict[str, Any] | None:
     resumen["sitemaps"] = _sitemaps(ctx)
     resumen["por_plantilla"], resumen["por_profundidad"] = _rendimiento(ctx)
     resumen["consultas_desde"] = ctx.consultas_desde
+    resumen["sin_busqueda"] = _sin_busqueda(ctx)
     an._flush_issues()
     job.gsc_resumen = {**job.gsc_resumen, "oportunidades": resumen}
     logger.info("Oportunidades de Search Console del job %s: %s", an.job_id,
@@ -266,6 +267,48 @@ class _Contexto:
         for clave, consulta, clics, imp, pos_x in filas:
             salida[clave][consulta] = [int(clics or 0), int(imp or 0), float(pos_x or 0)]
         return salida
+
+
+def _sin_busqueda(ctx: _Contexto) -> dict[str, Any] | None:
+    """Que parte de los clics llega sin su busqueda, medido en el sitio (#163).
+
+    Google da los clics de una pagina con TODAS sus busquedas, pero al pedirlos
+    por pagina y busqueda se calla las raras o sensibles (anonimizadas). La
+    diferencia entre las dos series en los mismos dias y propiedades es lo
+    que ninguna cifra por busqueda puede contar. Solo los dias que tienen las
+    dos series; si alguno de busquedas se corto en el tope de filas, la
+    diferencia mezcla las dos cosas y se dice (`con_dias_cortados`).
+    """
+    from shared.models import GscConsulta as C
+    from shared.models import GscPagina as P
+
+    primeros = [((e.detalle or {}).get("consultas") or {}).get("primer_dia") for e in ctx.estados]
+    primeros = [d for d in primeros if d]
+    if not ctx.propiedades or not primeros:
+        return None
+    desde = max(ctx.desde.isoformat(), max(primeros))
+    hasta = ctx.hasta.isoformat()
+    if desde > hasta:
+        return None
+    cortados = any(desde <= d <= hasta
+                   for e in ctx.estados
+                   for d in (((e.detalle or {}).get("consultas") or {}).get("truncados") or []))
+    try:
+        with ctx.an.session.begin_nested():
+            def _suma(modelo):
+                return int(ctx.an.session.execute(
+                    select(func.coalesce(func.sum(modelo.clics), 0))
+                    .where(modelo.cliente_id == ctx.job.cliente_id, modelo.propiedad.in_(ctx.propiedades),
+                           modelo.fecha >= desde, modelo.fecha <= hasta)).scalar() or 0)
+            paginas, busquedas = _suma(P), _suma(C)
+    except Exception:  # noqa: BLE001 -- base sin migrar: un savepoint, no un rollback
+        return None
+    if paginas <= 0:
+        return None
+    return {"desde": desde, "hasta": hasta, "clics_paginas": paginas,
+            "clics_busquedas": min(busquedas, paginas),
+            "parte": round(max(0, paginas - busquedas) / paginas, 4),
+            "con_dias_cortados": cortados}
 
 
 def _oportunidades(ctx: _Contexto, consultas: dict) -> int:

@@ -340,3 +340,44 @@ def test_la_comparacion_no_afirma_nada_de_los_avisos_de_trafico():
     r = comparar_incidencias(a, b, analisis_a="v", analisis_b="v")
     assert r["nuevas"]["total"] == 0
     assert [f["tipo"] for f in r["resueltas"]["por_tipo"]] == ["title_missing"]
+
+
+def _pagina_gsc(s, c, ruta, clics, dia=EN_VENTANA):
+    from shared.models import GscPagina
+
+    s.add(GscPagina(cliente_id=c.id, propiedad="sc-domain:x.com", fecha=dia, url=f"https://x.com{ruta}",
+                    url_clave=clave_de_url(f"https://x.com{ruta}"), clics=clics, impresiones=clics * 10))
+
+
+def test_la_parte_de_clics_sin_busqueda_se_mide_en_los_dias_de_las_dos_series(s):
+    """#163: lo que Google anonimiza se mide en el sitio. Un dia de paginas
+    ANTERIOR a la primera busqueda no cuenta: alli no hay con que comparar."""
+    c, j = _montar(s, detalle={"sitemaps": 0, "consultas": {"primer_dia": EN_VENTANA.isoformat()}})
+    _url(s, j, "/a/", clics=100, imp=1000, pos=5.0)
+    _pagina_gsc(s, c, "/a/", 100)
+    _pagina_gsc(s, c, "/a/", 900, dia=EN_VENTANA - timedelta(days=1))   # sin busquedas ese dia
+    _consulta(s, c, "/a/", "hoteles", 40, 400)
+    _consulta(s, c, "/a/", "hotel gran canaria", 20, 200)
+    resumen, _ = _analizar(s, j)
+    sb = resumen["sin_busqueda"]
+    assert (sb["clics_paginas"], sb["clics_busquedas"]) == (100, 60)
+    assert sb["parte"] == 0.4 and sb["desde"] == EN_VENTANA.isoformat()
+    assert sb["con_dias_cortados"] is False
+
+
+def test_un_dia_de_busquedas_cortado_se_dice(s):
+    c, j = _montar(s, detalle={"sitemaps": 0, "consultas": {"primer_dia": EN_VENTANA.isoformat(),
+                                                           "truncados": [EN_VENTANA.isoformat()]}})
+    _url(s, j, "/a/", clics=10, imp=100, pos=5.0)
+    _pagina_gsc(s, c, "/a/", 10)
+    _consulta(s, c, "/a/", "hoteles", 5, 50)
+    resumen, _ = _analizar(s, j)
+    assert resumen["sin_busqueda"]["con_dias_cortados"] is True
+
+
+def test_sin_serie_de_busquedas_no_se_afirma_ninguna_parte(s):
+    c, j = _montar(s)
+    _url(s, j, "/a/", clics=10, imp=100, pos=5.0)
+    _pagina_gsc(s, c, "/a/", 10)
+    resumen, _ = _analizar(s, j)
+    assert resumen["sin_busqueda"] is None
