@@ -240,7 +240,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 211 | La revisión humana de Jev, en la interfaz y a ciegas («Revisar a Jev»): una etiqueta por estado en `decision_labels`, que sobrevive al censo y amplía el juego de `evaluar` | [`llm-y-enriquecido`](llm-y-enriquecido.md#d211) |
 | 212 | Un segundo PageRank con la autoridad que entra de fuera (CSV de Ahrefs, Semrush o Majestic por cliente; salto β·uniforme + (1−β)·externo, masa colgante a las indexables) y avisos de backlinks a errores, noindex y bloqueadas (las huérfanas, en su detalle) | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d212) |
 | 213 | Los logs del servidor, por cliente: los lee el worker en streaming (con latido y memoria acotada), solo cuenta el Googlebot cuya IP es de Google (`None` si no se puede comprobar), del log solo queda lo agregado de los bots, y los avisos (por plantilla) solo con un log del mismo host, de la época del censo y que vea a Googlebot | [`incidencias`](incidencias.md#d213) |
-| 214 | Las trampas de rastreo (calendarios, sesión en la URL, facetas combinatorias, búsqueda interna, segmentos repetidos) se detectan sobre lo rastreado: una por plantilla con cuántas URLs genera y qué parte del rastreo se lleva | [`incidencias`](incidencias.md#d214) |
+| 214 | Las trampas de rastreo (sesión en la URL, `&amp;` copiado a los enlaces, calendarios que se van al futuro, búsqueda interna, facetas combinatorias, segmentos repetidos) se detectan sobre lo rastreado: una por plantilla y una clasificación por URL, con cuántas URLs genera y qué parte del rastreo se lleva | [`incidencias`](incidencias.md#d214) |
 
 ## Anadir una decision
 

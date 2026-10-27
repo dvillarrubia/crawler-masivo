@@ -176,7 +176,7 @@ const ISSUE_INFO = {
   },
   // ----- Trampas de rastreo (decision 214) -----
   'trampa_de_rastreo': {
-    que: 'Una plantilla que genera URLs sin fin: un calendario con «mes siguiente», un identificador de sesión en la URL, filtros que se combinan entre sí, la búsqueda interna o un enlace relativo que se repite a sí mismo (`/a/b/a/b/`). El detalle dice de qué tipo, cuántas URLs del rastreo genera y qué parte del rastreo se lleva.',
+    que: 'Una plantilla que genera URLs sin fin: un calendario con «mes siguiente», un identificador de sesión en la URL, un `&amp;` del HTML copiado a los enlaces, filtros que se combinan entre sí, la búsqueda interna o un enlace relativo que se repite a sí mismo (`/a/b/a/b/`). El detalle dice de qué tipo, cuántas URLs del rastreo genera y qué parte del rastreo se lleva.',
     google: 'Gasta su presupuesto de rastreo en copias y variantes, y tarda más en llegar (y en volver) a las páginas que importan. Las de sesión y búsqueda, además, son contenido duplicado.',
     arreglo: 'Según el tipo: quitar la sesión de la URL (cookie), poner nofollow o bloquear en robots.txt los filtros que no se quieran indexar y los resultados de búsqueda, acotar el calendario y corregir el enlace relativo. Se mide lo que el rastreo ya gastó: el sitio puede tener más.',
   },
@@ -1134,7 +1134,7 @@ const DETALLE_LABEL = {
   origenes: 'páginas que la enlazan', con_ancla_generica: 'con ancla genérica', anclas: 'anclas',
   cobertura: 'según Google', canonical_hoy: 'declarada en el censo', canonical_visto_por_google: 'visto por Google', canonical_declarado: 'declarado', canonical_de_google: 'de Google', inspeccionada: 'inspeccionada el', en: 'en', ultimo_rastreo_google: 'última visita de Google',
   // Backlinks del cliente (decision 212); tambien en el detalle de una huerfana.
-  trampa: 'tipo', parte_del_censo: 'parte del rastreo', fechas_distintas: 'fechas distintas', fuera_de_rango: 'fechas fuera de rango',
+  trampa: 'tipo', parte_del_censo: 'parte del rastreo', fechas_futuras: 'con fechas a más de dos años',
   combinaciones: 'combinaciones de filtros', mismo_filtro_en_otro_orden: 'mismos filtros en otro orden',
   dias_de_log: 'días de log', con_error: 'con error', codigos: 'códigos',
   backlinks: 'backlinks', dominios: 'dominios que enlazan', autoridad: 'autoridad que aporta', origenes: 'enlazada desde',
