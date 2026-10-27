@@ -737,11 +737,14 @@
                         x-text="p.ultimo && p.ultimo.paginas_html ? Math.round(p.ultimo.indexables / p.ultimo.paginas_html * 100) + ' %' : '—'"></td>
                     <!-- Paginas con error (decision 202): la portada decia «85» y la
                          tarjeta del mismo censo «72 páginas con error». Con una API
-                         anterior, las incidencias, dicho en el title. -->
-                    <td class="ta-r" data-label="Páginas con error" :class="p.ultimo && (paginasConError(p.ultimo) ?? p.ultimo.errores) ? 'text-red' : ''">
+                         anterior, las incidencias, dicho en el title. Solo el campo
+                         de la fila, como la cabecera: paginasConError() mira la
+                         evolucion del ultimo cliente abierto y esa fila pasaba a
+                         paginas bajo «errores (incidencias)» (revision del 27-oct). -->
+                    <td class="ta-r" data-label="Páginas con error" :class="p.ultimo && (p.ultimo.paginas_con_error ?? p.ultimo.errores) ? 'text-red' : ''">
                       <template x-if="!p.ultimo"><span>—</span></template>
-                      <template x-if="p.ultimo && paginasConError(p.ultimo) != null"><span x-text="fmt.num(paginasConError(p.ultimo))"></span></template>
-                      <template x-if="p.ultimo && paginasConError(p.ultimo) == null">
+                      <template x-if="p.ultimo && p.ultimo.paginas_con_error != null"><span x-text="fmt.num(p.ultimo.paginas_con_error)"></span></template>
+                      <template x-if="p.ultimo && p.ultimo.paginas_con_error == null">
                         <span title="Incidencias de gravedad error: esta versión del servidor no dice cuántas páginas" x-text="fmt.num(p.ultimo.errores)"></span>
                       </template>
                       <!-- Un censo que paro en el tope no es el sitio entero (1.6;
@@ -1052,9 +1055,13 @@
                                 </li>
                               </template>
                             </ul>
-                            <template x-if="cmpEstado().incidencias && cmpEstado().incidencias.comparable">
-                              <div class="text-sm text-dim mt-50"
-                                   x-text="fmt.num((cmpEstado().incidencias.nuevas || {}).total || 0) + ' incidencias nuevas y ' + fmt.num((cmpEstado().incidencias.resueltas || {}).total || 0) + ' resueltas'"></div>
+                            <!-- Sin «No incluida en el sitemap» si un censo leyo sus
+                                 sitemaps a medias, y dicho (decision 205). -->
+                            <template x-if="incidenciasEstado()">
+                              <div class="text-sm text-dim mt-50" data-testid="estado-incidencias">
+                                <div x-text="(a => fmt.num(a.nuevas || 0) + ' incidencias nuevas y ' + fmt.num(a.resueltas || 0) + ' resueltas')(incidenciasEstado() || {})"></div>
+                                <div x-show="(incidenciasEstado() || {}).sinSitemap" x-text="TEXTO_SIN_SITEMAP"></div>
+                              </div>
                             </template>
                           </div>
                         </template>
@@ -1225,9 +1232,11 @@
                         <td class="ta-r" data-label="Páginas" x-text="fmt.num(j.paginas_html)"></td>
                         <td class="solo-escritorio ta-r" x-text="j.paginas_html ? Math.round(j.indexables / j.paginas_html * 100) + ' %' : '—'"></td>
                         <!-- Paginas con error (decision 202), como la grafica y la
-                             tarjeta; sin la cifra (API anterior), las incidencias. -->
+                             tarjeta; sin la cifra (API anterior), las incidencias. La
+                             referencia, en la MISMA unidad que la fila: si no, «85
+                             incid. ▲13» restaba paginas a incidencias (revision del 27-oct). -->
                         <td class="ta-r nowrap" data-label="Páginas con error"
-                            x-data="{ get v() { return (x => x != null ? x : null)(paginasConError(j)) }, get r() { const r = referenciaDe(j); return r ? (paginasConError(r) ?? (this.v == null ? r.errores : null)) : null } }">
+                            x-data="{ get v() { return (x => x != null ? x : null)(paginasConError(j)) }, get r() { const r = referenciaDe(j); return r ? (this.v != null ? paginasConError(r) : r.errores) : null } }">
                           <span x-text="v != null ? fmt.num(v) : fmt.num(j.errores) + ' incid.'"
                                 :title="v != null ? '' : 'Incidencias de gravedad error: esta versión del servidor no dice cuántas páginas'"></span>
                           <template x-if="r != null">
@@ -6038,8 +6047,11 @@
                 </template>
                 <p x-show="!informe.comparacion.alertas.length && !(informe.comparacion.reglas_cliente || []).length">
                   Ningún cambio grave frente al rastreo anterior.</p>
-                <p x-show="informe.comparacion.incidencias" class="text-sm"
-                   x-text="informe.comparacion.incidencias ? fmt.num(informe.comparacion.incidencias.nuevas) + ' incidencias nuevas' + (informe.comparacion.incidencias.resueltas != null ? ', ' + fmt.num(informe.comparacion.incidencias.resueltas) + ' resueltas' : '') + ' y ' + fmt.num(informe.comparacion.incidencias.siguen) + ' que siguen.' : ''"></p>
+                <!-- Sin «No incluida en el sitemap» si un censo leyo sus
+                     sitemaps a medias, y dicho (decision 205). -->
+                <p x-show="incidenciasInforme()" class="text-sm" data-testid="informe-incidencias"
+                   x-text="(i => i ? fmt.num(i.nuevas) + ' incidencias nuevas' + (i.resueltas != null ? ', ' + fmt.num(i.resueltas) + ' resueltas' : '') + ' y ' + fmt.num(i.siguen) + ' que siguen.' : '')(incidenciasInforme())"></p>
+                <p x-show="(incidenciasInforme() || {}).sin_sitemap" class="text-sm text-dim" x-text="TEXTO_SIN_SITEMAP"></p>
                 <p x-show="informe.comparacion.incidencias_motivo" class="text-sm text-dim"
                    x-text="compartido ? 'En este informe las incidencias no se comparan una a una con el anterior.' : 'Las incidencias no se comparan: ' + (informe.comparacion.incidencias_motivo || '')"></p>
               </section>

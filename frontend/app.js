@@ -2096,11 +2096,51 @@ function app() {
         api(`/jobs/${jobId}/issues/resumen?orden=prioridad&ejemplos=0`).catch(() => null),
       ]);
       if (!this.estadoCliente || this.estadoCliente.jobId !== jobId) return;
+      // El censo de referencia, solo para saber si leyo sus sitemaps entero
+      // (decision 205): `undefined` mientras se pregunta, true si no se pudo.
+      const refId = job && job.comparacion && job.comparacion.comparado_con;
       this.estadoCliente = {
         ...e, job, stats,
         principales: filas ? filasPorTipo(filas.filter(r => r.severity !== 'info'), filas).slice(0, 5) : null,
         principalesError: filas === null,
+        refDudaSitemaps: refId ? undefined : false,
       };
+      if (refId) {
+        const duda = await api(`/jobs/${refId}`).then(a => !!dudaSitemaps(a)).catch(() => true);
+        if (this.estadoCliente && this.estadoCliente.jobId === jobId) this.estadoCliente = { ...this.estadoCliente, refDudaSitemaps: duda };
+      }
+    },
+
+    // «N incidencias nuevas y M resueltas» del Estado: los totales de la
+    // comparacion sin «No incluida en el sitemap» si cualquiera de los dos
+    // censos leyo sus sitemaps a medias (decision 205; V13 solo estaba en
+    // Problemas y el Estado de Lopesan decia «240 nuevas y 775 resueltas»
+    // con 370 de 396 ficheros vacios). null mientras no se sepa.
+    incidenciasEstado() {
+      const e = this.estadoCliente, c = this.cmpEstado();
+      const inc = c && c.incidencias;
+      if (!e || !inc || !inc.comparable) return null;
+      const aqui = !!dudaSitemaps(e.job);
+      if (!aqui && e.refDudaSitemaps === undefined) return null;
+      return incidenciasAfirmables(inc, aqui || e.refDudaSitemaps);
+    },
+
+    // Las incidencias del informe (decision 205). Una API con la decision ya
+    // las da sin «No incluida en el sitemap» cuando toca (`sin_sitemap`). Con
+    // una anterior, en la app el censo esta cargado y su comparacion trae el
+    // desglose por tipo: se quita aqui. En el enlace compartido, tal cual.
+    incidenciasInforme() {
+      const i = this.informe && this.informe.comparacion && this.informe.comparacion.incidencias;
+      if (!i) return null;
+      if ('sin_sitemap' in i) return i;
+      const j = this.job;
+      if (this.compartido || !j || !this.informe.job || this.informe.job.id !== j.id
+          || !j.comparacion || !j.comparacion.incidencias) return i;
+      const va = this.versionAnterior && this.versionAnterior.jobId === j.id ? this.versionAnterior : null;
+      const aqui = !!dudaSitemaps(j);
+      if (!aqui && (!va || va.version === undefined)) return null;
+      const a = incidenciasAfirmables(j.comparacion.incidencias, aqui || !!va.error || !!va.dudaSitemaps);
+      return { ...i, nuevas: a.nuevas, resueltas: i.resueltas == null ? null : a.resueltas, siguen: a.siguen, sin_sitemap: a.sinSitemap };
     },
 
     // Las alertas abiertas del cliente: los incidentes vivos (abiertos o
@@ -3081,9 +3121,13 @@ function app() {
     },
 
     // La ficha de una URL de otro censo (las frases de Google del Estado del
-    // cliente, 3.3): se abre el censo y, al cargarlo, su ficha.
+    // cliente, 3.3): se abre el censo y, al cargarlo, su ficha. Si ese censo
+    // ya esta cargado (se abrio antes y se volvio a la ficha del cliente, que
+    // no limpia `job`), el enrutador no llama a openJob: se abre la ficha
+    // directamente. Antes se quedaba en el Resumen y la peticion pendiente
+    // abria esa ficha mas tarde, al cargar el censo desde otro (revision del 27-oct).
     abrirFichaDeCenso(jobId, url) {
-      if (this.job && this.job.id === jobId && this.view !== 'client') return this.abrirFichaPorUrl(url);
+      if (this.job && this.job.id === jobId) { this._fichaPendiente = null; return this.abrirFichaPorUrl(url); }
       this._fichaPendiente = { jobId, url };
       location.hash = '#/rastreos/' + jobId;
     },
@@ -4372,6 +4416,7 @@ function app() {
       this.informeCargando = true;
       try {
         this.informe = await api(`/jobs/${this.job.id}/informe`);
+        this.cargarVersionAnterior();
         document.title = `Informe SEO · ${this.informe.job.sitio}`;
       } catch (e) { this.error = e.message; }
       this.informeCargando = false;
@@ -4689,7 +4734,9 @@ function app() {
       this.versionAnterior = { jobId, version: undefined };
       try {
         const ant = await api(`/jobs/${c.comparado_con}`);
-        if (this.job && this.job.id === jobId) this.versionAnterior = { jobId, version: ant.analisis_version || null };
+        // Si ese censo leyo sus sitemaps a medias, la diferencia de «No incluida
+        // en el sitemap» tampoco se puede afirmar (decision 205).
+        if (this.job && this.job.id === jobId) this.versionAnterior = { jobId, version: ant.analisis_version || null, dudaSitemaps: !!dudaSitemaps(ant) };
       } catch (e) {
         // Lo que no se ha podido comprobar no se afirma (decisiones 67 y 91).
         if (this.job && this.job.id === jobId) this.versionAnterior = { jobId, version: null, error: e.message };
@@ -4755,7 +4802,9 @@ function app() {
       }
       // Sin leer todos los sitemaps, «No incluida en el sitemap» no se puede
       // afirmar (V13): tampoco su diferencia. Fuera de los totales y dicho.
-      const dudosos = dudaSitemaps(j) ? ['not_in_sitemap'].filter(t => porTipo[t]) : [];
+      // Vale para los dos censos: si el parcial fue el de referencia, sus
+      // «resueltas» tampoco se pueden afirmar (decision 205).
+      const dudosos = (dudaSitemaps(j) || va.dudaSitemaps) ? TIPOS_DE_SITEMAP.filter(t => porTipo[t]) : [];
       const quitar = campo => dudosos.reduce((n, t) => n + (porTipo[t][campo] || 0), 0);
       const resueltosDelTodo = Object.entries(porTipo)
         .filter(([t]) => !dudosos.includes(t))
@@ -4767,8 +4816,7 @@ function app() {
         nuevas: ((inc.nuevas || {}).total || 0) - quitar('nuevas'),
         resueltas: ((inc.resueltas || {}).total || 0) - quitar('resueltas'),
         sinPagina: inc.sin_pagina_en_el_nuevo || 0,
-        avisos: (c.avisos || []).concat(dudosos.length
-          ? ['Sin contar «No incluida en el sitemap»: no se leyeron todos los sitemaps y su diferencia no se puede afirmar.'] : []),
+        avisos: (c.avisos || []).concat(dudosos.length ? [TEXTO_SIN_SITEMAP] : []),
       };
     },
 
@@ -7736,6 +7784,25 @@ function _crudo(x) { return (typeof Alpine !== 'undefined' && Alpine.raw) ? Alpi
 // La frase que matiza «No incluida en el sitemap» cuando la lectura de los
 // sitemaps no fue completa (revision de UX del 25-oct, 3.6; V13). null si se
 // leyo todo: entonces el aviso se puede afirmar.
+// Los totales de `comparacion.incidencias` (nuevas, resueltas, siguen) sin
+// «No incluida en el sitemap» cuando `dudoso` (decision 205): lo mismo que
+// shared/sitemaps_lectura.sin_tipos_de_sitemap del informe y de Slack.
+const TIPOS_DE_SITEMAP = ['not_in_sitemap'];
+const TEXTO_SIN_SITEMAP = 'Sin contar «No incluida en el sitemap»: no se leyeron todos los sitemaps y su diferencia no se puede afirmar.';
+function incidenciasAfirmables(inc, dudoso) {
+  if (!inc) return null;
+  const r = { sinSitemap: false };
+  for (const campo of ['nuevas', 'resueltas', 'siguen']) {
+    const b = inc[campo];
+    if (!b || typeof b !== 'object') { r[campo] = null; continue; }
+    const quitar = dudoso ? (b.por_tipo || []).filter(f => f && TIPOS_DE_SITEMAP.includes(f.tipo))
+      .reduce((n, f) => n + (Number(f.total) || 0), 0) : 0;
+    if (quitar) r.sinSitemap = true;
+    r[campo] = b.total == null ? null : b.total - quitar;
+  }
+  return r;
+}
+
 function dudaSitemaps(job) {
   const sm = resumenSitemaps(job);
   if (!sm || !sm.dudoso) return null;

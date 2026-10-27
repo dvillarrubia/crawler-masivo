@@ -488,6 +488,14 @@ contador de Problemas, la diferencia sin «No incluida en el sitemap» dudosa,
 paginas con error con su respaldo de la evolucion, alertas agrupadas, frases de
 Google con sus paginas solo si el grupo es unico, «200 de 4.720», errores de una
 API anterior en castellano, el tipo de serie del modal y los textos de V42).
+Revision final de la fase 3 (decision 205): `test_revision_final_frontend.py`
+(con el arnes de `test_movil_frontend.py`: la portada no cambia de unidad tras
+abrir un cliente, la flecha del Historial en la misma unidad, «Revisado con IA»
+en lineas, el Estado sin «No incluida en el sitemap» dudosa; y con `app.js`
+suelto, Problemas con el anterior dudoso, el informe con una API anterior y la
+ficha de Google con el censo ya cargado) y `test_sitemaps_lectura.py` (la regla
+de `shared/sitemaps_lectura.py` frente a la del frontend, y el informe y el
+aviso de Slack con SQLite).
 `test_programaciones_perfil.py::test_el_worker_resuelve_la_config_igual_que_la_api`
 se salta, diciendolo, en una imagen de la API sin parsel (anterior a la decision
 104): no es un fallo del codigo, hay que reconstruir la imagen.

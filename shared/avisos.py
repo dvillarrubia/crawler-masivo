@@ -159,7 +159,7 @@ def texto_de_informe(nombre_job: str, r: dict) -> str:
     """El aviso de «rastreo terminado» de un rastreo programado, a partir de
     `shared.resumen_semanal._resumen_de_rastreo`: lo mismo que ese rastreo
     aporta al resumen, para no tener dos cifras de lo mismo."""
-    from shared.resumen_semanal import ETIQUETAS, _num
+    from shared.resumen_semanal import ETIQUETAS, SIN_SITEMAP, _num
 
     lineas = [f"*{nombre_job}* ha terminado."]
     partes = []
@@ -173,6 +173,7 @@ def texto_de_informe(nombre_job: str, r: dict) -> str:
     if inc:
         lineas.append(f"Frente al anterior: {_num(inc.get('nuevas'))} incidencias nuevas"
                       + (f" y {_num(inc['resueltas'])} resueltas" if inc.get("resueltas") is not None else "")
+                      + (f" ({SIN_SITEMAP})" if inc.get("sin_sitemap") else "")
                       + ".")
     elif r.get("incidencias_motivo"):
         lineas.append(f"Sin comparar incidencias: {r['incidencias_motivo']}")

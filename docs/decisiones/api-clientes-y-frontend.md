@@ -917,3 +917,36 @@
    en una sección «Cambios a favor».
 
    Tests: `tests/test_pulido_frontend.py` (agrupado, gravedad, info aparte).
+
+<a id="d205"></a>
+205. **«No incluida en el sitemap» sale de los totales de «incidencias nuevas y resueltas» del Estado, del informe, de Slack y de Problemas si cualquiera de los dos censos leyó sus sitemaps a medias**
+
+   **Problema.** El V13 (revisión de UX del 25-oct, 3.6) solo estaba cerrado
+   en Problemas, y solo mirando el censo actual. El Estado de Lopesan decía
+   «240 incidencias nuevas y 775 resueltas» sin descontar ni avisar, con 370
+   de 396 ficheros de sitemap vacíos; el informe y el aviso de Slack, lo
+   mismo. Y si el parcial era el censo de referencia, sus «resueltas» de
+   `not_in_sitemap` tampoco se pueden afirmar y se contaban igual.
+
+   **Decisión.** Una regla en `shared/sitemaps_lectura.py`
+   (`lectura_dudosa`: lectura parcial, un fichero que no responde 200 o uno
+   que responde 200 sin un sitemap reconocible), la misma que
+   `resumenSitemaps().dudoso` del frontend; un test ejecuta las dos sobre los
+   mismos casos. Si cualquiera de los dos censos es dudoso, los totales
+   (`nuevas`, `resueltas`, `siguen`) no cuentan los tipos de sitemap
+   (`sin_tipos_de_sitemap`) y se dice: «Sin contar «No incluida en el
+   sitemap»: no se leyeron todos los sitemaps y su diferencia no se puede
+   afirmar». El informe (`comparacion.incidencias.sin_sitemap`) y el aviso de
+   «rastreo terminado» y el resumen semanal salen de
+   `_resumen_de_rastreo`; un censo de referencia que ya no está no se puede
+   comprobar y tampoco se afirma. En la interfaz, el Estado pide el censo de
+   referencia (`refDudaSitemaps`) y no pinta la línea hasta saberlo;
+   Problemas lo guarda en `versionAnterior.dudaSitemaps`; el informe usa el
+   campo de la API y, con una API anterior, el desglose por tipo del censo
+   cargado. No cambia nada guardado ni el análisis: los avisos siguen ahí,
+   como «no concluyente».
+
+   Tests: `tests/test_sitemaps_lectura.py` (la regla en Python y en el
+   frontend, el informe y el aviso con SQLite) y
+   `tests/test_revision_final_frontend.py` (Estado con Alpine en Chromium,
+   Problemas con el anterior dudoso, informe con una API anterior).

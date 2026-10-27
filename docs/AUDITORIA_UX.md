@@ -611,7 +611,10 @@ abierto».
   tabla y gráfica del Historial y tendencia cuentan páginas con error, la cifra
   de la tarjeta y del Estado (72, no 85). Con la API de hoy la ficha del
   cliente las saca de la evolución, y la portada dice «errores (incidencias)»
-  hasta que se despliegue.
+  hasta que se despliegue. Tras la revisión final: la portada lee solo el
+  campo de su fila (antes, la del último cliente abierto pasaba a 72 páginas
+  bajo «errores (incidencias)») y la flecha del Historial compara en la misma
+  unidad que la fila («85 incid. ▲13» restaba páginas a incidencias).
 - [x] **V16 · Contador de Problemas**: tipos de error o aviso (34), no las
   11.681 incidencias con las info.
 - [x] **V14 / 1.7 · Una fila por tipo** con «39 aviso · 157 info», en
@@ -627,6 +630,9 @@ abierto».
 - [x] **V13 · Sitemaps dudosos**: «no concluyente» en la fila de Problemas, su
   frase al desplegarla, la ficha («No está en los sitemaps leídos…») y el
   panel; fuera de «+N nuevas · −N resueltas» y de su etiqueta, dicho debajo.
+  Tras la revisión final (decisión 205), también fuera de «N incidencias
+  nuevas y M resueltas» del Estado, del informe y de Slack, y mirando los dos
+  censos: si el parcial fue el de referencia, sus «resueltas» tampoco valen.
 - [x] **V26 · Panel de URLs**: «Enlaces que recibe 200 de 4.720» (o «200+»),
   «Ver quién la enlaza» con el tope, problemas agrupados por tipo con el
   detalle legible, «1 clic desde la home».
@@ -659,6 +665,12 @@ abierto».
   analizar todavía».
 - [x] **V43 / UX-21 / 3.8**: hechos en esta rama (decisión 201): quedan 107
   `style=""` fijos de una sola vez (más 42 `:style` con datos), no 964.
+  Tras la revisión final: `.bloque` (sin `!important`, como todas las de
+  `display`) perdía frente a `.veredicto-lista li{display:flex}` y «Revisado
+  con IA» de la ficha salía en tres columnas; `.veredicto-lista li.bloque`.
+- [x] **3.3 · Enlace de Google del Estado con el censo ya cargado**: abre la
+  ficha directamente (el enrutador no recargaba el censo y se quedaba en el
+  Resumen, con la petición colgada para más tarde).
 - [x] `test_programaciones_perfil.py::test_el_worker_resuelve_la_config_igual_que_la_api`
   fallaba en la imagen local de la API porque es del 13-oct y no trae parsel
   (en `api/requirements.txt` desde el 16-oct): ahora se salta diciendo que hay
