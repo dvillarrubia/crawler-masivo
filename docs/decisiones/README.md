@@ -13,7 +13,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124, 153, 154, 155, 187, 198 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137, 156, 160, 164, 167, 170, 171 |
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152, 183, 195, 212 |
-| [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157, 161, 168, 190, 210, 213 |
+| [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157, 161, 168, 190, 210, 213, 214 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165, 188, 191, 192, 197 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151, 189, 194, 196, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208 |
@@ -240,6 +240,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 211 | La revisión humana de Jev, en la interfaz y a ciegas («Revisar a Jev»): una etiqueta por estado en `decision_labels`, que sobrevive al censo y amplía el juego de `evaluar` | [`llm-y-enriquecido`](llm-y-enriquecido.md#d211) |
 | 212 | Un segundo PageRank con la autoridad que entra de fuera (CSV de Ahrefs, Semrush o Majestic por cliente; salto β·uniforme + (1−β)·externo, masa colgante a las indexables) y avisos de backlinks a errores, noindex y bloqueadas (las huérfanas, en su detalle) | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d212) |
 | 213 | Los logs del servidor, por cliente: los lee el worker en streaming (con latido y memoria acotada), solo cuenta el Googlebot cuya IP es de Google (`None` si no se puede comprobar), del log solo queda lo agregado de los bots, y los avisos (por plantilla) solo con un log del mismo host, de la época del censo y que vea a Googlebot | [`incidencias`](incidencias.md#d213) |
+| 214 | Las trampas de rastreo (sesión en la URL, `&amp;` copiado a los enlaces, calendarios que se van al futuro, búsqueda interna, facetas combinatorias, segmentos repetidos) se detectan sobre lo rastreado: una por plantilla y una clasificación por URL, con cuántas URLs genera y qué parte del rastreo se lleva | [`incidencias`](incidencias.md#d214) |
 
 ## Anadir una decision
 

@@ -1302,7 +1302,7 @@ se lanza solo.
 - Validar los datos extraídos y parar el rastreo si dejan de tener sentido
   ([#20](https://github.com/dvillarrubia/crawler-masivo/issues/20)).
 - Resto: [#13](https://github.com/dvillarrubia/crawler-masivo/issues/13),
-  [#14](https://github.com/dvillarrubia/crawler-masivo/issues/14),
+  [#14](https://github.com/dvillarrubia/crawler-masivo/issues/14), Las trampas de rastreo, detectadas sobre lo rastreado (decisión 214); acotarlas mientras se rastrea, pendiente.
   [#15](https://github.com/dvillarrubia/crawler-masivo/issues/15),
   [#21](https://github.com/dvillarrubia/crawler-masivo/issues/21). La base
   técnica está en [#7](https://github.com/dvillarrubia/crawler-masivo/issues/7),

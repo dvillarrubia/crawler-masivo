@@ -1364,6 +1364,8 @@ ANCLADOS_POR_GRUPO = frozenset({
     # Logs del servidor (decision 213): la plantilla, no el ejemplo.
     "indexable_sin_visitas_googlebot",
     "googlebot_recibe_error",
+    # Trampas de rastreo (decision 214): la plantilla, no el ejemplo.
+    "trampa_de_rastreo",
     "paginacion_canonical_a_la_primera",
     "paginacion_noindex",
     "solo_enlazada_desde_paginacion_profunda",

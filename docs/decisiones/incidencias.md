@@ -1701,3 +1701,83 @@
      - el log que no ve a Googlebot, el de otro host y el de otra época;
      - sin logs a NULL.
    - `tests/test_logs_frontend.py`: el bloque del Resumen.
+
+<a id="d214"></a>
+214. **Las trampas de rastreo se detectan sobre lo ya rastreado, una por plantilla, con cuántas URLs genera y qué parte del rastreo se lleva** (#14, parte determinista)
+
+   **Problema.** Un calendario con «mes siguiente», un identificador de sesión
+   en la URL, un `&amp;` del HTML copiado a los enlaces, filtros que se
+   combinan entre sí, la búsqueda interna enlazada o un enlace relativo que
+   se resuelve contra sí mismo generan URLs sin fin. El rastreo las sigue
+   hasta el tope y se come el cupo antes de llegar a lo que importa. Solo había
+   avisos por URL suelta (`url_non_seo_friendly` con `;jsessionid=`,
+   `url_cms_faceted`) que no decían que es UNA trampa ni cuánto gasta.
+   Acotarlas DURANTE el rastreo es lo delicado de #14. Esto es lo
+   determinista y re-analizable.
+
+   **Decisión** (`analysis/avisos_de_trampas.py`):
+   - `trampa_de_rastreo`, una fila por (host, plantilla, tipo) anclada en un
+     ejemplo, con `paginas_afectadas`, `parte_del_censo` y cinco ejemplos (36
+     y 53). Casa entre censos por la plantilla (`ANCLADOS_POR_GRUPO`, con un
+     test de clave fija).
+   - **Una clasificación por URL**, en este orden, para que una URL no dé dos
+     avisos: sesión, entidad HTML, calendario, búsqueda, facetas, segmento
+     repetido.
+   - Lo bloqueado en robots.txt no cuenta: no gasta rastreo de Google.
+   - **Tipos** (los umbrales son juicios, ajustados con tres censos reales y
+     con una revisión que buscó falsos positivos):
+     - `parametro_de_sesion`: `sid`, `PHPSESSID`, `jsessionid` (en la query o
+       con `;` en la ruta).
+     - `entidad_html_en_url`: parámetros que empiezan por `;` o `amp;`
+       (`?%3Bamp%3Bpage=8`). Era la trampa de verdad de La Salle, que antes
+       salía como «facetas».
+     - `calendario_infinito`: solo si **al menos el 10 % de sus URLs** va a
+       más de dos años hacia delante, con 20 URLs como mínimo.
+       - Sin el 10 %, un blog de diez años, un archivo mensual o una noticia
+         de 1995 salían como calendarios.
+       - Las fechas se leen en la ruta con separadores, y en la query en
+         parámetros de fecha (`date`, `fecha`, `tribe-bar-date`...) o con el
+         año y el mes sueltos (`?mes=11&anio=2031`).
+       - Sin separador, nunca en la ruta: `/192401-daniel-brieba` (un id de
+         autor en Penguin) se leía como enero de 1924.
+     - `busqueda_interna_rastreable`: `?s=`, `?q=` con tres caracteres o más
+       (`?s=M` es una talla), `/buscar`...
+     - `facetas_combinatorias`: la misma **plantilla** con 50 combinaciones
+       de (ruta, filtros) o más, o con los mismos filtros en distinto orden.
+       Por ruta exacta, 500 categorías daban 500 avisos, y 30 categorías con
+       30 combinaciones no daban ninguno. No son filtros la paginación, el
+       seguimiento (utm, gclid, gbraid, gad_source, msclkid, srsltid,
+       `ref`...), el idioma, la moneda, la variante de una ficha ni las fechas
+       de una reserva.
+     - `segmento_repetido`: una secuencia de 1 a 3 tramos repetida **seguida**
+       (`/a/b/a/b/`, `/es/es/`), sin contar tramos numéricos. Se agrupa por lo
+       que se repite, no por la firma, que lleva la profundidad: un bucle que
+       crece daba un grupo por nivel.
+   - **Severidad.** `warning` si se lleva el 5 % del rastreo o 500 URLs;
+     `info` si no.
+   - **Lo que mide es lo que el rastreo ya gastó.** Que el sitio tenga más
+     no se afirma.
+
+   **Medido** en tres censos de producción, solo lectura:
+   - Lopesan (5.621 URLs): ninguna.
+   - La Salle (20.889): `entidad_html_en_url` en noticias (503 URLs) y
+     `facetas_combinatorias` en eventos, el buscador de estudios y proyectos
+     (1.018 URLs, el 4,9 %, en la mayor).
+   - Penguin (87.570): ninguna.
+
+   **Fuera** (lo demás de #14):
+   - Acotar la trampa mientras se rastrea, con un cupo por firma como los
+     topes por carpeta (172).
+   - La prioridad de la cola por valor previsto.
+   - El render JS por plantilla.
+
+   Tests: `tests/test_trampas.py`.
+   - Cada tipo.
+   - Lo que no es trampa: blog de diez años, archivo mensual, hemeroteca, id
+     de seis cifras, paginación, seguimiento, `?s=M` y tramos no seguidos o
+     numéricos.
+   - Los calendarios en la query, sin que salgan dos veces.
+   - Las facetas de muchas categorías como una sola plantilla.
+   - Las entidades HTML.
+   - El bucle que crece.
+   - La severidad, y el aviso con su clave fija, contra SQLite.
