@@ -8427,7 +8427,7 @@ function bloqueLogs(job) {
   if (gasto.length) frases.push('En qué se va: ' + gasto.join(', ') + '.');
   if (rep.con_parametros) frases.push(pct(rep.con_parametros, total) + ' de las visitas son a URLs con parámetros.');
   if (r.falsas) frases.push(fmt.n(r.falsas, 'visita', 'visitas') + ' más dicen ser de Googlebot y vienen de IPs que no son de Google: no cuentan.');
-  if (!r.afirmable_ausencia) frases.push('El log cubre menos de 7 días: no se afirma que una página no la visite.');
+  if (!r.afirmable_ausencia && r.no_se_afirma) frases.push('No se afirma qué páginas no visita: ' + r.no_se_afirma + '.');
   const bots = Object.entries(r.otros_bots || {}).filter(([, d]) => d.visitas)
     .sort((a, b) => b[1].visitas - a[1].visitas).slice(0, 8)
     .map(([b, d]) => ({ bot: NOMBRE_BOT_LOG[b] || b, visitas: d.visitas, verificadas: d.verificadas, falsas: d.falsas, sin_comprobar: d.sin_comprobar }));

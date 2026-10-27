@@ -38,5 +38,6 @@ def test_cobertura_presupuesto_falsos_y_otros_bots():
     assert any("20 % de las visitas son a URLs con parámetros" in x for x in f)
     assert any("120 visitas más dicen ser de Googlebot" in x for x in f)
     assert [x["bot"] for x in b["bots"]] == ["GPTBot", "ClaudeBot"]
-    corto = _bloque({"logs_resumen": {**RESUMEN, "afirmable_ausencia": False}})
-    assert any("menos de 7 días" in x for x in corto["frases"])
+    corto = _bloque({"logs_resumen": {**RESUMEN, "afirmable_ausencia": False,
+                                      "no_se_afirma": "el log cubre menos de 7 días"}})
+    assert any(x == "No se afirma qué páginas no visita: el log cubre menos de 7 días." for x in corto["frases"])

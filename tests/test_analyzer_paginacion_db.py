@@ -788,6 +788,7 @@ def test_r5_una_serie_entera_en_noindex_deja_el_warning_en_la_pagina():
 def test_r9_los_tipos_de_plantilla_casan_por_grupo_en_la_comparacion():
     """`shared.comparacion` no puede importar `analysis/` (la imagen de la API
     no lo lleva): repite la lista, y esto comprueba que coinciden."""
+    from analysis.avisos_de_logs import TIPOS_ANCLADOS_POR_GRUPO as TIPOS_LOGS
     from analysis.soft404 import TIPOS_ANCLADOS_POR_GRUPO as TIPOS_SOFT404
     from shared.accesibilidad import TIPOS as TIPOS_AXE
     from shared.comparacion import ANCLADOS_POR_GRUPO
@@ -795,7 +796,7 @@ def test_r9_los_tipos_de_plantilla_casan_por_grupo_en_la_comparacion():
     # Mas los de axe (decision 174), que viven en `shared/`, y el soft 404 de
     # plantilla (decision 190).
     assert ANCLADOS_POR_GRUPO == (set(avisos_de_paginacion.TIPOS_DE_PLANTILLA) | TIPOS_AXE
-                                  | set(TIPOS_SOFT404))
+                                  | set(TIPOS_SOFT404) | set(TIPOS_LOGS))
 
 
 def test_r9_un_map_host_tambien_casa_la_serie():

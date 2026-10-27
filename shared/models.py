@@ -1367,6 +1367,10 @@ class LogImport(Base):
     # Por bot: visitas verificadas, falsas y sin comprobar.
     bots = Column(JSON, nullable=True)
     progreso = Column(BigInteger, nullable=True)
+    # Lo actualiza el worker mientras lee: sin latido, la lectura se corto.
+    latido_at = Column(DateTime(timezone=True), nullable=True)
+    # Lo que se aparto al leer: de otro host, fuera del tope de rutas, otros metodos.
+    resumen = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     terminado_at = Column(DateTime(timezone=True), nullable=True)
 

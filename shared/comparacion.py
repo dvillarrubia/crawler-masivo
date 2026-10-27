@@ -1361,6 +1361,9 @@ def _alertas(afectadas, bases, umbral_absoluto=None, umbrales=None) -> list[dict
 # (imagenes, cabeceras por host) tienen el mismo riesgo y no se tocan aqui:
 # cambiar como casan es otra decision, con su propia medida.
 ANCLADOS_POR_GRUPO = frozenset({
+    # Logs del servidor (decision 213): la plantilla, no el ejemplo.
+    "indexable_sin_visitas_googlebot",
+    "googlebot_recibe_error",
     "paginacion_canonical_a_la_primera",
     "paginacion_noindex",
     "solo_enlazada_desde_paginacion_profunda",

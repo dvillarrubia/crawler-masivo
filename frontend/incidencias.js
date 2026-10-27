@@ -176,12 +176,12 @@ const ISSUE_INFO = {
   },
   // ----- Logs del servidor (decision 213) -----
   'indexable_sin_visitas_googlebot': {
-    que: 'Página indexable de las más importantes del sitio (el cuarto con más PageRank) a la que Googlebot no ha ido en todo el periodo del log subido. Solo se afirma con 7 días de log o más.',
+    que: 'Páginas indexables de las más importantes del sitio (el cuarto con más PageRank) a las que Googlebot no ha ido en todo el periodo del log subido, agrupadas por plantilla. Solo se afirma con 7 días de log o más, de la época del rastreo y si el log ve a Googlebot de verdad.',
     google: 'Si no la visita, tarda en ver sus cambios y puede dejar de tenerla al día en el índice. Suele ser señal de que llega poco enlazado de verdad, de que está lejos o de que el presupuesto de rastreo se va en otras URLs.',
     arreglo: 'Enlazarla desde páginas que Googlebot sí visita, incluirla en el sitemap y mirar en «Logs» en qué se va el presupuesto (parámetros, redirecciones, errores).',
   },
   'googlebot_recibe_error': {
-    que: 'El rastreo vio esta página con 200, pero en el log la mayoría de las visitas de Googlebot recibieron un error (4xx o 5xx).',
+    que: 'Páginas que el rastreo vio con 200 y a las que, en el log, la mayoría de las visitas de Googlebot recibieron un error (4xx o 5xx), agrupadas por plantilla.',
     google: 'Lo que cuenta es lo que le responde a él: si recibe errores, acaba sacándola del índice aunque a una persona le cargue bien.',
     arreglo: 'Mirar en el servidor por qué responde distinto a Googlebot: un WAF o un límite de peticiones que lo frena, o fallos a ciertas horas.',
   },

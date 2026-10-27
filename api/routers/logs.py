@@ -8,7 +8,6 @@ La lectura vive en `shared/logs_servidor.py`.
 
 from __future__ import annotations
 
-import shutil
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -30,7 +29,7 @@ def _resumen(i: LogImport, en_uso: bool) -> dict:
     return {"id": i.id, "fichero": i.fichero, "bytes": i.bytes, "formato": i.formato, "host": i.host,
             "estado": i.estado, "motivo": i.motivo, "progreso": i.progreso,
             "lineas_ok": i.lineas_ok, "lineas_error": i.lineas_error, "errores": (i.errores or [])[:10],
-            "personas": i.personas, "bots": i.bots or {},
+            "personas": i.personas, "bots": i.bots or {}, "apartado": i.resumen or {},
             "desde": i.desde.isoformat() if i.desde else None, "hasta": i.hasta.isoformat() if i.hasta else None,
             "subido": i.created_at.isoformat() if i.created_at else None, "en_uso": en_uso}
 
@@ -77,10 +76,19 @@ def subir(cliente_id: uuid.UUID, fichero: UploadFile = File(...),
     destino_dir = L.directorio()
     destino_dir.mkdir(parents=True, exist_ok=True)
     destino = destino_dir / f"{uuid.uuid4().hex}.log"
+    # Se corta al pasar del tope, no despues de copiarlo entero: el volumen es
+    # el de los Parquet de los enlaces.
+    tamano = 0
     try:
         with open(destino, "wb") as out:
-            shutil.copyfileobj(fichero.file, out, length=4 * 1024 * 1024)
-        tamano = destino.stat().st_size
+            while True:
+                trozo = fichero.file.read(4 * 1024 * 1024)
+                if not trozo:
+                    break
+                tamano += len(trozo)
+                if tamano > MAX_BYTES:
+                    break
+                out.write(trozo)
     except OSError as exc:
         destino.unlink(missing_ok=True)
         raise HTTPException(status_code=507, detail=f"No se pudo guardar el fichero: {exc}") from exc
@@ -111,8 +119,13 @@ def _podar(db: Session, cliente_id) -> None:
     """Deja las `GUARDADAS` mas recientes; de las demas se van las filas y el fichero."""
     import os
 
-    viejas = (db.query(LogImport).filter(LogImport.cliente_id == cliente_id)
-              .order_by(LogImport.created_at.desc(), LogImport.id.desc()).offset(GUARDADAS).all())
+    todas = (db.query(LogImport).filter(LogImport.cliente_id == cliente_id)
+             .order_by(LogImport.created_at.desc(), LogImport.id.desc()).all())
+    # Primero se van las que fallaron: tres subidas con error seguidas no
+    # pueden llevarse el ultimo log leido.
+    sobran = len(todas) - GUARDADAS
+    viejas = ([i for i in reversed(todas) if i.estado == "error"]
+              + [i for i in reversed(todas) if i.estado != "error"])[:max(0, sobran)]
     for v in viejas:
         if v.estado == "procesando":
             continue
