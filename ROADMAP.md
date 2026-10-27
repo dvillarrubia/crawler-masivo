@@ -1179,7 +1179,10 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   ancho (eran 39 tamaños y bajaban a 9 px; `code` salía a 11,4 px). Los 922
   estilos en línea fijos de `index.html` bajan a 108: lo repetido pasa a clases
   con el mismo contenido, comprobado elemento a elemento contra producción.
-  Un solo ayudante de porcentaje (`fmt.pct`). Solo frontend.
+  Un solo ayudante de porcentaje (`fmt.pct`). Tras la revisión, `.mono`
+  vuelve a ganar en los campos de texto (cron, GSC, Slack), las etiquetas de
+  «Qué arreglar primero» caben en dos líneas y los `h5`/`h6` del markdown
+  suben a 12 px. Solo frontend.
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 

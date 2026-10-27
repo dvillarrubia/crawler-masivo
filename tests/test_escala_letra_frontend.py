@@ -9,12 +9,23 @@ Lo que se sujeta:
   `.8rem` eran 11,2 px; `code` y `pre` salian a 11,4 px por la rareza de
   Chromium con la familia `monospace` sola; y el texto de un SVG cuenta con
   la escala a la que se pinta;
+- en esas mismas vistas (21, con alertas, migracion, IA, limpieza,
+  puntuacion, semantico y la ficha de URL), cada utilidad con !important gana
+  de verdad en el elemento que la lleva, oculto o no: `.mono` sin el perdia
+  contra input[type="text"] y la cron o el canal de Slack salian en letra
+  normal sin que ninguna medida de tamano lo viera;
+- los titulares de markdown de h1 a h6 a 12 px o mas, y las etiquetas
+  largas de «Que arreglar primero» sin cortar;
 - todo `font-size` del frontend usa una variable de la escala (`--fs-*`),
   salvo la raiz de 14px, y la escala son cuatro tamanos de texto mas las dos
   excepciones declaradas (cifra e icono), ninguno por debajo de 12 px;
 - los estilos en linea fijos de `index.html` bajan de la mitad de los que
   habia (947) y las clases que los sustituyen existen en `style.css`;
 - un solo ayudante de porcentaje (`fmt.pct`).
+
+Los tres ultimos tests leen el fuente: son guardas de convencion (la escala
+en variables, el recuento de estilos en linea, un solo ayudante), no
+sustituyen a lo que se ejecuta arriba.
 
 Necesita Chromium y poder bajar Alpine de su CDN: si no, se salta.
 """
@@ -36,6 +47,9 @@ RUTAS = [
     f"#/clientes/{CLI}", f"#/clientes/{CLI}/historial", f"#/clientes/{CLI}/configuracion",
     f"#/rastreos/{JOB}", f"#/rastreos/{JOB}/problemas", f"#/rastreos/{JOB}/urls",
     f"#/rastreos/{JOB}/enlaces", f"#/rastreos/{JOB}/comparar",
+    f"#/clientes/{CLI}/alertas", f"#/rastreos/{JOB}/migracion", f"#/rastreos/{JOB}/ia",
+    f"#/rastreos/{JOB}/limpieza", f"#/rastreos/{JOB}/puntuacion", f"#/rastreos/{JOB}/semantico",
+    f"#/rastreos/{JOB}/url/1",
 ]
 
 # El tamano calculado de cada texto visible; en un SVG, por la escala a la
@@ -58,6 +72,79 @@ MEDIR = """() => {
       + (typeof e.className === 'string' ? e.className : '') + ' «' + t.textContent.trim().slice(0, 30) + '»');
   }
   return { n, malos: malos.slice(0, 10) };
+}"""
+
+
+# Que cada utilidad con !important gane de verdad en el elemento que la
+# lleva, tambien en los que estan ocultos (modales con x-show): sustituyen a
+# un estilo en linea, y una que pierde contra una regla de componente cambia
+# el aspecto sin que se vea en ninguna medida de tamano. Se saltan las
+# celdas de las tablas que en movil pasan a tarjetas, que mandan a proposito. Paso con `.mono`,
+# que perdia contra input[type="text"] {font-family:inherit}. Se compara el
+# valor calculado con el que daria la misma declaracion puesta en linea.
+GANAN = """() => {
+  const quieto = document.createElement('style');
+  quieto.textContent = '*{transition:none!important;animation:none!important}';
+  document.head.appendChild(quieto);
+  const reglas = [];
+  const visitar = (lista) => { for (const r of lista) {
+    if (r.cssRules && !r.selectorText) {
+      if (!r.media || matchMedia(r.media.mediaText).matches) visitar(r.cssRules);
+      continue;
+    }
+    if (!r.selectorText || !/^\\.[\\w-]+$/.test(r.selectorText)) continue;
+    const props = [];
+    for (let i = 0; i < r.style.length; i++) {
+      const p = r.style[i];
+      // .mono entra aunque alguien le quite el !important: es la que fallo.
+      if (r.style.getPropertyPriority(p) === 'important' || r.selectorText === '.mono') props.push([p, r.style.getPropertyValue(p)]);
+    }
+    if (props.length) reglas.push([r.selectorText.slice(1), props]);
+  } };
+  for (const h of document.styleSheets) { try { visitar(h.cssRules) } catch (e) {} }
+  const pierden = new Set(), vistas = new Set(); let n = 0;
+  // En movil, la tabla que pasa a tarjetas o se apila manda a proposito:
+  // alinea a la izquierda, deja partir las lineas y abre los truncados.
+  const movil = innerWidth <= 720;
+  for (const [clase, props] of reglas) for (const e of document.getElementsByClassName(clase)) for (const [p, v] of props) {
+    if (movil && e.closest('.con-tarjetas .tabla-tarjetas, .tabla-apilable')) continue;
+    n++; vistas.add(clase);
+    const antes = getComputedStyle(e).getPropertyValue(p);
+    const previo = e.style.getPropertyValue(p), prio = e.style.getPropertyPriority(p);
+    e.style.setProperty(p, v, 'important');
+    const debido = getComputedStyle(e).getPropertyValue(p);
+    if (previo) e.style.setProperty(p, previo, prio); else e.style.removeProperty(p);
+    if (antes !== debido) pierden.add('.' + clase + ' en ' + e.tagName.toLowerCase()
+      + (e.id ? '#' + e.id : '') + ': ' + p + ' da «' + antes + '» y no «' + debido + '»');
+  }
+  quieto.remove();
+  return { n, vistas: [...vistas], pierden: [...pierden].slice(0, 10) };
+}"""
+
+# Los titulares de un informe en markdown, de h1 a h6: h5 y h6 heredaban
+# .83em y .67em del navegador (10 y 8 px sobre la base de 12).
+MARKDOWN = """() => {
+  const d = document.createElement('div'); d.className = 'markdown-body';
+  d.innerHTML = '<h1>a</h1><h2>b</h2><h3>c</h3><h4>d</h4><h5>e</h5><h6>f</h6><p>g</p>';
+  document.body.appendChild(d);
+  const r = [...d.children].map(e => [e.tagName.toLowerCase(), parseFloat(getComputedStyle(e).fontSize)]);
+  d.remove();
+  return r;
+}"""
+
+
+# Las etiquetas de «Que arreglar primero» (Resumen) con los nombres largos de
+# siempre: a 12 px, «Error datos estructurados» ya no cabia en una linea de
+# 130 px y salia con puntos suspensivos. Ahora caben en dos.
+ETIQUETAS = """() => {
+  const c = document.createElement('div'); c.className = 'bar-chart'; c.style.width = Math.min(innerWidth - 32, 700) + 'px';
+  const nombres = ['Error datos estructurados', 'Aviso datos estructurados', 'Canonical apunta a otra URL', 'Imagen sin texto alternativo'];
+  c.innerHTML = nombres.map(t => '<div class="bar-row"><div class="bar-label">' + t
+    + '</div><div class="bar-track"></div><div class="bar-count">9</div></div>').join('');
+  document.body.appendChild(c);
+  const cortadas = [...c.querySelectorAll('.bar-label')].filter(e => e.scrollHeight > e.clientHeight + 1 || e.scrollWidth > e.clientWidth + 1).map(e => e.textContent);
+  c.remove();
+  return cortadas;
 }"""
 
 
@@ -126,8 +213,11 @@ def _recorrer(tema: str, ancho: int):
                 await pagina.evaluate("h => { location.hash = h }", h)
                 await pagina.wait_for_timeout(1200)
                 salida[h] = await pagina.evaluate(MEDIR)
+                salida[h]["ganan"] = await pagina.evaluate(GANAN)
                 salida[h]["errores"] = errores[:]
                 errores.clear()
+            salida["markdown"] = await pagina.evaluate(MARKDOWN)
+            salida["etiquetas"] = await pagina.evaluate(ETIQUETAS)
             await nav.close()
             return salida, errores
 
@@ -144,6 +234,14 @@ def test_ningun_texto_visible_por_debajo_de_12_px(tema, ancho):
         assert r["errores"] == [], f"{ruta}: {r['errores']}"
         assert r["n"] > 5, f"{ruta}: casi no hay texto ({r['n']}), la vista no se pinto"
         assert r["malos"] == [], f"{tema} a {ancho} px, {ruta}: {r['malos']}"
+        assert r["ganan"]["n"] > 20, f"{ruta}: casi no hay utilidades ({r['ganan']['n']})"
+        assert r["ganan"]["pierden"] == [], f"{tema} a {ancho} px, {ruta}: {r['ganan']['pierden']}"
+    # Hay campos monoespaciados en el recorrido (Ajustes, configuracion), y se miran.
+    assert any("mono" in salida[r]["ganan"]["vistas"] for r in RUTAS)
+    assert salida["etiquetas"] == [], salida["etiquetas"]
+    md = dict(salida["markdown"])
+    assert min(md.values()) >= 11.95, md
+    assert md["h1"] > md["h3"] > md["p"] - 0.01, md
 
 
 def _css(nombre: str) -> str:

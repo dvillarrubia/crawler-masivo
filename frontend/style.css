@@ -439,7 +439,10 @@ input[type="checkbox"]{accent-color:var(--accent);width:15px;height:15px;border-
 /* ===== Chart Bars ===== */
 .bar-chart{display:flex;flex-direction:column;gap:.3rem}
 .bar-row{display:flex;align-items:center;gap:.4rem;font-size:var(--fs-sm)}
-.bar-label{width:130px;text-align:right;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:0}
+/* Hasta dos lineas antes de cortar: con la letra a 12 px, «Error datos
+   estructurados» ya no cabia en una (revision de UX del 25-oct, 3.8). */
+.bar-label{width:150px;text-align:right;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;flex-shrink:0;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-height:1.25;overflow-wrap:anywhere}
 .bar-track{flex:1;height:18px;background:#e8eaed;border-radius:2px;overflow:hidden;position:relative}
 .bar-fill{height:100%;border-radius:2px;transition:width .5s var(--transition-smooth);position:relative}
 .bar-fill::after{
@@ -627,7 +630,8 @@ th[data-tip]{overflow:visible}
 .markdown-body h1{font-size:var(--fs-lg);border-bottom:1px solid var(--border);padding-bottom:.35rem}
 .markdown-body h2{font-size:var(--fs-md);border-bottom:1px solid var(--border);padding-bottom:.25rem}
 .markdown-body h3{font-size:var(--fs-base)}
-.markdown-body h4{font-size:var(--fs-sm)}
+/* h5 y h6 heredaban .83em y .67em del navegador: 10 y 8 px (3.8). */
+.markdown-body h4,.markdown-body h5,.markdown-body h6{font-size:var(--fs-sm)}
 .markdown-body p{margin:.4rem 0}
 .markdown-body ul,.markdown-body ol{margin:.4rem 0;padding-left:1.5rem}
 .markdown-body li{margin:.15rem 0}
@@ -1979,7 +1983,11 @@ a.tab{display:flex;align-items:center;gap:.35rem;white-space:nowrap;flex-shrink:
   .cfg-campos{grid-template-columns:1fr}
   .cfg-asi-lista{grid-template-columns:1fr}
 }
-.mono{font-family:ui-monospace,'SFMono-Regular',Menlo,Consolas,monospace}
+/* Con !important, como el resto de utilidades: sustituye a un
+   style="font-family:monospace" y sin el perdia contra input[type="text"]
+   (font-family:inherit), y la cron, la propiedad de GSC o el canal de Slack
+   salian en letra normal (revision de UX del 25-oct, 3.8). */
+.mono{font-family:ui-monospace,'SFMono-Regular',Menlo,Consolas,monospace!important}
 
 /* --- Movil y barra del Explorador (revision de UX del 25-oct, 3.2 y 3.4) --- */
 /* La busqueda, primero y ancha: con la barra llena se quedaba en «Busc». */

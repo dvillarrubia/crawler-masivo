@@ -589,6 +589,13 @@ Cosas que no estaban en la auditoría y aparecieron al hacerla:
   px en los dos temas; ninguna ruta desborda a 390. La barra lateral del
   Explorador pasa de 170 a 190 px: «Tráfico de Google» partía en dos líneas.
 - [x] Un solo ayudante de porcentaje (`fmt.pct`; fuera `pctEs`).
+- [x] Tras la revisión: `.mono` no llevaba `!important` y perdía contra
+  `input[type="text"]`, así que la cron, la propiedad de GSC, el canal de
+  Slack y la credencial salían en letra normal; ahora lo lleva, y el test
+  comprueba en Chromium que cada utilidad gana donde se usa, también en los
+  modales ocultos. Las etiquetas de «Qué arreglar primero» pasan a 150 px y
+  hasta dos líneas («Error datos estructurados» salía cortado), y los `h5` y
+  `h6` del markdown, a 12 px (heredaban 10 y 8 px del navegador).
 - Lo abierto: los 108 estilos en línea que quedan son de una sola vez; la
   clase `.text-sm` de antes (sin `!important`) convive con `.fs-sm` (con él,
   porque sustituye a un estilo en línea). Las `.caja-codigo` usaban

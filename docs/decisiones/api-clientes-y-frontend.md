@@ -801,13 +801,27 @@
      revisión sobre producción: solo cambian lo que deriva del tamaño de letra
      (`letter-spacing` y huecos en `em`, márgenes `auto`) y un
      `justify-content: flex-end` que la clase `justify-end` ya pedía en
-     Configuración sin que existiera.
+     Configuración sin que existiera. Esa comparación miraba solo lo visible
+     y se le escapó una: `.mono` (de antes, sin `!important`) perdía contra
+     `input[type="text"] {font-family: inherit}`, y la cron de los dos
+     modales de programar, la propiedad de GSC, el canal de Slack y la
+     credencial dejaron de ser monoespaciados. Ahora `.mono` lleva
+     `!important` como el resto, y el test comprueba ejecutando que cada
+     utilidad con `!important` gana en el elemento que la lleva, oculto o no
+     (salvo en las tablas que en móvil pasan a tarjetas, que mandan a
+     propósito).
+   - Lo que la escala cortaba o dejaba fuera: las etiquetas de «Qué arreglar
+     primero» pasan de 130 px en una línea a 150 px en hasta dos («Error datos
+     estructurados» salía con puntos suspensivos), y los `h5`/`h6` de un
+     informe en markdown, que heredaban `.83em`/`.67em` del navegador (10 y 8
+     px), van a 12 px como el `h4`.
    - Un solo ayudante de porcentaje: `fmt.pct` (se quita `pctEs`; con un
      decimal fijo, «2,2 %», y «—» si no hay dato).
 
-   Tests: `tests/test_escala_letra_frontend.py` (14 vistas a 1440 y 390 px en
+   Tests: `tests/test_escala_letra_frontend.py` (21 vistas a 1440 y 390 px en
    los dos temas: ningún texto visible calcula menos de 12 px, el de los SVG
-   con su escala; todo `font-size` usa la escala; los estilos en línea fijos
+   con su escala; cada utilidad con `!important` gana donde se usa; titulares
+   de markdown y etiquetas largas de las barras; todo `font-size` usa la escala; los estilos en línea fijos
    por debajo de la mitad y sus clases definidas; un solo ayudante de
    porcentaje).
 
