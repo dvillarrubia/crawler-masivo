@@ -2035,3 +2035,33 @@ a.tab{display:flex;align-items:center;gap:.35rem;white-space:nowrap;flex-shrink:
 .limpieza-repetidas code{flex:1;min-width:0;overflow-wrap:anywhere;white-space:pre-wrap;font-size:.78rem}
 .limpieza-regla{display:flex;gap:.5rem;margin-bottom:.5rem;align-items:center;flex-wrap:wrap}
 .limpieza-regla input{flex:1 1 14rem;min-width:0}
+/* Botones y jerga (revision de UX del 25-oct, 3.5 y 3.9) */
+/* El pie de los modales queda a la vista aunque el cuerpo sea largo: Lanzar
+   o Guardar sin bajar hasta el final del formulario. */
+.modal > .modal-footer{position:sticky;bottom:0;z-index:2}
+.modal-sin-guardar{margin-right:auto;align-self:center}
+/* «⋯» con Eliminar dentro, en una celda de acciones */
+.menu-wrap-fila{display:inline-block;vertical-align:middle}
+td.celda-acciones{overflow:visible}
+.menu .danger svg{color:var(--red)}
+/* Barra fija «Cambios sin guardar · Guardar» */
+.barra-cambios{position:fixed;left:0;right:0;bottom:0;z-index:70;display:flex;align-items:center;justify-content:center;
+  gap:.6rem;flex-wrap:wrap;padding:.6rem 1rem;background:var(--bg-card);border-top:2px solid var(--orange);
+  box-shadow:0 -4px 16px rgba(0,0,0,.08);font-size:.88rem}
+.barra-cambios-texto{font-weight:600;min-width:0;overflow-wrap:anywhere}
+.barra-cambios-hueco{height:4rem}
+@media (max-width:640px){
+  .barra-cambios{justify-content:flex-start;padding:.55rem 1rem}
+  .barra-cambios-texto{flex:1 1 100%}
+  .barra-cambios > svg, .barra-cambios > i{display:none}
+  /* En la tabla apilada los botones van a la izquierda: el menu se abre hacia la derecha */
+  .tabla-apilable .menu-wrap-fila .menu{left:0;right:auto;max-width:calc(100vw - 3rem)}
+  .menu .menu-sub{white-space:normal}
+}
+/* El identificador (slug), plegado en Datos del cliente */
+.cfg-mas > summary{cursor:pointer;color:var(--accent);width:max-content;margin-top:.25rem}
+/* «?» con una ayuda corta (canario, semillas, PageRank) */
+.ayuda{display:inline-flex;align-items:center;justify-content:center;width:1.05rem;height:1.05rem;margin-left:.3rem;
+  border:1px solid var(--border);border-radius:50%;font-size:.7rem;font-weight:700;color:var(--text-dim);cursor:help;
+  vertical-align:middle;line-height:1}
+.ayuda:focus-visible{outline:2px solid var(--accent);outline-offset:1px}

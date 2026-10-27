@@ -1163,6 +1163,15 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   proponen hasta 40 líneas con la parte del texto que quitan, y la ficha de
   una página del bloque «Google» se busca por URL exacta (`?url_exacta=`):
   /es decía «no está en este censo» porque la contienen 1.272 URLs.
+- **Un botón principal por vista y menos jerga** (revisión de UX del 25-oct,
+  3.5 y 3.9; decisión 200; en local, sin desplegar): barra fija «Cambios sin
+  guardar · Guardar» en la configuración del cliente (cómo se rastrea, datos,
+  integraciones, reglas) y en Ajustes, que pregunta antes de salir; «Eliminar»
+  dentro de «⋯» en perfiles, programaciones y reglas; pie fijo en los modales;
+  el aceptar de las preguntas ya no sale desactivado. Reglas de alertas en
+  frase, slug plegado, IA sin claves internas y con salida a Problemas, ayuda
+  para semillas y canario, tildes y números en castellano (`fmt.dec`,
+  `fmt.pct`, `fmt.pctDe`, `fmt.n`).
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 
