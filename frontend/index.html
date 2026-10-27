@@ -672,8 +672,10 @@
              `profile_runs`. Los canarios y las pruebas no cuentan, y a traves
              de un cambio de version del analisis no hay flecha. -->
         <template x-if="clientes.length">
-          <div class="card table-wrap">
-            <table class="panel-cartera" style="width:100%;font-size:.85rem">
+          <!-- A 390 px, cada cliente una tarjeta con su ultimo censo, errores y
+               alertas (revision de UX del 25-oct, 3.2; V41). -->
+          <div class="card table-wrap con-tarjetas">
+            <table class="panel-cartera tabla-tarjetas" style="width:100%;font-size:.85rem" data-testid="panel-cartera">
               <thead><tr>
                 <th style="text-align:left">cliente</th>
                 <th style="text-align:left">último censo</th>
@@ -695,7 +697,7 @@
                         </template>
                       </div>
                     </td>
-                    <td>
+                    <td data-label="Último censo" class="td-ancha">
                       <template x-if="!p.ultimo"><span class="text-dim">sin censo completado</span></template>
                       <template x-if="p.ultimo">
                         <div>
@@ -704,13 +706,13 @@
                         </div>
                       </template>
                     </td>
-                    <td style="text-align:right" x-text="p.ultimo ? fmt.num(p.ultimo.paginas_html) : '—'"></td>
-                    <td style="text-align:right"
+                    <td style="text-align:right" class="solo-escritorio" x-text="p.ultimo ? fmt.num(p.ultimo.paginas_html) : '—'"></td>
+                    <td style="text-align:right" class="solo-escritorio"
                         :class="p.ultimo && p.ultimo.paginas_html && p.ultimo.indexables / p.ultimo.paginas_html < .5 ? 'text-orange' : ''"
                         x-text="p.ultimo && p.ultimo.paginas_html ? Math.round(p.ultimo.indexables / p.ultimo.paginas_html * 100) + ' %' : '—'"></td>
-                    <td style="text-align:right" :class="p.ultimo && p.ultimo.errores ? 'text-red' : ''"
+                    <td style="text-align:right" data-label="Errores" :class="p.ultimo && p.ultimo.errores ? 'text-red' : ''"
                         x-text="p.ultimo ? fmt.num(p.ultimo.errores) : '—'"></td>
-                    <td style="white-space:nowrap">
+                    <td style="white-space:nowrap" data-label="Tendencia">
                       <template x-if="!p.evolucion || !p.evolucion.tendencia"><span class="text-dim text-sm">—</span></template>
                       <template x-if="p.evolucion && p.evolucion.tendencia">
                         <span class="evo-tendencia" :title="'Serie «' + p.evolucion.serie + '». ' + ((textoTendencia(p.evolucion.tendencia) || {}).titulo || '')">
@@ -725,7 +727,7 @@
                          Antes salian a la vez «3 alertas» (las de la ultima
                          comparacion) y «5 incidentes» (revision de UX del
                          25-oct, 2.3; el porque, en cargarAlertasAbiertas). -->
-                    <td class="text-sm">
+                    <td class="text-sm" data-label="Alertas">
                       <template x-if="p.incidentes_vivos">
                         <a :href="'#/clientes/' + p.id + '/alertas'" @click.stop class="text-orange"
                            x-text="fmt.num(p.incidentes_vivos) + (p.incidentes_vivos === 1 ? ' abierta' : ' abiertas')"></a>
@@ -1139,8 +1141,10 @@
                 <div class="text-dim text-sm">Ningún rastreo todavía.</div>
               </template>
               <template x-if="clienteSerie.length">
-                <div class="table-wrap">
-                <table style="width:100%;font-size:.85rem">
+                <div class="table-wrap con-tarjetas">
+                <!-- En movil, tarjetas con el rastreo arriba (revision de UX del
+                     25-oct, 3.2). -->
+                <table class="tabla-tarjetas tarjetas-orden" style="width:100%;font-size:.85rem" data-testid="tabla-serie">
                   <thead><tr>
                     <th style="text-align:left">fecha</th>
                     <th style="text-align:left">rastreo</th>
@@ -1154,16 +1158,16 @@
                   <tbody>
                     <template x-for="(j, n) in serieVisible()" :key="j.id">
                       <tr @click="location.hash = '#/rastreos/' + j.id" style="cursor:pointer">
-                        <td style="white-space:nowrap" x-text="fmt.dia(j.created_at)" :title="fmt.date(j.created_at)"></td>
-                        <td>
+                        <td style="white-space:nowrap" data-label="Fecha" x-text="fmt.dia(j.created_at)" :title="fmt.date(j.created_at)"></td>
+                        <td class="td-cabeza">
                           <span x-text="j.name"></span>
                           <span class="tipo-chip" x-show="j.tipo !== 'censo'" x-text="j.tipo"></span>
                           <span class="badge" :class="statusColor(j.status)" x-show="j.status !== 'completed'" x-text="fmt.status(j.status)"></span>
                         </td>
-                        <td style="text-align:right" x-text="fmt.num(j.urls)"></td>
-                        <td style="text-align:right" x-text="fmt.num(j.paginas_html)"></td>
-                        <td style="text-align:right" x-text="j.paginas_html ? Math.round(j.indexables / j.paginas_html * 100) + ' %' : '—'"></td>
-                        <td style="text-align:right;white-space:nowrap">
+                        <td style="text-align:right" class="solo-escritorio" x-text="fmt.num(j.urls)"></td>
+                        <td style="text-align:right" data-label="Páginas" x-text="fmt.num(j.paginas_html)"></td>
+                        <td style="text-align:right" class="solo-escritorio" x-text="j.paginas_html ? Math.round(j.indexables / j.paginas_html * 100) + ' %' : '—'"></td>
+                        <td style="text-align:right;white-space:nowrap" data-label="Errores">
                           <span x-text="fmt.num(j.errores)"></span>
                           <template x-if="referenciaDe(j)">
                             <span class="delta" :class="j.errores > referenciaDe(j).errores ? 'peor' : (j.errores < referenciaDe(j).errores ? 'mejor' : '')"
@@ -1171,10 +1175,10 @@
                                   x-text="j.errores === referenciaDe(j).errores ? '=' : (j.errores > referenciaDe(j).errores ? '▲' : '▼') + fmt.num(Math.abs(j.errores - referenciaDe(j).errores))"></span>
                           </template>
                         </td>
-                        <td style="text-align:right" x-text="fmt.num(j.avisos)"></td>
+                        <td style="text-align:right" data-label="Avisos" x-text="fmt.num(j.avisos)"></td>
                         <!-- «frente al 19 oct: saltaron 3 alertas»: las que salto ESA
                              comparacion, con la fecha de su referencia. -->
-                        <td class="text-sm" style="white-space:nowrap">
+                        <td class="text-sm td-ancha" style="white-space:nowrap" data-label="Alertas">
                           <template x-if="!j.comparado_con"><span class="text-dim">—</span></template>
                           <template x-if="j.comparado_con">
                             <a :href="'#/rastreos/' + j.id + '/comparar'" @click.stop
@@ -2252,8 +2256,10 @@
         <!-- Tabla de trabajos -->
         <template x-if="jobs.length > 0">
           <div>
-            <div class="table-wrap">
-              <table>
+            <!-- En movil, cada rastreo una tarjeta: estado, si ha terminado y
+                 cuantas URLs lleva (revision de UX del 25-oct, 3.2). -->
+            <div class="table-wrap con-tarjetas">
+              <table class="tabla-tarjetas tabla-rastreos" data-testid="tabla-rastreos">
                 <thead>
                   <tr>
                     <th style="width:2.2rem">
@@ -2276,7 +2282,7 @@
                   <template x-for="j in jobs" :key="j.id">
                     <tr @click="openJob(j.id)" style="cursor:pointer"
                         :class="jobsSel[j.id] && 'fila-marcada'">
-                      <td @click.stop>
+                      <td @click.stop class="td-sel">
                         <input type="checkbox" :checked="!!jobsSel[j.id]" @change="alternarSeleccion(j.id)"
                                :aria-label="'Seleccionar ' + j.name">
                       </td>
@@ -2287,7 +2293,7 @@
                         </div>
                         <div class="text-dim text-sm truncate" style="max-width:250px" x-text="j.seeds?.[0] || ''"></div>
                       </td>
-                      <td>
+                      <td data-label="Cliente">
                         <template x-if="j.cliente_id">
                           <a href="#" @click.prevent.stop="abrirCliente(j.cliente_id)" x-text="j.cliente_nombre || j.client_id"></a>
                         </template>
@@ -2297,12 +2303,12 @@
                           <span class="text-dim" x-text="j.client_id || '—'"></span>
                         </template>
                       </td>
-                      <td><span class="badge" :class="statusColor(j.status)" x-text="fmt.status(j.status)"></span></td>
-                      <td x-text="j.seeds?.length || 0"></td>
-                      <td x-text="fmt.num(j.total_urls_crawled)"></td>
-                      <td x-show="hayFallidas" x-text="fmt.num(j.total_urls_failed)"></td>
-                      <td x-text="fmt.ago(j.created_at)" :title="fmt.date(j.created_at)"></td>
-                      <td>
+                      <td data-label="Estado"><span class="badge" :class="statusColor(j.status)" x-text="fmt.status(j.status)"></span></td>
+                      <td class="solo-escritorio" x-text="j.seeds?.length || 0"></td>
+                      <td data-label="Rastreadas" x-text="fmt.num(j.total_urls_crawled)"></td>
+                      <td data-label="Fallidas" x-show="hayFallidas" x-text="fmt.num(j.total_urls_failed)"></td>
+                      <td data-label="Creado" x-text="fmt.ago(j.created_at)" :title="fmt.date(j.created_at)"></td>
+                      <td data-label="Duración">
                         <template x-if="j.started_at && j.completed_at">
                           <span x-text="fmt.lapso(new Date(j.completed_at) - new Date(j.started_at))"></span>
                         </template>
@@ -2635,7 +2641,7 @@
         <!-- Las tarjetas, solo en la ficha: en URLs la tabla necesita el alto. -->
         <template x-if="stats && view === 'detail'">
           <div class="stats-grid">
-            <button class="stat-card stat-link" @click="openExplorer(); setExplorerTab('html')"
+            <button class="stat-card stat-link" @click="openExplorer(); setExplorerTab('paginas_html')"
                     data-tip="Páginas HTML internas que responden 2xx: lo que el buscador puede indexar">
               <div class="stat-value" x-text="fmt.num(stats.paginas_html)"></div>
               <div class="stat-label">Páginas HTML</div>
@@ -6701,12 +6707,15 @@
                   <div class="exp-sidebar-titulo" x-text="tab.header"></div>
                 </template>
                 <template x-if="!tab.divider && !tab.header && (!tab.requiere || expAMedida.length)">
-                  <button type="button" class="exp-tab" :class="expTab === tab.key && !expWp && 'active'" @click="setExplorerTab(tab.key)">
+                  <button type="button" class="exp-tab" :class="expTab === tab.key && !expWp && 'active'" @click="setExplorerTab(tab.key)"
+                          :title="tab.titulo || (tab.ambito ? (explorerAnalizado() ? 'Páginas con algún problema de ' + tab.label.toLowerCase() : 'Sin analizar: no hay problemas calculados') : '')">
                     <i :data-lucide="tab.icon" class="exp-tab-icon"></i>
                     <span x-text="tab.label"></span>
-                    <template x-if="!tab.ambito">
-                      <span class="exp-tab-badge" x-text="expBadgeCounts[tab.key] != null ? fmt.num(expBadgeCounts[tab.key]) : ''"></span>
-                    </template>
+                    <!-- Contador en todas las entradas, tambien en los ambitos
+                         (revision de UX del 25-oct, 3.4): «0» si no hay ninguna;
+                         sin cifra mientras se cuenta, si no se pudo o, en los ambitos,
+                         si el censo no esta analizado. -->
+                    <span class="exp-tab-badge" x-text="expBadgeCounts[tab.key] != null ? fmt.num(expBadgeCounts[tab.key]) : ''"></span>
                     <template x-if="tab.ambito">
                       <span class="exp-tab-punto" :class="'p-' + gravedadDelAmbito(tab)"
                             :title="({error:'Hay errores', warning:'Hay avisos', info:'Solo info', ok:'Sin problemas'})[gravedadDelAmbito(tab)] || ''"></span>
@@ -6781,8 +6790,33 @@
           <div class="exp-toolbar">
             <div class="exp-search-wrap">
               <i data-lucide="search"></i>
-              <input type="text" class="exp-search" placeholder="Buscar URL o título..." x-model="expSearch" @input="explorerSearchInput()">
+              <input type="text" class="exp-search" placeholder="Buscar URL o título..." aria-label="Buscar URL o título" x-model="expSearch" @input="explorerSearchInput()">
             </div>
+            <!-- En movil la barra lateral no cabe: sus entradas, con su cifra,
+                 en un desplegable (revision de UX del 25-oct, 3.2). -->
+            <select class="exp-problema exp-vista-movil" aria-label="Qué URLs ver" data-testid="exp-vista-movil"
+                    @change="elegirVistaMovil($event.target.value)">
+              <optgroup label="URLs">
+                <template x-for="tab in EXP_TABS.slice(0, EXP_TABS.findIndex(t => t.header)).filter(t => !t.divider && (!t.requiere || expAMedida.length))" :key="'m_' + tab.key">
+                  <option :value="tab.key" :selected="expTab === tab.key && !expWp" x-text="textoVistaMovil(tab)"></option>
+                </template>
+              </optgroup>
+              <optgroup label="Por ámbito SEO">
+                <template x-for="tab in EXP_TABS.slice(EXP_TABS.findIndex(t => t.header) + 1)" :key="'m_' + tab.key">
+                  <option :value="tab.key" :selected="expTab === tab.key && !expWp" x-text="textoVistaMovil(tab)"></option>
+                </template>
+              </optgroup>
+              <template x-if="expVistas.length">
+                <optgroup :label="'Vistas de ' + (job.cliente_nombre || 'este cliente')">
+                  <template x-for="v in expVistas" :key="'m_v' + v.id">
+                    <option :value="'vista:' + v.id" x-text="v.nombre"></option>
+                  </template>
+                </optgroup>
+              </template>
+              <template x-if="resumenWordPress(job) && resumenWordPress(job).abierta">
+                <option value="wp" :selected="expWp">Solo en WordPress</option>
+              </template>
+            </select>
             <!-- «Con el problema…» (docs/INVESTIGACION_EXPLORADOR.md): el puente con
                  Problemas. El servidor ya filtraba /urls por issue_type y la
                  interfaz no lo ofrecia. -->
@@ -6806,19 +6840,30 @@
               </template>
             </select>
             <span class="exp-results-count" x-text="fmt.num(expTotal) + ' resultados'"></span>
-            <!-- Agrupar por plantilla (#131): la unidad de trabajo del SEO tecnico. -->
-            <button class="exp-toolbar-btn" :class="expAgrupar && expAgruparPor === 'plantilla' && 'active'" @click="alternarAgrupar('plantilla')"
-                    :aria-pressed="expAgrupar && expAgruparPor === 'plantilla'" data-tip="Agrupa las URLs de esta vista por la forma de su ruta">
-              <i data-lucide="layers" style="width:13px;height:13px"></i>
-              <span>Por plantilla</span>
-            </button>
-            <!-- Segmentos de negocio (decision 125): los de las reglas del
-                 cliente y, si ninguna casa, la forma de la ruta. -->
-            <button class="exp-toolbar-btn" :class="expAgrupar && expAgruparPor === 'segmento' && 'active'" @click="alternarAgrupar('segmento')"
-                    :aria-pressed="expAgrupar && expAgruparPor === 'segmento'" data-tip="Agrupa las URLs de esta vista por su segmento de negocio">
-              <i data-lucide="shapes" style="width:13px;height:13px"></i>
-              <span>Por segmento</span>
-            </button>
+            <!-- «Agrupar ▾» en un solo boton (revision de UX del 25-oct, 3.4):
+                 por plantilla (#131, la unidad de trabajo del SEO tecnico) o
+                 por segmento de negocio (decision 125: los de las reglas del
+                 cliente y, si ninguna casa, la forma de la ruta). -->
+            <div class="menu-wrap" @click.outside="menuAbierto === 'agrupar-exp' && (menuAbierto = '')">
+              <button class="exp-toolbar-btn" :class="expAgrupar && 'active'" data-testid="exp-agrupar"
+                      @click="menuAbierto = menuAbierto === 'agrupar-exp' ? '' : 'agrupar-exp'"
+                      aria-haspopup="menu" :aria-expanded="menuAbierto === 'agrupar-exp'">
+                <i data-lucide="layers" style="width:13px;height:13px"></i>
+                <span x-text="!expAgrupar ? 'Agrupar' : (expAgruparPor === 'segmento' ? 'Por segmento' : 'Por plantilla')"></span>
+                <i data-lucide="chevron-down" style="width:11px;height:11px"></i>
+              </button>
+              <div class="menu menu-izq" x-show="menuAbierto === 'agrupar-exp'" x-transition.opacity role="menu" style="min-width:18rem">
+                <button role="menuitemradio" :aria-checked="!expAgrupar" :class="!expAgrupar && 'menu-activa'" @click="agruparCon('')">
+                  <i data-lucide="list" style="width:14px;height:14px"></i>
+                  <span>Sin agrupar<span class="menu-sub">Una fila por URL</span></span></button>
+                <button role="menuitemradio" :aria-checked="expAgrupar && expAgruparPor === 'plantilla'" :class="expAgrupar && expAgruparPor === 'plantilla' && 'menu-activa'" @click="agruparCon('plantilla')">
+                  <i data-lucide="layers" style="width:14px;height:14px"></i>
+                  <span>Por plantilla<span class="menu-sub">Por la forma de su ruta</span></span></button>
+                <button role="menuitemradio" :aria-checked="expAgrupar && expAgruparPor === 'segmento'" :class="expAgrupar && expAgruparPor === 'segmento' && 'menu-activa'" @click="agruparCon('segmento')">
+                  <i data-lucide="shapes" style="width:14px;height:14px"></i>
+                  <span>Por segmento<span class="menu-sub">Por su segmento de negocio</span></span></button>
+              </div>
+            </div>
             <select class="exp-problema exp-segmento" :class="expSegmento && 'has-value'" aria-label="Filtrar por segmento"
                     @change="elegirSegmento($event.target.value)">
               <option value="" :selected="!expSegmento">Todos los segmentos</option>
@@ -6948,9 +6993,11 @@
           <template x-if="(EXP_TABS.find(t => t.key === expTab) || {}).ambito">
             <div class="exp-ambito">
               <button class="chip-ambito" :class="!expProblema && 'on'" @click="elegirTipoDelAmbito('')">Todas las páginas</button>
-              <template x-if="tiposDelAmbito().length > 1">
+              <!-- Lo que abre la entrada de la barra y lo que cuenta su cifra
+                   (revision de UX del 25-oct, 3.4): siempre a la vista. -->
+              <template x-if="explorerAnalizado()">
                 <button class="chip-ambito" :class="expProblema === (EXP_TABS.find(t => t.key === expTab).ambito.join(',')) && 'on'"
-                        @click="elegirTipoDelAmbito('*')">Con cualquier problema de este ámbito</button>
+                        @click="elegirTipoDelAmbito('*')">Con algún problema de este ámbito</button>
               </template>
               <template x-for="r in tiposDelAmbito()" :key="r.issue_type">
                 <button class="chip-ambito" :class="[expProblema === r.issue_type && 'on', 'sev-' + r.severity]"
@@ -6958,8 +7005,12 @@
                   <span x-text="fmt.issue(r.issue_type)"></span> <strong x-text="fmt.num(r.paginas)"></strong>
                 </button>
               </template>
-              <template x-if="issuesResumen && !tiposDelAmbito().length">
+              <template x-if="explorerAnalizado() && issuesResumen && !tiposDelAmbito().length">
                 <span class="text-dim text-sm">Ningún problema de este ámbito en este rastreo.</span>
+              </template>
+              <!-- Sin analizar no hay problemas calculados: no es «ninguno». -->
+              <template x-if="!explorerAnalizado()">
+                <span class="text-dim text-sm" x-text="['pending', 'running', 'analyzing'].includes((job || {}).status) ? 'Los problemas salen al acabar el análisis.' : 'Este rastreo no se analizó: no hay problemas calculados.'"></span>
               </template>
             </div>
           </template>
@@ -7060,7 +7111,9 @@
               </div>
             </template>
             <template x-if="expUrls.length > 0">
-              <table class="exp-table">
+              <!-- La columna URL fija al desplazar en horizontal (revision de
+                   UX del 25-oct, 3.4), si es la primera. -->
+              <table class="exp-table" :class="getExpColumns()[0] === 'url' && 'url-fija'">
                 <thead>
                   <tr>
                     <template x-for="col in getExpColumns()" :key="col">

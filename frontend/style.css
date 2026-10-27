@@ -1955,3 +1955,52 @@ a.tab{display:flex;align-items:center;gap:.35rem;white-space:nowrap;flex-shrink:
   .cfg-asi-lista{grid-template-columns:1fr}
 }
 .mono{font-family:ui-monospace,'SFMono-Regular',Menlo,Consolas,monospace}
+
+/* --- Movil y barra del Explorador (revision de UX del 25-oct, 3.2 y 3.4) --- */
+/* La busqueda, primero y ancha: con la barra llena se quedaba en «Busc». */
+.exp-toolbar{flex-wrap:wrap}
+.exp-search-wrap{order:-1;flex:1 1 20rem;min-width:14rem;max-width:34rem}
+.exp-vista-movil{display:none}
+.menu.menu-izq{left:0;right:auto}
+/* La columna URL fija al desplazar en horizontal. */
+.exp-table.url-fija th:first-of-type,.exp-table.url-fija td:first-of-type{position:sticky;left:0;box-shadow:inset -1px 0 0 var(--border)}
+.exp-table.url-fija td:first-of-type{z-index:2;background:var(--bg-card)}
+.exp-table.url-fija thead th:first-of-type{z-index:7}
+.exp-table.url-fija thead tr.exp-filter-row th:first-of-type{z-index:6}
+.exp-table.url-fija tbody tr:nth-child(even) td:first-of-type{background:var(--bg-input)}
+.exp-table.url-fija tbody tr:hover td:first-of-type{background:#eef5e6}
+.exp-table.url-fija tbody tr.exp-row-selected td:first-of-type{background:#dbedc8}
+@media (max-width:768px){
+  /* La barra lateral pasa a un desplegable dentro de la barra de arriba. */
+  .exp-sidebar{display:none}
+  .exp-vista-movil{display:block}
+  .exp-search-wrap{flex-basis:100%;max-width:none;min-width:0}
+  .exp-toolbar .exp-problema{flex:1 1 100%;min-width:0;max-width:100%}
+  .exp-filter-hint{display:none}
+  /* La URL fija no puede comerse la pantalla: el resto se ve al desplazar. */
+  .exp-table.url-fija th:first-of-type,.exp-table.url-fija td:first-of-type{min-width:0 !important;max-width:52vw;width:52vw}
+}
+/* Listas como tarjetas a 390 px (V41): el patron de Enlaces (.tabla-tarjetas). */
+@media (max-width:640px){
+  .table-wrap.con-tarjetas{background:none;border:none;box-shadow:none;padding:0;overflow:visible}
+  /* Dos columnas con la etiqueta encima: la tarjeta cabe en media pantalla. */
+  .con-tarjetas .tabla-tarjetas tr{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.3rem .75rem}
+  .con-tarjetas .tabla-tarjetas td{display:block;text-align:left !important;white-space:normal !important;min-width:0}
+  .con-tarjetas .tabla-tarjetas td[data-label]::before{display:block;margin-bottom:.05rem}
+  .con-tarjetas .tabla-tarjetas td:not([data-label]),.con-tarjetas .tabla-tarjetas td.td-ancha{grid-column:1/-1}
+  .con-tarjetas .solo-escritorio{display:none !important}
+  .tabla-tarjetas td.td-cabeza,.tabla-rastreos td:nth-child(2){font-weight:600}
+  .tabla-tarjetas.tarjetas-orden td.td-cabeza{order:-1}
+  .tabla-rastreos tr{position:relative}
+  .tabla-rastreos td.td-sel{position:absolute;top:.45rem;right:.6rem;padding:0}
+  .tabla-rastreos td:nth-child(2){padding-right:1.8rem;display:block}
+  .tabla-rastreos td:nth-child(2) .truncate{max-width:100% !important}
+  .panel-cartera td:first-of-type{display:block}
+  .panel-cartera tr,.tabla-rastreos tr{grid-template-columns:repeat(3,minmax(0,1fr)) !important}
+  .panel-cartera td .truncate{max-width:100% !important}
+  /* En un tercio de tarjeta el sparkline y «≠ versión» no caben en fila. */
+  .panel-cartera .evo-tendencia{flex-wrap:wrap;row-gap:.1rem}
+  /* Las tarjetas con el fondo del tema (en terminal, blanco con cifras
+     verde claro no se leia). */
+  .tabla-tarjetas tr{background:var(--bg-card)}
+}

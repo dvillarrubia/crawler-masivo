@@ -474,3 +474,11 @@ limites y las opciones del formulario son los de `JobConfig` —necesita tambien
 pydantic—, heredado/cambiado/«volver al heredado», una cabecera heredada no se
 quita en silencio, al lanzar solo va lo de ese rastreo y el tope del canario, y
 cambiar de cliente o quitarlo conserva lo cambiado).
+Movil y barra del Explorador (revision de UX del 25-oct, 3.2 y 3.4; decision
+199): `test_movil_frontend.py` carga `frontend/index.html` entero con Alpine
+(de su CDN: sin red, se salta) en Chromium y una API simulada con nombres y URLs
+largos. A 390 px, `document.documentElement.scrollWidth` <= 390 en clientes,
+rastreos, historial del cliente, Resumen y URLs; las listas sin cabecera de
+tabla y con sus etiquetas; el desplegable de vistas con sus cifras. A 1440 px,
+barra lateral, busqueda primero, URL fija y la tarjeta «Páginas HTML» con la
+misma cifra que su entrada.

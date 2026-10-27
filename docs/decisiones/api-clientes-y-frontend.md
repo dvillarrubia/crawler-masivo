@@ -659,3 +659,58 @@
    Tests: `tests/test_config_niveles.py` (API: origen y origen por clave,
    borrador, avisos del mismo sitio, ajustes sin secretos) y
    `tests/test_config_niveles_frontend.py`.
+
+<a id="d199"></a>
+199. **Cada entrada de la barra del Explorador cuenta lo mismo que abre, con «0» cuando es cero, y dos cifras distintas llevan nombres distintos**
+
+   **Problema.** La barra lateral del Explorador decía «HTML 3.772» y la
+   tarjeta del Resumen «3.731 páginas HTML», y la tarjeta abría la entrada de
+   3.772 (revisión de UX del 25-oct, V30). No era un error de cuenta: la
+   tarjeta cuenta las HTML internas que responden 2xx (`/stats.paginas_html`) y
+   la barra todo lo que responde HTML, también los 4xx (en Lopesan, justo los
+   41 de diferencia). Además, JavaScript, CSS, 5xx, Indexables, No indexables,
+   Bloqueadas y todos los ámbitos SEO salían sin cifra: no se distinguía «no
+   hay ninguna» de «no se ha contado».
+
+   **Decisión.**
+
+   - Dos entradas con nombre propio: **«Páginas HTML»** (internas, HTML, 2xx:
+     la cifra de la tarjeta, que ahora abre esta) y **«Todo el HTML»** (la de
+     antes, con un `title` que dice que incluye las que dan error).
+     Indexables y No indexables llevan un `title` que dice que son de
+     cualquier tipo (PDF, redirecciones), porque no cuadran con la tarjeta
+     «Indexables», que es solo de páginas HTML.
+   - Lo que `/stats` agrupa del censo entero (tipo de recurso, grupo de
+     estado) da «0» cuando no sale: un `GROUP BY` completo no omite nada que
+     exista.
+   - Lo demás es el `total` de `GET /urls` con el mismo filtro que aplica la
+     entrada (`page_size=1`): una consulta cada vez, en orden y en segundo
+     plano, guardada por censo y por estado y versión del análisis: con el
+     rastreo sin terminar se recuenta cada vez que se entra, y al acabar el
+     análisis se tira lo contado a medias (y el resumen de problemas del que
+     salen los ámbitos) antes de recontar. En un ámbito SEO la cifra son las
+     **páginas** de esa vista con algún problema del ámbito (`issue_type` con
+     todos sus tipos), no la suma de incidencias: una página con dos problemas
+     del ámbito cuenta una vez. Y como la entrada tiene que abrir lo que cuenta,
+     **pulsar un ámbito abre «Con algún problema de este ámbito»** («Títulos
+     307» abre 307, no las 3.772 páginas HTML); «Todas las páginas» queda a un
+     clic en los chips. Una URL guardada con la pestaña y sin `problema` sigue
+     abriendo todas. Un ámbito sin ningún tipo en el resumen de problemas es 0
+     sin preguntar, pero solo si el resumen trae algo (vacío puede ser que
+     falló). Si una consulta falla, la entrada se queda sin cifra: nunca un 0
+     que no se ha contado.
+   - **Un censo sin analizar** (cancelado o fallido antes del análisis, o aún
+     en curso: sin `analisis_version` o con el estado sin cerrar) no tiene
+     problemas ni indexabilidad calculados, que no es «0»: los ámbitos,
+     Indexables y No indexables van sin cifra ni punto de color, el ámbito abre
+     todas las páginas y en lugar de «Ningún problema de este ámbito» dice que
+     no se analizó. El mismo criterio que la tarjeta «sin analizar todavía» del
+     Resumen. «Externas» sigue sin cifra con una API sin `/links/resumen`
+     (revisión 2.8).
+   - Con Search Console en el censo, las columnas de serie llevan los clics de
+     Google detrás de indexable y enlaces entrantes (`columnasPorDefecto`); sin
+     él no se añade una columna vacía.
+
+   Tests: `tests/test_movil_frontend.py` (la tarjeta y su entrada con la misma
+   cifra, un ámbito abre lo que cuenta, un censo sin analizar sin cifra en los
+   ámbitos, contadores en todas las entradas, columnas por defecto).

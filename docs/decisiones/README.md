@@ -16,7 +16,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157, 161, 168, 190 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165, 188, 191, 192 |
-| [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151, 189, 194, 196 |
+| [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151, 189, 194, 196, 199 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
 | [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 177, 178, 179, 180, 181, 182, 184, 185 |
 | [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34), su edición y prueba en vivo, y segmentos de negocio | 104, 125, 166 |
@@ -223,6 +223,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 194 | El alta de un cliente pide nombre y dominio, crea sola el perfil «Sitio principal» con la home (`perfil_principal`) y acaba en «Siguiente paso»: lanzar canario, lanzar censo o programar cada semana | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d194) |
 | 195 | La pestaña Enlaces filtra en el servidor (destino, origen, ancla, interno/externo, follow, posición, estado y código del destino) sobre `links.job_id` o el Parquet con el mismo resultado, agrupa por destino y pone primero los destinos rotos; un destino sin comprobar es «sin dato», no «bien», y un 403 de un tercero, «no concluyente» | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d195) |
 | 196 | La configuración se edita con el mismo formulario en el cliente, el perfil y el rastreo (cada campo dice de dónde viene; igual a lo heredado no se fija), con «Así rastreará» y avisos que solo afirman lo que se sabe (WAF con bloqueos anteriores); lo de la agencia (Slack, llaves de GSC, claves de modelos) va en Ajustes | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d196) |
+| 199 | Cada entrada de la barra del Explorador cuenta lo mismo que abre, con «0» cuando es cero (`total` de `/urls` con su filtro; en un ámbito, páginas con algún problema, no incidencias); «Páginas HTML» (internas 2xx, la cifra de la tarjeta) y «Todo el HTML» son dos entradas | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d199) |
 
 ## Anadir una decision
 

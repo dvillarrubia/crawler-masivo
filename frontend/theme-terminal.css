@@ -422,3 +422,8 @@ html[data-theme="terminal"] .topnav a{text-transform:uppercase;font-size:1.05rem
 html[data-theme="terminal"] .topnav a.active{background:transparent;color:var(--accent);text-shadow:var(--glow)}
 html[data-theme="terminal"] .menu{background:var(--bg-card);border-color:var(--border-hi)}
 html[data-theme="terminal"] .breadcrumbs{background:transparent}
+
+/* ----- Columna URL fija del Explorador (revision de UX del 25-oct, 3.4) ----- */
+/* Opaca para tapar lo que pasa por debajo, con el fondo y el hover del tema. */
+html[data-theme="terminal"] .exp-table.url-fija tbody tr td:first-of-type{background:var(--bg-card)}
+html[data-theme="terminal"] .exp-table.url-fija tbody tr:hover td:first-of-type{background:var(--bg-hover)}

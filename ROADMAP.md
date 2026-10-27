@@ -1127,6 +1127,19 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   en los dos temas (comprobado en Chromium). Las alertas de la pestaña no salen
   en verde, cancelado es gris y las gráficas de evolución pintan cada tramo
   según mejore o empeore, con un eje que no exagera. Solo frontend.
+- **Móvil y barra del Explorador** (revisión de UX del 25-oct, 3.2 y 3.4,
+  decisión 199; en local, sin desplegar): a 390 px la portada de clientes,
+  todos los rastreos y la evolución del cliente son tarjetas (estado, si ha
+  terminado, errores y alertas) con el patrón de Enlaces, y ninguna ruta
+  desborda (medido en las 21; `tests/test_movil_frontend.py`). En la pestaña
+  URLs la barra lateral pasa a un desplegable con sus cifras; en escritorio la
+  búsqueda va primero y ancha, «Agrupar ▾» es un solo botón, la URL queda fija
+  al desplazar, las columnas de serie empiezan por indexable, enlaces
+  entrantes y clics de Google (si hay Search Console), y todas las entradas de
+  la barra llevan su cifra («0» si es cero). «Páginas HTML» (la cifra de la
+  tarjeta) y «Todo el HTML» son dos entradas (V30); cada ámbito abre las
+  páginas que cuenta, y un censo sin analizar no dice «0» en lo que el análisis
+  no ha calculado. Solo frontend.
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 
