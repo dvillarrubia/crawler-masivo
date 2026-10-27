@@ -533,6 +533,13 @@ const ISSUE_INFO = {
     google: 'Puede tratarla como soft 404 si no ofrece nada más. No está afirmado: es la lista para revisar (y para la fase con modelo de #11).',
     arreglo: 'Revisar a mano. Si es un error, como «Soft 404»; si es una página útil, nada.',
   },
+  // Decision 190: lo dice la sonda, no las paginas; una fila por host con las
+  // plantillas que fallan (revision de UX del 25-oct, 2.11).
+  'soft_404_plantilla': {
+    que: 'Plantillas del sitio que responden 200 («todo bien») a una URL que no existe, en lugar de 404. Se comprueba pidiendo una dirección inventada en cada plantilla.',
+    google: 'Cualquier enlace viejo o mal escrito a esas secciones le llega como una página normal y vacía: la acaba marcando como «Soft 404» en Search Console y gasta rastreo en ella. Ninguna página del censo sale del índice por esto.',
+    arreglo: 'Pedir al cliente que esas plantillas (sus categorías, listados o fichas) devuelvan 404 a las URLs que no existen. Es un arreglo por plantilla, en el servidor o en el CMS, no página a página.',
+  },
   'low_word_count': {
     que: 'La página indexable tiene poco contenido propio (sin contar menú ni pie).',
     google: 'Contenido escaso: difícil que posicione y, en cantidad, rebaja la calidad del sitio.',
@@ -1020,6 +1027,19 @@ const TIPO_NO_RASTREABLE = {
   fragmento_como_ruta: 'ruta en el fragmento (#/)',
 };
 
+// `tipo` de enlace_sin_ancla (avisos_de_enlaces.py): por que no tiene texto.
+const TIPO_SIN_ANCLA = {
+  imagen: 'imagen sin texto alternativo',
+  texto_vacio: 'enlace sin texto',
+  mixto: 'imagen sin texto alternativo o enlace sin texto',
+};
+
+// `motivos` de oportunidad_posicion (oportunidades_gsc.py).
+const MOTIVO_DETALLE = {
+  pagerank_bajo: 'pocos enlaces internos',
+  profundidad: 'muy lejos de la portada',
+};
+
 // Cómo se leen los campos de `issues.details`. Lo que no está aquí se
 // enseña con su nombre: mejor un nombre técnico que esconder el dato.
 const DETALLE_LABEL = {
@@ -1059,8 +1079,18 @@ const DETALLE_LABEL = {
   directiva: 'directiva',
   max_snippet: 'máx. caracteres del fragmento',
   version: 'versión comparada',
+  // Revision de UX del 25-oct, 2.7: los que salian con su nombre interno
+  image_url: 'imagen', content_word_count: 'palabras de contenido', body_word_count: 'palabras con menú y pie',
+  count: 'cuántos', estado: 'estado', indexability_status: 'indexabilidad', inlinks: 'enlaces entrantes',
+  in_sitemap: 'en el sitemap', en_sitemap: 'en el sitemap', click_depth: 'clics desde la portada',
+  pagerank_score: 'PageRank interno', pagerank_p25: 'PageRank del cuartil bajo', profundidad_lejos: 'lejos a partir de',
+  clics_por_ganar: 'clics por ganar', clics_que_faltan: 'clics que faltan', ctr: 'CTR', ctr_esperado: 'CTR esperado',
+  ctr_top3_del_sitio: 'CTR del top 3 del sitio', sin_marcas: 'sin marcado', saltos_que_apuntan: 'redirecciones que llegan',
+  en_el_censo: 'en el censo', ficheros: 'sitemaps', lastmod_distinto: 'con lastmod distinto',
+  entradas_recortadas: 'lista recortada', autothrottle: 'con freno automático', vuelve_a_la_pagina: 'vuelve a la propia página',
+  intermedias: 'intermedias', consulta: 'búsqueda',
   origenes: 'páginas que la enlazan', con_ancla_generica: 'con ancla genérica', anclas: 'anclas',
-  cobertura: 'según Google', canonical_hoy: 'hoy', canonical_visto_por_google: 'visto por Google', canonical_declarado: 'declarado', canonical_de_google: 'de Google', inspeccionada: 'comprobada',
+  cobertura: 'según Google', canonical_hoy: 'declarada en el censo', canonical_visto_por_google: 'visto por Google', canonical_declarado: 'declarado', canonical_de_google: 'de Google', inspeccionada: 'inspeccionada el', en: 'en', ultimo_rastreo_google: 'última visita de Google',
   clics: 'clics', impresiones: 'impresiones', ventana_dias: 'días', clics_variantes: 'clics en variantes', clics_pagina: 'clics en la página', variantes: 'variantes',
   campos: 'campos',
   // Accesibilidad con axe (decisión 174)

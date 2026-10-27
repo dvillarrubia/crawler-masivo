@@ -1367,6 +1367,10 @@ ANCLADOS_POR_GRUPO = frozenset({
     "paginacion_sin_enlace",
     "paginacion_siguiente_rota",
     "paginacion_rel_incorrecto",
+    # Una fila por host con las plantillas que responden 200 a una URL que no
+    # existe (decision 190): se ancla en la URL menor de sus paginas, que
+    # cambia de un censo a otro.
+    "soft_404_plantilla",
 }) | TIPOS_AXE
 
 
@@ -2055,6 +2059,13 @@ def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
         "anterior_reanalizado": reanalizado,
         "anterior_sin_reanalizar": sin_reanalizar,
         "comparado_con": str(anterior.id),
+        # Con que version del analisis estaban los dos censos al compararse
+        # (decision 191). Si uno de los dos se vuelve a analizar despues (el
+        # siguiente censo de la serie re-analiza a este como referencia, 93),
+        # sus incidencias ya no son las que se compararon y la diferencia por
+        # tipo que ensena Problemas no se puede dar como del sitio.
+        "analisis_version": getattr(job, "analisis_version", None),
+        "analisis_version_anterior": getattr(anterior, "analisis_version", None),
         "nombre_anterior": anterior.name,
         "fecha_anterior": resumen_de_job(anterior)["fecha"],
         "comparable": r.get("comparable", False),

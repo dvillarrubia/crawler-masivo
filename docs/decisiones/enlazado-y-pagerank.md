@@ -1132,3 +1132,93 @@
      (la ficha a la que todo el sitio enlaza con `nofollow`) y cuesta una
      consulta sobre las candidatas de `not_reachable_from_home`, que suelen
      ser decenas.
+
+<a id="d195"></a>
+195. **La pestaña Enlaces filtra en el servidor, agrupa por destino y dice el
+   estado de cada destino sin afirmar de más** (revisión de UX del 25-oct,
+   2.8; V24 y V25). `GET /links` era la tabla de un censo entero (926.525
+   filas en Lopesan, «Página 1 de 18.531») sin un solo filtro y ordenada por el
+   hash del destino: no contestaba ni «quién enlaza a X» ni «qué enlaces
+   externos están rotos», y el estado de la sonda externa (decisión 123) lo
+   calculaba la API y no lo enseñaba nadie.
+   - **Filtros:** destino (contiene o exacto, o por su hash: «quién la
+     enlaza»), página de origen, texto del enlace o alt de su imagen,
+     interno/externo, follow, posición (`nav`, `header`, `content`,
+     `sidebar`, `footer` o sin posición) y estado y código del destino. Se
+     suman (Y). El texto se busca tal cual: `%` y `_` no son comodines.
+     «Es exactamente» busca la URL con y sin la barra final (`variantes_exactas`):
+     pegar `…/hotel-1` cuando el enlace lleva `…/hotel-1/` daba cero. Son dos
+     destinos distintos y cada fila sigue diciendo el suyo.
+   - **Estado del destino**, una sola regla para internos y externos
+     (`api/enlaces.py`, `grupo_interno` y `grupo_sonda`): si está en el censo,
+     su código (≥ 400 roto, 3xx redirige, 2xx bien; sin código —bloqueada,
+     sin respuesta— `sin_dato`); si no, la sonda: solo `roto` y
+     `redirige_a_error` (los `ROTOS`, los mismos del aviso de enlace externo
+     roto) son roto; un 403, un 429, un 5xx o un tiempo agotado son
+     `no_concluyente`; y lo que nadie comprobó es `sin_dato`, nunca «bien».
+     Un dominio muerto no se adelanta aquí: exige mirar el host entero
+     (`hosts_muertos`) y ya tiene su aviso.
+   - **Orden por defecto: los destinos rotos primero** (roto, redirige, no
+     concluyente, sin dato, bien) y, dentro de cada estado, juntos los enlaces
+     del mismo destino. La página se arma pidiendo a cada estado solo su tramo
+     (conteo por estado y `OFFSET` dentro del que toca). `orden=destino` es el
+     orden de antes. La respuesta trae `por_estado` (filas de cada estado con
+     los demás filtros: las cifras de los chips) y `filtros`, que es como el
+     frontend sabe que el servidor filtra.
+   - **Vista por destino** (`GET /links/destinos`): páginas distintas que lo
+     enlazan, enlaces, apariciones (`SUM(repeticiones)`, decisión 94),
+     nofollow, las tres anclas más usadas y su estado; los rotos primero y
+     luego los más enlazados. Los filtros de enlace se aplican antes de
+     agrupar; los de estado y código, al destino. Y `GET /links/resumen`:
+     enlaces y destinos internos y externos y los destinos por estado.
+   - **Las dos fuentes, el mismo resultado.** Sobre `links`, siempre
+     `links.job_id` (37, 41): el estado sale de subconsultas a `urls` y
+     `respuestas_sondeadas` filtradas por SU `job_id`, en un
+     `IN (… UNION ALL …)` o un `NOT EXISTS` al nivel de arriba del WHERE, que
+     Postgres hace semi-join o anti-join por hash; no se une `links` con
+     `urls`. Sobre el Parquet de un censo archivado (95, 150; en producción,
+     casi todos): los mismos filtros como expresión de pyarrow, con las listas
+     de hashes de cada estado; la vista por destino recorre el fichero por
+     lotes sin cargarlo (va ordenado por destino: las filas del último
+     destino de cada lote pasan al siguiente) y lo calculado se guarda en una
+     caché por fichero (16 entradas) para que pasar de página no lo recorra
+     otra vez. Un test exige lo mismo vivo y archivado filtro a filtro, con
+     lotes y grupos de filas de 3 y 4 para que todo cruce de uno a otro.
+     Un censo archivado cuyo fichero no está responde 409 con el motivo, no
+     una lista vacía.
+   - **Medido** en una base de pruebas con 1,85 M de enlaces (dos censos de
+     924.000, 5.500 URLs y 1.000 sondas cada uno): por `links`, la primera
+     página con los cinco conteos por estado 313 ms, «rotos» 202 ms, la
+     vista por destino 503 ms y el resumen 333 ms; en el plan, `Hash Join`
+     contra `urls` por `ix_urls_job_status` y `Hash Anti Join` para
+     `sin_dato`, sin ningún `SubPlan` por fila. Archivado en Parquet (4,7
+     MB): 293 ms la primera vez y 45 ms las siguientes, 140 ms la vista por
+     destino (36 ms con caché) y 11 ms el resumen.
+   - **Rastreos en curso (`links`), acotados.** Los conteos por estado y la
+     agregación por destino recorren todos los enlaces del job que pasan los
+     filtros, en la BD de producción mientras rastrea. Por eso: (1) los cinco
+     conteos por estado son UNA pasada (`contar_por_estado_sql`, un `CASE` con
+     los mismos predicados, agrupado); (2) lo calculado sobre `links` se guarda
+     `TTL_VIVO` = 30 s (pasar de página, volver a la pestaña o abrir el
+     Explorador no repite la agregación; las cifras de un rastreo en marcha van
+     como mucho 30 s por detrás); y (3) cada cálculo lleva `statement_timeout`
+     de `TOPE_VIVO_S` = 20 s: pasado, 503 con «demasiados enlaces para contarlos
+     ahora mientras rastrea; filtra… o vuelve cuando acabe», nunca una cifra a
+     medias ni una consulta de minutos compitiendo con el rastreo. Medido con
+     5 M de enlaces en un job (40.000 URLs, 3.000 sondas, 44.000 destinos):
+     cinco `COUNT` 12,2 s → una pasada 1,7 s; vista por destino 2,7 s.
+   - **«Externas 0»** (V25): la barra del Explorador cuenta URLs del censo, y
+     los externos no se rastrean. Sin ninguna en el censo, la pestaña cuenta
+     los destinos externos enlazados (del resumen) y lleva a Enlaces con
+     «Externos»; con una API sin `/links/resumen`, sin cifra, nunca un 0, y el
+     clic abre la pestaña de URLs externas de siempre: llevar a Enlaces con
+     `tipo=externo` a una API que no filtra enseñaba todos los enlaces bajo un
+     filtro que no se aplicaba.
+   - **Atrás vuelve a los destinos.** Pasar de un destino a «Quién la enlaza»
+     (o cambiar entre «Por destino» y «Todos los enlaces») solo cambia lo que
+     va tras el «?», que el router trata como un filtro y sustituye; esos dos
+     pasos piden su propia entrada en el historial (`_rutaNueva`).
+   - **Lo que no hace:** el CSV de enlaces sigue saliendo entero (sin los
+     filtros) y la vista por destino de un censo archivado gigante (Druni,
+     ~42 M filas) recorre el fichero entero la primera vez: unos segundos
+     estimados, sin medir con ese censo.

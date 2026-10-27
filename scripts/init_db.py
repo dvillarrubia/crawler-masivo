@@ -222,6 +222,11 @@ def migrar_clientes() -> None:
         "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS profile_id UUID",
         "ALTER TABLE programaciones ADD COLUMN IF NOT EXISTS cliente_id UUID",
         "ALTER TABLE programaciones ADD COLUMN IF NOT EXISTS profile_id UUID",
+        # Decision 193: si hereda del perfil en cada disparo. Falso en las que
+        # ya hay (copia fija), que siguen igual hasta migrarlas a mano con
+        # scripts/migrar_programaciones_a_perfiles.py. Tabla de pocas filas.
+        "ALTER TABLE programaciones ADD COLUMN IF NOT EXISTS hereda_perfil "
+        "BOOLEAN NOT NULL DEFAULT FALSE",
         # Mismos nombres que generaria create_all en una instalacion nueva, para
         # no acabar con el indice dos veces.
         "CREATE INDEX IF NOT EXISTS ix_jobs_cliente_id ON jobs (cliente_id)",

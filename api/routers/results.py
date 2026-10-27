@@ -36,6 +36,8 @@ from api.schemas import (
     IssueResponse,
     IssueTypeCount,
     JobStats,
+    DestinosResponse,
+    EnlacesResponse,
     LinkResponse,
     PaginatedResponse,
     Recommendation,
@@ -789,6 +791,13 @@ def _urls_filtradas(db: Session, job_id: uuid.UUID, qp, *, unir_meta: bool = Fal
     for clause in _filtros_a_medida(db, job_id, qp):
         q = q.filter(clause)
 
+    # Una URL exacta: la ficha de una pagina de la que solo se sabe la
+    # direccion (trafico entre censos). Con `search` («contiene») una URL corta
+    # como /es casa con miles y la exacta no salia entre las primeras
+    # (revision de UX del 25-oct, 3.3).
+    if qp.get("url_exacta"):
+        q = q.filter(Url.url == qp.get("url_exacta"))
+
     # Buscador de arriba: URL o titulo
     if search:
         pattern = f"%{search}%"
@@ -1192,7 +1201,10 @@ def export_vista(
                             fila.append(valor_csv_a_medida(xs.get(uid, {}).get(nombre), clase, regla, pos))
                         else:
                             v = COLUMNAS_VISTA[c][1](u)
-                            fila.append("" if v is None else v)
+                            # Una celda de texto de la pagina (titulo, url, anchor)
+                            # que empiece por `=`/`+`/`-`/`@` se escapa para que
+                            # la hoja de calculo no la ejecute (decision 207).
+                            fila.append("" if v is None else celda_segura(v))
                     w.writerow(fila)
                 yield buf.getvalue()
 
@@ -1259,7 +1271,10 @@ def export_enlaces_entrantes(
             w = csv.writer(buf)
             for h, origen, cod_origen, ancla, pos, follow, tipo in enlaces:
                 destino, cod = tramo[h]
-                w.writerow([destino, cod, origen, cod_origen, ancla or "", pos or "",
+                # Ancla, destino y origen vienen de la pagina: se escapan para que
+                # una hoja de calculo no los ejecute como formula (decision 207).
+                w.writerow([celda_segura(destino), cod, celda_segura(origen), cod_origen,
+                            celda_segura(ancla or ""), pos or "",
                             "si" if follow else "no", tipo or ""])
             yield buf.getvalue()
 
@@ -1721,13 +1736,76 @@ def _wordpress_de_url(db: Session, job_id: uuid.UUID, url_hash: str | None) -> l
             for t, i, st, m, c, u in filas]
 
 
+def _inspeccion_google(db: Session, job: Job, url_obj: Url) -> dict | None:
+    """La ultima inspeccion de Google de esta URL (decision 189, sobre la 144):
+    si la tiene indexada y que canonical elige. Es una muestra diaria y
+    rotatoria del CLIENTE, no del censo, y `gsc_inspecciones` guarda una fila
+    por URL que se reescribe en cada inspeccion: va con su fecha y la de la
+    ultima visita de Google. Solo se compara con la canonical que declaraba la
+    pagina EN ESTE CENSO si la inspeccion cae en la ventana de la 144 (30 dias
+    antes, 14 despues; `shared.gsc.ventana_de_inspeccion`, la misma de los
+    avisos): fuera de ella, comparar dos fechas distintas no dice nada y la
+    tarjeta contradiria a los avisos de la misma ficha. Las comparaciones, con
+    `shared.indexabilidad.misma_url`, la regla del analisis. Sin cliente, sin
+    inspeccion o sin la tabla: None. Best-effort: el `try` cubre la funcion
+    entera (decision 40)."""
+    try:
+        if not getattr(job, "cliente_id", None):
+            return None
+        from shared.gsc import clave_de_url, ventana_de_inspeccion
+        from shared.indexabilidad import misma_url
+        from shared.models import GscInspeccion as G
+
+        with db.begin_nested():
+            fila = (db.query(G)
+                    .filter(G.cliente_id == job.cliente_id, G.url_clave == clave_de_url(url_obj.url),
+                            G.error.is_(None))
+                    .order_by(G.fecha.desc()).first())
+        if fila is None:
+            return None
+        desde, hasta = ventana_de_inspeccion(job)
+        fecha = fila.fecha
+        if fecha is not None and fecha.tzinfo is None:
+            fecha = fecha.replace(tzinfo=timezone.utc)
+        en_ventana = fecha is not None and desde <= fecha <= hasta
+        meta = url_obj.html_meta
+        declarado = (meta.canonical_href or meta.canonical_header) if meta else None
+        declarado = declarado or url_obj.url
+
+        def _igual(a, b):
+            return misma_url(a, b) if en_ventana and a and b else None
+
+        return {
+            "fecha": fila.fecha.isoformat() if fila.fecha else None,
+            "ultimo_rastreo": fila.ultimo_rastreo.isoformat() if fila.ultimo_rastreo else None,
+            "verdict": fila.verdict,
+            "cobertura": fila.cobertura,
+            "canonical_google": fila.canonical_google,
+            "canonical_visto": fila.canonical_usuario,
+            # La inspeccion vale para este censo (ventana de la decision 144)
+            "en_ventana_del_censo": en_ventana,
+            # Google eligio la misma que vio declarada (None: falta alguna).
+            # No depende del censo: las dos son de la inspeccion.
+            "google_acepta": (misma_url(fila.canonical_google, fila.canonical_usuario)
+                              if fila.canonical_google and fila.canonical_usuario else None),
+            # Lo que Google vio declarado es lo que declaraba la pagina en este
+            # censo: si no, su eleccion es de una version anterior (144).
+            "visto_igual_que_censo": _igual(fila.canonical_usuario, declarado),
+            # La que elige Google es la que declaraba la pagina en este censo:
+            # con lo visto distinto, Google ya la sigue y no hay que esperar.
+            "google_igual_que_censo": _igual(fila.canonical_google, declarado),
+        }
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @router.get("/urls/{url_id}", response_model=UrlDetailResponse)
 def get_url_detail(
     job_id: uuid.UUID,
     url_id: int,
     db: Session = Depends(get_session),
 ):
-    _get_job_or_404(job_id, db)
+    job = _get_job_or_404(job_id, db)
 
     url_obj = (
         db.query(Url)
@@ -1796,6 +1874,7 @@ def get_url_detail(
     resp.robots_regla = _robots_regla(db, job_id, url_obj)
     resp.sitemaps = _sitemaps_de_url(db, job_id, url_obj.url_hash)
     resp.wordpress = _wordpress_de_url(db, job_id, url_obj.url_hash)
+    resp.google_inspeccion = _inspeccion_google(db, job, url_obj)
 
     out_items = []
     for link_obj, src_url in outlink_rows:
@@ -1907,6 +1986,10 @@ class _ResumenIssue(BaseModel):
     # primero.
     importancia: float | None = None
     prioridad: float | None = None
+    # Paginas distintas con este tipo en CUALQUIER gravedad (decision 202):
+    # la interfaz pinta una fila por tipo («39 aviso · 157 info») y sumar las
+    # paginas de cada gravedad contaria dos veces la que tenga las dos.
+    paginas_tipo: int | None = None
 
 
 @router.get("/issues/resumen", response_model=list[_ResumenIssue])
@@ -1981,6 +2064,13 @@ def resumen_issues(
         ))
     if segs or por_segmento:
         _anadir_segmentos(db, job_id, resultado, segs, por_segmento, segmentos_max)
+    # Una consulta agrupada por tipo (decision 202), con el mismo filtro.
+    por_tipo = dict(
+        db.query(Issue.issue_type, func.count(func.distinct(Issue.url_id)))
+        .filter(Issue.job_id == job_id, *filtro_seg)
+        .group_by(Issue.issue_type).all())
+    for r in resultado:
+        r.paginas_tipo = int(por_tipo.get(r.issue_type, 0))
     _anadir_prioridad(db, job_id, resultado, filtro_seg)
     if orden == "prioridad":
         resultado.sort(key=lambda r: (-(r.prioridad or 0), _ORDEN_GRAVEDAD.get(r.severity, 3),
@@ -2122,64 +2212,101 @@ def list_issue_urls(
 # ---------------------------------------------------------------------------
 # GET /api/jobs/{job_id}/links
 # ---------------------------------------------------------------------------
-@router.get("/links", response_model=PaginatedResponse[LinkResponse])
+def _filtros_enlaces(
+    destino: str | None = Query(None, description="La URL de destino contiene esto"),
+    exacto: bool = Query(False, description="`destino` es la URL exacta, no un trozo"),
+    destino_hash: str | None = Query(None, max_length=64,
+                                     description="El destino por su hash: quien enlaza a esa URL"),
+    origen: str | None = Query(None, description="La URL de la pagina que enlaza contiene esto"),
+    ancla: str | None = Query(None, description="El texto del enlace (o el alt de su imagen) contiene esto"),
+    tipo: Literal["interno", "externo"] | None = None,
+    follow: Literal["si", "no"] | None = None,
+    posicion: Literal["nav", "header", "content", "sidebar", "footer", "sin"] | None = None,
+    estado: Literal["roto", "redireccion", "no_concluyente", "sin_dato", "ok"] | None = Query(
+        None, description="Estado del destino (el del censo o el de la sonda de externos)"),
+    codigo: int | None = Query(None, ge=0, le=999, description="Codigo HTTP del destino"),
+):
+    from api.enlaces import FiltrosEnlaces
+
+    return FiltrosEnlaces(
+        destino=(destino or "").strip(), destino_exacto=bool(exacto and destino),
+        destino_hash=(destino_hash or "").strip(), origen=(origen or "").strip(),
+        ancla=(ancla or "").strip(), tipo=tipo or "", follow=follow or "",
+        posicion=posicion or "", estado=estado or "", codigo=codigo,
+    )
+
+
+@router.get("/links", response_model=EnlacesResponse)
 def list_links(
     job_id: uuid.UUID,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
+    orden: Literal["estado", "destino"] = Query(
+        "estado", description="estado: destinos rotos primero; destino: solo agrupados por destino"),
+    filtros=Depends(_filtros_enlaces),
     db: Session = Depends(get_session),
 ):
+    """Enlaces del censo, filtrados en el servidor (decision 195): destino,
+    origen, ancla, interno/externo, follow, posicion y estado del destino.
+    Siempre sobre `links.job_id`, o sobre el Parquet si el censo esta
+    archivado (decisiones 37, 95 y 150)."""
+    from api import enlaces as E
+
     job = _get_job_or_404(job_id, db)
-
-    if archivo_enlaces.esta_archivado(job):
-        items = []
-        filas = _como_links(db, job_id, archivo_enlaces.pagina(
-            job_id, (page - 1) * page_size, page_size))
-        sondas = _sondas_de(db, job_id, (getattr(r, "to_url_hash", None) for r in filas
-                                         if not getattr(r, "is_internal", True)))
-        for r in filas:
-            resp = LinkResponse.model_validate(r)
-            resp.from_url = r.from_url_rel.url
-            resp.estado_externo, resp.status_externo = sondas.get(
-                getattr(r, "to_url_hash", None), (None, None))
-            items.append(resp)
-        return _paginate(items=items, total=archivo_enlaces.contar(job_id),
-                         page=page, page_size=page_size)
-
-    q = db.query(Link).filter(Link.job_id == job_id)
-
-    total = q.count()
-
-    # Ordenado por destino y no por `id`: con `ORDER BY id` Postgres recorre
-    # la clave primaria de la tabla ENTERA (todos los rastreos, 187 M filas en
-    # local) filtrando por job, y la primera pagina de Lopesan tardaba 2 min
-    # 02 s — la pestana se quedaba en «0 enlaces · Cargando...». Con
-    # `(to_url_hash, id)` sirve el indice `ix_links_to_hash (job_id,
-    # to_url_hash)`: 0,3 ms. De paso, los enlaces a un mismo destino salen
-    # juntos, que es como se leen.
-    rows = (
-        q.options(joinedload(Link.from_url_rel))
-        .order_by(Link.to_url_hash, Link.id)
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
-    )
-
-    sondas = _sondas_de(db, job_id, (r.to_url_hash for r in rows if not r.is_internal))
+    r = E.listar_enlaces(db, job, filtros, orden, page, page_size)
+    filas = r["filas"]
+    if r["archivado"]:
+        filas = _como_links(db, job_id, filas)
+    destinos = E.destinos_de(db, job_id, (getattr(x, "to_url_hash", None) for x in filas))
     items = []
-    for r in rows:
-        resp = LinkResponse.model_validate(r)
-        if r.from_url_rel:
-            resp.from_url = r.from_url_rel.url
-        resp.estado_externo, resp.status_externo = sondas.get(r.to_url_hash, (None, None))
+    for x in filas:
+        resp = LinkResponse.model_validate(x)
+        if x.from_url_rel is not None:
+            resp.from_url = x.from_url_rel.url
+        d = destinos.get(x.to_url_hash) or E.Destino("sin_dato")
+        resp.estado_destino, resp.status_destino = d.grupo, d.status
+        # Los dos campos de la sonda (decision 123), como antes: solo externos.
+        if not x.is_internal and d.veredicto is not None:
+            resp.estado_externo, resp.status_externo = d.veredicto, d.status
         items.append(resp)
+    out = _paginate(items=items, total=r["total"], page=page, page_size=page_size)
+    out.update(orden=orden, por_estado=r["por_estado"], filtros=filtros.activos(),
+               archivado=r["archivado"])
+    return out
 
-    return _paginate(
-        items=items,
-        total=total,
-        page=page,
-        page_size=page_size,
-    )
+
+@router.get("/links/destinos", response_model=DestinosResponse)
+def list_link_destinations(
+    job_id: uuid.UUID,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    orden: Literal["estado", "paginas", "url"] = Query(
+        "estado", description="estado: rotos primero y luego los mas enlazados; paginas; url"),
+    filtros=Depends(_filtros_enlaces),
+    db: Session = Depends(get_session),
+):
+    """Enlaces agrupados por URL de destino (decision 195): cuantas paginas la
+    enlazan, cuantos enlaces y apariciones, sus anclas mas usadas y su estado.
+    Los filtros de enlace (origen, ancla, posicion...) se aplican antes de
+    agrupar; los de estado y codigo, al destino."""
+    from api import enlaces as E
+
+    job = _get_job_or_404(job_id, db)
+    r = E.listar_destinos(db, job, filtros, orden, page, page_size)
+    out = _paginate(items=r["items"], total=r["total"], page=page, page_size=page_size)
+    out.update(orden=orden, por_estado=r["por_estado"], filtros=filtros.activos(),
+               archivado=r["archivado"])
+    return out
+
+
+@router.get("/links/resumen")
+def links_summary(job_id: uuid.UUID, db: Session = Depends(get_session)):
+    """Enlaces y destinos internos y externos del censo, y los destinos por
+    estado (decision 195). Lo que la barra del Explorador pone en «Externas»."""
+    from api import enlaces as E
+
+    job = _get_job_or_404(job_id, db)
+    return E.resumen(db, job)
 
 
 # ---------------------------------------------------------------------------
@@ -2555,9 +2682,16 @@ CSV_COLUMNS = [
 
 
 def _val(v) -> str:
-    """Format a value for CSV output."""
+    """Format a value for CSV output.
+
+    Una cadena sacada de la pagina rastreada (titulo, meta, anchor, contenido)
+    que empiece por un caracter de formula se escapa, para que Excel o Sheets
+    no la ejecuten al abrir el CSV (decision 207); los numeros no se tocan.
+    """
     if v is None:
         return ""
+    if isinstance(v, str) and v.startswith(_FORMULA):
+        return "'" + v
     return str(v)
 
 
@@ -3693,7 +3827,7 @@ def _calc_structured_data(job_id: uuid.UUID, db: Session) -> CategoryInsight:
         ))
 
     return CategoryInsight(
-        key="structured_data", name="Datos Estructurados", icon="📊",
+        key="structured_data", name="Datos estructurados", icon="📊",
         score=_clamp_score(score),
         metrics={
             "total_html": total_html, "pages_with_sd": pages_with_sd,
@@ -3720,7 +3854,7 @@ def _calc_i18n(job_id: uuid.UUID, db: Session) -> CategoryInsight:
         ).first() is not None
         if not hay_avisos:
             return CategoryInsight(
-                key="i18n", name="Internacionalizacion", icon="🌐", score=100,
+                key="i18n", name="Internacionalización", icon="🌐", score=100,
                 metrics={"total_hreflang": 0, "languages": [], "pct_return_ok": 0, "pct_lang_valid": 0},
                 recommendations=[],
             )
@@ -3844,7 +3978,7 @@ def _calc_i18n(job_id: uuid.UUID, db: Session) -> CategoryInsight:
         ))
 
     return CategoryInsight(
-        key="i18n", name="Internacionalizacion", icon="🌐",
+        key="i18n", name="Internacionalización", icon="🌐",
         score=_clamp_score(score),
         metrics={
             "total_hreflang": total_hreflang, "languages": languages,

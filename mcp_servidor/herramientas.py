@@ -71,7 +71,7 @@ def _cliente_id(api: Api, cliente: str) -> str:
 
 
 def clientes(api: Api) -> list[dict]:
-    """Cada cliente con su último censo, tendencia de errores y alertas abiertas."""
+    """Cada cliente con su último censo, tendencia de páginas con error y alertas abiertas."""
     panel = api.get("/clients/panel")
     salida = []
     for c in panel["clientes"]:
@@ -80,8 +80,12 @@ def clientes(api: Api) -> list[dict]:
             "cliente": c["nombre"], "slug": c["slug"], "rastreos": c.get("n_rastreos"),
             "ultimo_censo": {"id": u.get("id"), "nombre": u.get("name"), "fecha": u.get("created_at"),
                              "paginas_html": u.get("paginas_html"), "indexables": u.get("indexables"),
-                             "errores": u.get("errores"), "alertas": u.get("alertas")} if u else None,
-            "tendencia_errores": (c.get("evolucion") or {}).get("tendencia"),
+                             "errores": u.get("errores"),
+                             "paginas_con_error": u.get("paginas_con_error"),
+                             "alertas": u.get("alertas")} if u else None,
+            # Desde la decision 202 la tendencia del panel es de paginas con
+            # error (`metrica` lo dice), no de incidencias.
+            "tendencia_paginas_con_error": (c.get("evolucion") or {}).get("tendencia"),
             "alertas_abiertas": c.get("incidentes_vivos", 0),
         })
     return salida

@@ -13,8 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from shared.perfiles import (
     IMPERSONATE_POR_DEFECTO,
     PERFILES_IMPERSONATE,
-    huella_para_ua,
-    ua_para_huella,
+    claves_deducidas,
 )
 from shared.config import (
     DEFAULT_CONCURRENT_REQUESTS,
@@ -544,15 +543,13 @@ class JobConfig(BaseModel):
         avisa en el log. Por `__dict__`, como `_lista_sin_sitemap`, para que la
         clave deducida no cuente como fijada al fusionar capas.
         """
-        fijadas = self.model_fields_set
-        if "impersonate" not in fijadas and "user_agent" in fijadas:
-            huella = huella_para_ua(self.user_agent)
-            if huella:
-                self.__dict__["impersonate"] = huella
-        elif "impersonate" in fijadas and "user_agent" not in fijadas:
-            ua = ua_para_huella(self.impersonate)
-            if ua:
-                self.__dict__["user_agent"] = ua
+        # La regla vive en `shared.perfiles.claves_deducidas`: el worker la
+        # aplica igual al disparar una programacion colgada de un perfil.
+        deducidas = claves_deducidas(self.model_fields_set, {
+            "user_agent": self.user_agent, "impersonate": self.impersonate})
+        for clave in ("user_agent", "impersonate"):
+            if clave in deducidas:
+                self.__dict__[clave] = deducidas[clave]
         return self
 
     @field_validator("topes_por_carpeta")
@@ -577,8 +574,10 @@ class JobConfig(BaseModel):
         pisaria el `use_sitemap: true` que fijase su perfil. Asi se decide otra
         vez sobre la config FUSIONADA (`resolver_config`).
         """
-        if self.max_depth == 0 and "use_sitemap" not in self.model_fields_set:
-            self.__dict__["use_sitemap"] = False
+        # Misma regla que el worker: `shared.perfiles.claves_deducidas`.
+        deducidas = claves_deducidas(self.model_fields_set, {"max_depth": self.max_depth})
+        if "use_sitemap" in deducidas:
+            self.__dict__["use_sitemap"] = deducidas["use_sitemap"]
         return self
 
     @model_validator(mode="after")
@@ -647,16 +646,27 @@ def _validar_zona(v: str | None) -> str | None:
 
 
 class ProgramacionCreate(BaseModel):
-    """Un rastreo que se repite. Mismo cuerpo que un job, mas el cuando."""
+    """Un rastreo que se repite. Dos formas (decision 193):
 
-    nombre: str = Field(..., min_length=1, max_length=512)
-    seeds: list[str] = Field(..., min_length=1)
+    - **Colgada de un perfil** (la de la interfaz): `profile_id` y, si acaso,
+      `config_propia` (solo lo que cambia esta programacion, p. ej. un tope de
+      URLs). Sin semillas: en cada disparo usa las del perfil y la config del
+      cliente y del perfil de ESE momento.
+    - **Copia fija** (la de siempre): `seeds` y `config` completas. Se sigue
+      aceptando para no romper a quien ya llama asi (scripts, MCP con semillas
+      propias), pero no hereda los cambios del cliente ni del perfil.
+
+    `hereda_perfil` sin mandar = colgada si hay perfil y no hay semillas.
+    """
+
+    nombre: str | None = Field(default=None, min_length=1, max_length=512)
+    seeds: list[str] = Field(default_factory=list)
     client_id: str | None = Field(default=None, max_length=128)
-    # De quien es (#36). Los jobs que dispare salen colgados de este cliente
-    # y perfil; la configuracion sigue siendo la suya propia.
     cliente_id: uuid.UUID | None = None
     profile_id: uuid.UUID | None = None
+    hereda_perfil: bool | None = None
     config: JobConfig = Field(default_factory=JobConfig)
+    config_propia: dict[str, Any] = Field(default_factory=dict)
     # Expresion de cinco campos: `minuto hora dia-del-mes mes dia-de-semana`.
     cron: str = Field(..., min_length=1, max_length=128)
     zona_horaria: str | None = Field(default=None, max_length=64)
@@ -674,8 +684,36 @@ class ProgramacionCreate(BaseModel):
 
     @field_validator("seeds", mode="before")
     @classmethod
-    def validar_semillas(cls, v: list[str]) -> list[str]:
-        return JobCreate.validate_seeds(v)
+    def validar_semillas(cls, v: list[str] | None) -> list[str]:
+        return _limpiar_semillas(v, obligatorias=False)
+
+    @field_validator("config_propia")
+    @classmethod
+    def validar_config_propia(cls, v: dict) -> dict:
+        return validar_config_parcial(v)
+
+    @model_validator(mode="after")
+    def _forma(self):
+        if self.hereda_perfil is None:
+            self.hereda_perfil = bool(self.profile_id) and not self.seeds
+        if self.hereda_perfil:
+            if not self.profile_id:
+                raise ValueError(
+                    "Una programacion que hereda del perfil necesita `profile_id`")
+            if self.seeds:
+                raise ValueError(
+                    "Una programacion colgada de un perfil usa las semillas del "
+                    "perfil: no mandes `seeds` (o manda hereda_perfil=false)")
+        else:
+            if not self.seeds:
+                raise ValueError("At least one valid seed URL is required")
+            if not self.nombre:
+                raise ValueError("Falta el nombre de la programacion")
+            if self.config_propia:
+                raise ValueError(
+                    "`config_propia` es solo para las que heredan del perfil; "
+                    "una copia fija lleva su `config` entera")
+        return self
 
 
 class ProgramacionUpdate(BaseModel):
@@ -685,6 +723,8 @@ class ProgramacionUpdate(BaseModel):
     cron: str | None = Field(default=None, min_length=1, max_length=128)
     zona_horaria: str | None = Field(default=None, max_length=64)
     activa: bool | None = None
+    # Solo en las colgadas de un perfil (decision 193).
+    config_propia: dict[str, Any] | None = None
 
     @field_validator("cron")
     @classmethod
@@ -696,6 +736,17 @@ class ProgramacionUpdate(BaseModel):
     def validar_zona_horaria(cls, v: str | None) -> str | None:
         return _validar_zona(v)
 
+    @field_validator("config_propia")
+    @classmethod
+    def validar_config_propia(cls, v: dict | None) -> dict | None:
+        return None if v is None else validar_config_parcial(v)
+
+
+class ProgramacionRepetida(BaseModel):
+    id: uuid.UUID
+    nombre: str
+    motivo: str  # «mismo perfil» | «mismas semillas»
+
 
 class ProgramacionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -705,7 +756,14 @@ class ProgramacionResponse(BaseModel):
     client_id: str | None = None
     cliente_id: uuid.UUID | None = None
     profile_id: uuid.UUID | None = None
+    # Si hereda del perfil en cada disparo (decision 193). Falso = copia fija.
+    hereda_perfil: bool = False
+    # Las semillas que lanzaria hoy: las del perfil si hereda. Con
+    # `?resumen=true`, solo las tres primeras (un censo sembrado desde el
+    # sitemap son 3.040: 233 kB por programacion).
     seeds: list[str]
+    n_semillas: int = 0
+    # Si hereda: solo lo propio de la programacion. Si es copia fija: entera.
     config: dict[str, Any] | None = None
     cron: str
     zona_horaria: str | None = None
@@ -715,6 +773,11 @@ class ProgramacionResponse(BaseModel):
     ultimo_job_id: uuid.UUID | None = None
     ultimo_motivo: str | None = None
     created_at: datetime | None = None
+    cliente_nombre: str | None = None
+    perfil_nombre: str | None = None
+    # Otras activas que repiten trabajo de esta (mismo perfil o mismas
+    # semillas). Vacia si esta no esta activa.
+    repetida_con: list[ProgramacionRepetida] = Field(default_factory=list)
 
 
 def _limpiar_semillas(v: list[str] | None, *, obligatorias: bool = True) -> list[str]:
@@ -752,11 +815,22 @@ class CensoDeSerie(BaseModel):
     urls: int = 0
     paginas_html: int = 0
     indexables: int = 0
-    errores: int = 0
+    errores: int = 0                    # incidencias de gravedad error (no paginas)
     avisos: int = 0
+    # Paginas distintas con algun error: la cifra de la tarjeta del censo y del
+    # Estado del cliente. La portada y la serie decian «Errores 85» (las
+    # incidencias) junto a «72 paginas con error» (decision 202).
+    paginas_con_error: int = 0
+    # El tope de URLs si el rastreo se paro al llegar a el: la portada dice
+    # «topado en N URLs» (revision de UX del 25-oct, 1.6; decision 203).
+    topado: int | None = None
     alertas: int | None = None          # de la comparacion automatica; None = no se comparo
     alertas_criticas: int | None = None
     comparado_con: uuid.UUID | None = None
+    # La fecha del censo con el que se comparo (ISO, de la comparacion): la
+    # ficha del cliente dice «frente al 19 oct» aunque ese censo no este en la
+    # serie (de otro cliente o fuera del limite). Revision de UX del 25-oct, 2.3.
+    fecha_anterior: str | None = None
 
 
 class PanelCliente(BaseModel):
@@ -815,6 +889,11 @@ class JobCreate(BaseModel):
     client_id: str | None = Field(default=None, max_length=128)
     cliente_id: uuid.UUID | None = None
     profile_id: uuid.UUID | None = None
+    # El tipo que elige quien lanza (revision de UX del 25-oct, 1.6; decision
+    # 203): sin marcar, un rastreo de prueba contaba como censo en la portada
+    # salvo que el nombre lo dijera. None = como antes (lo deduce del nombre):
+    # los scripts y las programaciones no lo mandan.
+    tipo: Literal["censo", "canario", "prueba"] | None = None
     config: JobConfig = Field(default_factory=JobConfig)
 
     @field_validator("seeds", mode="before")
@@ -1120,6 +1199,10 @@ class UrlResponse(BaseModel):
 class UrlDetailResponse(UrlResponse):
     """Full URL detail with all related data for the detail view."""
 
+    # El de `links.to_url_hash`: «quien la enlaza» en la pestaña Enlaces
+    # (decision 195), por el indice y sin depender de como se escribio la URL.
+    url_hash: str | None = None
+
     headings: list[HeadingResponse] = []
     resources: list[ResourceResponse] = []
     hreflangs: list[HreflangResponse] = []
@@ -1146,6 +1229,11 @@ class UrlDetailResponse(UrlResponse):
     # otro esquema. Vacio = el adaptador no la leyo (no es WordPress, no se
     # analizo, o no es una entidad que la REST API liste).
     wordpress: list[dict[str, Any]] = []
+    # La ultima inspeccion de Google de la URL (decision 189): fecha, ultima
+    # visita, cobertura y canonical que elige Google frente al que vio
+    # declarado. None = Search Console no la ha inspeccionado (es una muestra
+    # diaria del cliente) o el censo no tiene cliente.
+    google_inspeccion: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -1190,6 +1278,59 @@ class LinkResponse(BaseModel):
     # 123): veredicto de `shared/sondas.py` y codigo. NULL = no se sondeo.
     estado_externo: str | None = None
     status_externo: int | None = None
+    # Estado del destino, interno o externo (decision 195): roto,
+    # redireccion, no_concluyente, sin_dato u ok; y su codigo (el del censo o
+    # el de la sonda). NULL en las respuestas que no lo calculan.
+    estado_destino: str | None = None
+    status_destino: int | None = None
+
+
+class EnlacesResponse(BaseModel):
+    """`GET /links` con filtros (decision 195). `por_estado`: filas de cada
+    estado del destino con los demas filtros, solo con `orden=estado`;
+    `filtros`: los que se han aplicado, para que quien llama sepa que el
+    servidor filtra (una API anterior devolvia la lista entera)."""
+    items: list[LinkResponse]
+    total: int
+    page: int
+    page_size: int
+    pages: int
+    orden: str
+    por_estado: dict[str, int] | None = None
+    filtros: dict[str, Any] = {}
+    archivado: bool = False
+
+
+class AnclaContada(BaseModel):
+    texto: str
+    veces: int
+
+
+class DestinoEnlazadoResponse(BaseModel):
+    to_url: str | None = None
+    to_url_hash: str
+    is_internal: bool
+    paginas: int          # paginas distintas que lo enlazan
+    enlaces: int          # filas: enlaces distintos (decision 94)
+    apariciones: int      # SUM(repeticiones)
+    nofollow: int         # enlaces nofollow
+    anclas: list[AnclaContada] = []
+    estado_destino: str
+    status_destino: int | None = None
+    veredicto_sonda: str | None = None
+    url_id: int | None = None
+
+
+class DestinosResponse(BaseModel):
+    items: list[DestinoEnlazadoResponse]
+    total: int
+    page: int
+    page_size: int
+    pages: int
+    orden: str
+    por_estado: dict[str, int]
+    filtros: dict[str, Any] = {}
+    archivado: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -1576,6 +1717,9 @@ class ClientCreate(_ClienteCampos):
     integraciones: list[Integracion] = Field(default_factory=list)
     decisiones: DecisionesCliente | None = None
     notas: str | None = None
+    # Alta guiada (decision 194): crea tambien el perfil «Sitio principal» con
+    # la home del primer dominio como semilla. Sin dominios no hace nada.
+    perfil_principal: bool = False
 
 
 class ClientUpdate(_ClienteCampos):
@@ -1628,6 +1772,11 @@ class ProfileCreate(_PerfilCampos):
     config: dict[str, Any] = Field(default_factory=dict)
     notas: str | None = None
     activo: bool = True
+    # «Programar» desde un rastreo (revision de UX del 25-oct, 2.2): el perfil
+    # nuevo guarda lo que la config de ese rastreo tiene de distinto respecto
+    # al cliente (sus exclusiones, su profundidad...). `config`, si viene, va
+    # encima.
+    desde_job_id: uuid.UUID | None = None
 
 
 class ProfileUpdate(_PerfilCampos):
@@ -1653,13 +1802,29 @@ class ProfileResponse(BaseModel):
     last_job_id: uuid.UUID | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    # Lo que no se pudo copiar al crear el perfil desde un rastreo.
+    avisos: list[str] = Field(default_factory=list)
+
+
+class AvisoDeConfig(BaseModel):
+    nivel: Literal["peligro", "aviso", "info"]
+    texto: str
+    # La clave de la configuracion a la que se refiere, si es una.
+    campo: str | None = None
+
+
+class ProgramacionPropia(BaseModel):
+    id: uuid.UUID
+    nombre: str
+    claves: list[str] = Field(default_factory=list)
 
 
 class ConfigResueltaResponse(BaseModel):
     """La configuracion que tendria un job lanzado ahora desde este cliente
     (y perfil): para precargar el modal con lo heredado."""
 
-    cliente_id: uuid.UUID
+    # None en un borrador sin cliente (decision 196).
+    cliente_id: uuid.UUID | None = None
     profile_id: uuid.UUID | None = None
     seeds: list[str] = Field(default_factory=list)
     # Completa: lo que tendria el job (defaults incluidos).
@@ -1668,6 +1833,33 @@ class ConfigResueltaResponse(BaseModel):
     # el modal: con la completa, un default de la API (el UA `SEOCrawler/1.0`)
     # pisaria el del formulario sin que nadie lo hubiera elegido.
     config_heredada: dict[str, Any] = Field(default_factory=dict)
+    # Decision 196 (revision de UX del 25-oct, 2.4): de donde sale cada clave
+    # de `config` («cliente», «perfil» o el nivel del borrador); lo que no
+    # sale es el valor de serie, que va entero en `serie`. Con `avisos`, el
+    # bloque «Así rastreará» de la interfaz.
+    origen: dict[str, str] = Field(default_factory=dict)
+    # Cabeceras, cookies, topes y reglas con nombre se fusionan clave a clave:
+    # aqui la capa de cada clave (`{"http.custom_headers": {"X-A": "cliente"}}`).
+    origen_por_clave: dict[str, dict[str, str]] = Field(default_factory=dict)
+    serie: dict[str, Any] = Field(default_factory=dict)
+    avisos: list[AvisoDeConfig] = Field(default_factory=list)
+    # Las programaciones del perfil que cambian algo por su cuenta
+    # (`config_propia`, decision 193): el proximo disparo lleva ademas eso.
+    programaciones: list[ProgramacionPropia] = Field(default_factory=list)
+
+
+class ConfigBorrador(BaseModel):
+    """`POST /api/clients/config-resuelta` (decision 196): la configuracion
+    con la que saldria un rastreo si `config` fuera la del `nivel` indicado,
+    sin guardar nada. Es lo que pinta el bloque «Así rastreará» mientras se
+    edita el formulario del cliente, del perfil o del rastreo."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cliente_id: uuid.UUID | None = None
+    profile_id: uuid.UUID | None = None
+    nivel: Literal["cliente", "perfil", "rastreo"] = "rastreo"
+    config: dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -1704,12 +1896,28 @@ class CleaningRule(BaseModel):
     value: str = Field(..., min_length=1, max_length=2000)
 
 
+class CleaningLineaRepetida(BaseModel):
+    texto: str
+    paginas: int
+
+
 class CleaningGroupInfo(BaseModel):
     group_key: str
     pages: int
     cleaned_pages: int
     avg_content_length: int
     sample_urls: list[str]
+    # Texto repetido en una muestra del grupo (decision 198). None si no se
+    # midio (grupo de menos de 3 paginas o fuera de los mas grandes).
+    repetido_parte: float | None = None
+    repetido_chars_medio: int | None = None
+    repetido_muestra: int | None = None
+    lineas_repetidas: list[CleaningLineaRepetida] = []
+    # Cuantas lineas repetidas hay en total y que parte del texto quitan las
+    # de `lineas_repetidas` (las de mas peso, con tope): la cifra del grupo es
+    # de todas y «Quitar todas estas lineas» solo de las que se mandan.
+    lineas_repetidas_total: int | None = None
+    repetido_parte_lineas: float | None = None
 
 
 class CleaningPreviewRequest(BaseModel):

@@ -1474,3 +1474,62 @@
      (`tests/test_wordpress_frontend.py`). No hay todavia un censo WordPress
      analizado en produccion (el unico job con `adapters` es de un sitio que
      no lo es): la tarjeta no se ha visto con datos reales de un cliente.
+
+<a id="d190"></a>
+190. **Una plantilla que responde 200 a una URL que no existe es UN aviso
+   agrupado por host (`soft_404_plantilla`), aunque ninguna página del censo
+   sea la página de error** (revisión de UX del 25-oct, 2.11; V17).
+
+   **Problema.** La sonda de la decisión 105 pide, por host y por plantilla de
+   ruta, una URL inventada. Si responde 200, el sitio tiene soft 404 de serie
+   en esa plantilla; pero el análisis solo emitía incidencias en PÁGINAS que
+   llevaban la huella de la sonda. En Lopesan (censo del 21-oct, analizado el
+   24-oct) las 7 sondas de las categorías del blog (`/blog/category/:slug`,
+   `/blog/de/category/…`, `/blog/en/category/…`) respondían 200 y ninguna página
+   del censo casaba con su huella: el Resumen decía «Soft 404: 0 páginas» en
+   verde y Problemas no decía nada. Lo que hay que pedir al cliente —que sus
+   categorías devuelvan 404 a lo que no existe— no aparecía en ningún sitio.
+
+   **Decisión.** `analysis/soft404.py` emite `soft_404_plantilla`, `warning`,
+   UNA fila por host (decisiones 53 y 64: es un arreglo de servidor o de CMS,
+   uno por plantilla), con `plantillas` (plantilla, URL pedida, código y cuántas
+   páginas del censo la usan), `plantillas_afectadas`, `paginas_afectadas` (las
+   páginas 200 HTML del censo con esas plantillas; con la raíz respondiendo 200,
+   todas las del host), `raiz` y `paginas_ejemplo`. Anclada en la URL menor de
+   esas páginas (88) con `group_key` por host, y añadida a `ANCLADOS_POR_GRUPO`
+   de la comparación: la URL de anclaje cambia de un censo a otro y el hallazgo
+   es el mismo.
+   - **Solo lo que se puede afirmar** (67): cuenta una sonda con código 2xx que
+     no redirige, sin error, que no es un muro (clase de respuesta de la 103 o
+     título de bloqueo de la 62). Una que redirige no dice qué respondió el
+     destino.
+   - **`warning` y no `error`**: ninguna página del censo sale del índice por
+     esto; lo que pasa es que cualquier enlace viejo o mal escrito a esas
+     plantillas es para Google una página 200 vacía («Soft 404» en Search
+     Console) y rastreo gastado.
+   - Convive con `soft_404` y `soft_404_candidato`: aquellos son páginas del
+     censo que SON la página de error; este es cómo responde el servidor a lo
+     que no conoce. El resumen de `jobs.soft404` lleva
+     `plantillas_responden_200` y `sondas_responden_200` (las URLs pedidas que
+     cuentan). El Resumen y la lista desplegada en Problemas pintan esa lista,
+     no las sondas con 2xx a secas: un muro de WAF servido con 200 saldría como
+     «plantilla que hay que corregir» justo donde el análisis se niega a
+     afirmarlo. Para los censos analizados antes, `resumenSoft404` repite el
+     mismo filtro (sin redirección ni error, 2xx, clase de respuesta válida,
+     sin título de bloqueo, una por host y plantilla).
+   - El tipo va también en `TIPOS_ANCLADOS_POR_GRUPO` de `analysis/soft404.py`,
+     que el test de la r9 (`test_analyzer_paginacion_db.py`) compara con
+     `ANCLADOS_POR_GRUPO`.
+   - **Cuándo se calcula**: en el análisis (la sonda se hace durante el
+     rastreo y se guarda en `jobs.soft404.sondas`). Los censos ya analizados
+     no lo tienen hasta volver a analizarse; el Resumen lo dice igualmente
+     desde las sondas («7 plantillas responden 200…») y deja de pintar «0
+     páginas» en verde.
+   - En Problemas la fila cuenta **plantillas** (de `plantillas_responden_200`),
+     no «1 página», y despliega la lista de plantillas con la URL pedida. Con
+     una sección o ruta elegida no se da esa cifra (es del sitio entero, no de
+     la sección): la fila dice que el hallazgo no se reparte.
+
+   Tests: `tests/test_soft404_plantilla.py` (el caso Lopesan, lo que no se
+   afirma, la raíz, una fila por host y que casa entre censos con otra URL de
+   anclaje), ejecutando el análisis contra SQLite.

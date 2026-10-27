@@ -161,6 +161,25 @@ def test_la_serie_cuenta_filas_y_va_de_nuevo_a_viejo(entorno):
     assert serie[1]["tipo"] == "canario"
 
 
+def test_la_serie_lleva_la_fecha_de_su_referencia(entorno):
+    """Revision de UX del 25-oct, 2.3: la ficha del cliente dice «frente al
+    19 oct» aunque el censo con el que se comparo no este en la serie."""
+    api, Sesion, acme, ids = entorno
+    otro = uuid.uuid4()
+    s = Sesion()
+    s.get(Job, ids["nuevo"]).comparacion = {
+        "comparable": True, "comparado_con": str(otro), "alertas": [],
+        "fecha_anterior": "2026-10-19T09:00:48+00:00"}
+    s.commit()
+    s.close()
+    serie = api.get(f"/api/clients/{acme}/serie").json()
+    nuevo = next(x for x in serie if x["id"] == str(ids["nuevo"]))
+    assert nuevo["comparado_con"] == str(otro) and nuevo["alertas"] == 0
+    assert nuevo["fecha_anterior"] == "2026-10-19T09:00:48+00:00"
+    # Sin comparacion, sin fecha.
+    assert next(x for x in serie if x["id"] == str(ids["viejo"]))["fecha_anterior"] is None
+
+
 def test_el_panel_compara_censo_con_censo(entorno):
     api, _, acme, ids = entorno
     d = api.get("/api/clients/panel").json()

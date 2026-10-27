@@ -371,7 +371,20 @@ SQLite y Postgres, que no lee `links` capturando el SQL, que lo escriben
 `run_analysis` y el worker sin lanzar nunca, la serie con sus motivos y cortes
 de version, y el relleno simulado que no deja nada), `test_evolucion_api.py`
 (los endpoints, el panel y el backup; trabajo de la API) y
-`test_evolucion_frontend.py` (graficas y tendencia en Chromium).
+`test_evolucion_frontend.py` (graficas y tendencia en Chromium, con el
+color de cada tramo y el rango minimo del eje, UX 3.1),
+`test_contraste_frontend.py` (la escala de color pasa 4,5:1 en el tema claro
+y en el terminal, midiendo en Chromium el color que resulta; UX 3.1),
+`test_ficha_cliente_frontend.py` (rutas de las pestanas del cliente y la
+referencia de «frente al anterior», en Chromium) y `test_ia_frontend.py`
+(pestana IA, UX 2.9: el aviso de consulta repetida, la linea «Revisado con IA»
+de Problemas que cuenta solo las paginas del problema y calla sin listas
+completas, los textos de la clave; en Chromium con la API simulada, y las
+parejas pregunta-problema contra el catalogo y el analizador).
+`test_comparar_frontend.py` (Comparar sin mapeo, lo guardado al instante y el
+desplegable por tipo, UX 2.13/V21/V22) y `test_migracion_frontend.py`
+(«Validar migración», decision 192: la vista previa de cada caso comun contra
+`shared.comparacion._aplicar_rutas`, en Chromium).
 Run with
 `pip install -r tests/requirements.txt && pytest`.
 `scripts/prueba_espera_render.py` mide si la espera de render pierde el
@@ -444,3 +457,55 @@ agrupada; ninguna lectura mas de `links`; y que la regla del `rel` en SQL de
 con `PAGERANK_TEST_DATABASE_URL`, y que el extractor la usa) y, en
 `test_analyzer_paginacion_db.py`, que la paginacion va antes que
 `solo_enlazada_con_nofollow`.
+
+Enlaces con filtros (decision 195): `tests/test_enlaces_filtros.py` ejecuta
+`GET /links`, `/links/destinos` y `/links/resumen` con SQLite y, con
+`PAGERANK_TEST_DATABASE_URL`, con Postgres; cada filtro, el estado del
+destino y el orden, y que el censo vivo y archivado en Parquet devuelvan lo
+mismo con lotes y grupos de filas pequenos. Necesita `pyarrow` (la imagen de la
+API de desarrollo puede no traerlo: `pip install pyarrow`).
+Configuracion en tres niveles y Ajustes (decision 196): `test_config_niveles.py`
+(API con SQLite: `config-resuelta` dice de que capa sale cada clave y trae lo de
+serie; el borrador de `POST /api/clients/config-resuelta` se valida como al
+guardar y no guarda nada; el aviso del WAF solo con un rastreo anterior parado
+o con muros, con sus cifras, y sin ese rastro nada; `GET /api/ajustes` sin el
+valor de ninguna clave) y `test_config_niveles_frontend.py` (Chromium: los
+limites y las opciones del formulario son los de `JobConfig` —necesita tambien
+pydantic—, heredado/cambiado/«volver al heredado», una cabecera heredada no se
+quita en silencio, al lanzar solo va lo de ese rastreo y el tope del canario, y
+cambiar de cliente o quitarlo conserva lo cambiado).
+Movil y barra del Explorador (revision de UX del 25-oct, 3.2 y 3.4; decision
+199): `test_movil_frontend.py` carga `frontend/index.html` entero con Alpine
+(de su CDN: sin red, se salta) en Chromium y una API simulada con nombres y URLs
+largos. A 390 px, `document.documentElement.scrollWidth` <= 390 en clientes,
+rastreos, historial del cliente, Resumen y URLs; las listas sin cabecera de
+tabla y con sus etiquetas; el desplegable de vistas con sus cifras. A 1440 px,
+barra lateral, busqueda primero, URL fija y la tarjeta «Páginas HTML» con la
+misma cifra que su entrada.
+Cierre de la fase 3 (decisiones 202, 203 y 204): `test_pulido_frontend.py`
+(Chromium, `app.js` suelto: filas por tipo sin sumar paginas que no se saben,
+contador de Problemas, la diferencia sin «No incluida en el sitemap» dudosa,
+paginas con error con su respaldo de la evolucion, alertas agrupadas, frases de
+Google con sus paginas solo si el grupo es unico, «200 de 4.720», errores de una
+API anterior en castellano, el tipo de serie del modal y los textos de V42).
+Revision final de la fase 3 (decision 205): `test_revision_final_frontend.py`
+(con el arnes de `test_movil_frontend.py`: la portada no cambia de unidad tras
+abrir un cliente, la flecha del Historial en la misma unidad, «Revisado con IA»
+en lineas, el Estado sin «No incluida en el sitemap» dudosa; y con `app.js`
+suelto, Problemas con el anterior dudoso, el informe con una API anterior y la
+ficha de Google con el censo ya cargado) y `test_sitemaps_lectura.py` (la regla
+de `shared/sitemaps_lectura.py` frente a la del frontend, y el informe y el
+aviso de Slack con SQLite).
+`test_programaciones_perfil.py::test_el_worker_resuelve_la_config_igual_que_la_api`
+se salta, diciendolo, en una imagen de la API sin parsel (anterior a la decision
+104): no es un fallo del codigo, hay que reconstruir la imagen.
+Revision de UX del 25-oct, 3.3 y 3.6 (decisiones 197 y 198):
+`test_trafico_entre_censos.py` tambien junta en una frase la misma pagina de dos
+grupos (y no lo hace sin saber que son las mismas) y comprueba que `GET
+/api/jobs/{id}` redacta las frases al servirlas; `test_limpieza_repetido.py`
+(lineas repetidas en la mitad de la muestra y el orden de `/cleaning/groups` con
+TestClient y SQLite; necesita fastapi: correr en la imagen de la API) y
+`test_google_limpieza_frontend.py` (Chromium: cifras y ventana de los datos del
+bloque «Google», frases que solo dicen lo que se sabe, paginas una vez,
+sitemaps vacios y su matiz, host dominante, base de cada alerta, y la celda,
+el orden y el editor de la Limpieza).

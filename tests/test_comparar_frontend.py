@@ -1,8 +1,8 @@
-"""La pestana Comparar con el mapeo de migracion (decision 131), ejecutando
-`frontend/app.js` en Chromium: las reglas del textarea se mandan como la
-lista JSON que espera `/diff` (y solo con la casilla de migracion marcada), un
-422 de una regex rota llega al usuario con su motivo, y las incidencias nuevas
-se reparten por tipo entre URL existente y URL nueva.
+"""La pestana Comparar ejecutando `frontend/app.js` en Chromium: no manda
+ningun mapeo (la migracion es aparte, revision de UX del 25-oct, 2.13), un
+error llega con su motivo, lo guardado sale al instante (V21), el desplegable
+agrupa por tipo (V22) y las incidencias nuevas se reparten por tipo entre URL
+existente y URL nueva (decision 131).
 
 Necesita Chromium: se salta si no esta.
 """
@@ -61,46 +61,121 @@ MONTAR = """
 """
 
 
-def test_sin_casilla_de_migracion_no_se_manda_ningun_mapeo():
+def test_comparar_no_manda_ningun_mapeo():
+    """Comparar es solo el seguimiento: el mapeo de una migracion va por
+    «Validar migración» (revision de UX del 25-oct, 2.13)."""
     r = _evaluar("async () => {" + MONTAR + """
-      a.diffMapRutas = '^/a/(.*)$ => /b/\\\\1';
       await a.cargarDiff();
-      return window.__pedidas;
+      return [window.__pedidas, 'diffMigracion' in a, typeof a.reglasMapRutas];
     }""")
-    assert r == ["/jobs/J1/diff/J0"]
+    assert r == [["/jobs/J1/diff/J0"], False, "undefined"]
 
 
-def test_las_reglas_viajan_como_lista_json_con_el_host():
-    r = _evaluar("async () => {" + MONTAR + r"""
-      a.diffMigracion = true;
-      a.diffMapHost = ' viejo.com=x.com ';
-      a.diffMapRutas = '^/es/hoteles/([^/]+)\\.html$ => /es/hotel/\\1/\n\n  ^/ficha\\?id=(\\d+)$ => /p/\\1  \n^/(?=x)=>y => /z';
-      await a.cargarDiff();
-      return {ruta: window.__pedidas[0], reglas: a.reglasMapRutas()};
-    }""")
-    ruta = r["ruta"]
-    assert ruta.startswith("/jobs/J1/diff/J0?")
-    from urllib.parse import parse_qs, urlsplit
-    q = parse_qs(urlsplit(ruta).query)
-    assert q["map_host"] == ["viejo.com=x.com"]
-    reglas = json.loads(q["map_rutas"][0])
-    # Las lineas vacias no son reglas; el separador lleva espacios, asi que un
-    # `=>` pegado dentro de la regex no la parte.
-    assert reglas == [[r"^/es/hoteles/([^/]+)\.html$", r"/es/hotel/\1/"],
-                      [r"^/ficha\?id=(\d+)$", r"/p/\1"],
-                      [r"^/(?=x)=>y", "/z"]]
-
-
-def test_un_422_llega_con_el_motivo_del_servidor():
+def test_un_error_llega_con_el_motivo_del_servidor():
     r = _evaluar("async () => {" + MONTAR + """
-      a.diffMigracion = true;
-      a.diffMapRutas = '^/a/( => /b';
-      window.__error = "map_rutas: regla 1: el patron '^/a/(' no compila: missing ), unterminated subpattern";
+      window.__error = "son dos origenes distintos (a.com y b.com)";
       await a.cargarDiff();
-      return a.diff;
+      return a.diffVista();
     }""")
     assert r["comparable"] is False
-    assert "no compila" in r["motivo"] and "[object" not in r["motivo"]
+    assert "origenes distintos" in r["motivo"] and "[object" not in r["motivo"]
+
+
+def test_lo_guardado_sale_al_instante_mientras_llega_el_diff():
+    """V21: con la comparacion automatica guardada, Comparar la pinta ya y el
+    diff entero la sustituye al llegar; una respuesta vieja no pisa otra nueva."""
+    r = _evaluar("async () => {" + MONTAR + """
+      a.job = {id: 'J1', seeds: ['https://x.com/'], analisis_version: 'v2', name: 'hoy',
+               comparacion: {comparado_con: 'J0', comparable: true, analisis_version: 'v2',
+                             analisis_version_anterior: 'v2',
+                             alertas: [{regla: 'x'}], urls: {en_ambos: 5, nuevas: 1, desaparecidas: 0},
+                             incidencias: {comparable: true, nuevas: {total: 3, por_tipo: []}}}};
+      a.versionAnterior = {jobId: 'J1', version: 'v2'};
+      let soltar;
+      window.api = (ruta) => new Promise(res => { soltar = () => res({comparable: true, cambios: {}, urls: {en_ambos: 6}}); });
+      const p = a.cargarDiff();
+      const antes = a.diffVista();
+      const cargando = a.diffCargando;
+      soltar(); await p;
+      const despues = a.diffVista();
+      // Otro censo elegido: lo guardado no es suyo.
+      a.diffOtro = 'J9';
+      const otro = a.diffVista();
+      return {guardada: antes._guardada, alertas: antes.alertas.length, cambios: antes.cambios,
+              inc: antes.incidencias.nuevas.total, cargando, despuesGuardada: !!despues._guardada,
+              en_ambos: despues.urls.en_ambos, otro};
+    }""")
+    assert r == {"guardada": True, "alertas": 1, "cambios": None, "inc": 3, "cargando": True,
+                 "despuesGuardada": False, "en_ambos": 6, "otro": None}
+
+
+def test_lo_guardado_no_ensena_incidencias_si_el_censo_se_reanalizo():
+    r = _evaluar("async () => {" + MONTAR + """
+      a.job = {id: 'J1', seeds: ['https://x.com/'], analisis_version: 'v3',
+               comparacion: {comparado_con: 'J0', comparable: true, analisis_version: 'v2',
+                             incidencias: {comparable: true, nuevas: {total: 3, por_tipo: []}}}};
+      window.api = () => new Promise(() => {});
+      a.cargarDiff();
+      const d = a.diffVista();
+      return [d.incidencias, d._incidenciasViejas];
+    }""")
+    assert r == [None, "este"]
+
+
+GUARDADA = """
+      a.job = {id: 'J1', seeds: ['https://x.com/'], analisis_version: 'v2',
+               comparacion: {comparado_con: 'J0', comparable: true, analisis_version: 'v2',
+                             analisis_version_anterior: 'v2',
+                             incidencias: {comparable: true, nuevas: {total: 3, por_tipo: []}}}};
+      window.api = () => new Promise(() => {});
+      a.cargarDiff();
+"""
+
+
+def test_lo_guardado_no_ensena_incidencias_si_se_reanalizo_el_anterior():
+    """Decision 191: volver a analizar el censo ANTERIOR deja igual de viejas
+    las incidencias guardadas (hallazgo de la revision de 2.13)."""
+    r = _evaluar("async () => {" + MONTAR + GUARDADA + """
+      a.versionAnterior = {jobId: 'J1', version: 'v3'};
+      const d = a.diffVista();
+      return [d.incidencias, d._incidenciasViejas, d._incidenciasPendientes];
+    }""")
+    assert r == [None, "anterior", False]
+
+
+def test_lo_guardado_espera_al_diff_si_no_se_puede_afirmar_que_valga():
+    """Sin saber aun la version del anterior, o con una comparacion de antes
+    de la 191 (sin sello), las incidencias guardadas no se dan por vigentes."""
+    r = _evaluar("async () => {" + MONTAR + GUARDADA + """
+      const sinSaber = a.diffVista();
+      a.versionAnterior = {jobId: 'J1', version: 'v2'};
+      const sabido = a.diffVista();
+      const c = {...a.job.comparacion}; delete c.analisis_version; delete c.analisis_version_anterior;
+      a.job = {...a.job, comparacion: c};
+      const sinSello = a.diffVista();
+      return [sinSaber.incidencias, sinSaber._incidenciasPendientes, sabido.incidencias.nuevas.total,
+              sabido._incidenciasPendientes, sinSello.incidencias, sinSello._incidenciasPendientes];
+    }""")
+    assert r == [None, True, 3, False, None, True]
+
+
+def test_el_desplegable_agrupa_por_tipo_y_no_por_tamano():
+    """V22: la replica grande es una prueba aunque tenga el tamano de un censo;
+    solo salen los del mismo host y se piden los del cliente."""
+    r = _evaluar("async () => {" + MONTAR + """
+      a.job = {id: 'J1', cliente_id: 'C1', seeds: ['https://x.com/'], total_urls_crawled: 5000};
+      window.api = async (ruta) => { window.__pedidas.push(ruta); return {items: [
+        {id: 'J1', status: 'completed', seeds: ['https://x.com/'], tipo_efectivo: 'censo'},
+        {id: 'A', status: 'completed', seeds: ['https://x.com/'], tipo_efectivo: 'censo', total_urls_crawled: 4900},
+        {id: 'B', status: 'completed', seeds: ['https://x.com/'], tipo_efectivo: 'prueba', total_urls_crawled: 5100},
+        {id: 'C', status: 'completed', seeds: ['https://x.com/'], tipo_efectivo: 'canario', total_urls_crawled: 26},
+        {id: 'D', status: 'completed', seeds: ['https://otro.com/'], tipo_efectivo: 'censo'},
+      ]}; };
+      await a.cargarCandidatosDiff();
+      return {pedida: window.__pedidas[0], grupos: a.gruposDiff().map(g => [g.etiqueta, g.items.map(j => j.id)])};
+    }""")
+    assert "client_id=C1" in r["pedida"] and "status=completed" in r["pedida"]
+    assert r["grupos"] == [["Censos", ["A"]], ["Canarios", ["C"]], ["Pruebas", ["B"]]]
 
 
 def test_las_nuevas_se_reparten_por_tipo_entre_url_existente_y_nueva():

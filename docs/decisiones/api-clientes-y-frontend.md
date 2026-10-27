@@ -514,3 +514,516 @@
    Probado de punta a punta con el cliente oficial del SDK contra uvicorn: 401,
    descubrimiento, registro, autorizar con la clave, token, las 17
    herramientas, y un lanzamiento simulado que no escribe nada.
+
+<a id="d189"></a>
+189. **La ficha de una URL trae la última inspección de Google de esa URL
+   (`google_inspeccion`), con su fecha, y no solo cuando algo no cuadra**
+   (revisión de UX del 25-oct, 2.7; sobre la 144). La canonical que elige
+   Google solo llegaba a la interfaz por los avisos
+   `google_elige_otro_canonical` y `google_tiene_canonical_antiguo`, que salen
+   cuando no coincide: en las 3.727 URLs de Lopesan inspeccionadas, 155. En las
+   demás no se podía decir «Google acepta tu canonical» aunque estuviera
+   guardado. Se lee de `gsc_inspecciones` por cliente y `url_clave`
+   (`shared.gsc.clave_de_url`), la última sin error:
+   - **Con su fecha y la de la última visita de Google**: es una muestra
+     rotatoria del cliente, no del censo, y `gsc_inspecciones` guarda una fila
+     por URL que se reescribe en cada inspección; la ficha dice «según la
+     inspección de Google del 19 oct (su última visita: 11 oct)».
+   - **Solo se compara con el censo si la inspección cae en su ventana**
+     (`en_ventana_del_censo`): la de la 144, 30 días antes y 14 después,
+     `shared.gsc.ventana_de_inspeccion`, la misma que usan los avisos (antes
+     las dos constantes vivían en `analysis/`). Fuera de ella, en un censo
+     viejo o con la URL reinspeccionada después, comparar dos fechas no dice
+     nada y la tarjeta contradiría a los avisos de la misma ficha: las
+     comparaciones con el censo salen None y la ficha lo dice.
+   - **`google_acepta`, `visto_igual_que_censo` y `google_igual_que_censo` se
+     calculan en la API con `shared.indexabilidad.misma_url`**, la regla del
+     análisis: una copia en JavaScript acabaría discrepando del aviso. Si
+     Google vio declarada otra canonical que la del censo, su elección es de
+     una versión anterior y la ficha no dice que Google ignore la del censo; y
+     si la que elige ya es la del censo (Lopesan, 
+     `oferta-om-spa-costa-meloneras-cumpleanos`: vio la de
+     `webserver-lopesan-prd.lfr.cloud` y elige la de www), dice que ya la
+     sigue, no que «cambiará con la próxima visita». Sin eso, «puede
+     cambiar», no «cambiará». Es «la del censo» y no «la de hoy»: el censo
+     puede ser viejo (revisión de la 2.7).
+   - **None no es «Google no la tiene»**: sin cliente, sin inspección o solo
+     con inspecciones fallidas. La ficha dice que no está inspeccionada solo
+     si el censo tiene inspecciones (`gsc_resumen.inspeccion`); contra una API
+     sin el campo, usa los detalles de los avisos y, sin ellos, «no consta».
+   - Best-effort: el `try` cubre la función entera; un fallo deja la ficha
+     igual, sin el campo. Test: `tests/test_ficha_url_google.py`.
+
+<a id="d194"></a>
+194. **El alta de un cliente pide nombre y dominio, crea sola un perfil «Sitio principal» y acaba en el siguiente paso**
+
+   **Problema.** Dar de alta un cliente abría el formulario entero de
+   Configuración (JSON incluido) y, al guardar, se quedaba ahí, sin perfil y
+   sin decir qué hacer después (revisión de UX del 25-oct, V37). Para el
+   primer censo hacía falta además crear un perfil a mano.
+
+   **Decisión.** `POST /api/clients` acepta `perfil_principal: true`: en la
+   misma transacción crea el perfil «Sitio principal» con la home del primer
+   dominio como semilla (`https://<dominio>/`; los dominios ya se guardan sin
+   esquema ni ruta). Sin dominio no crea nada. La interfaz pide solo nombre y
+   dominio y abre la ficha en Estado con «Siguiente paso: el primer censo»:
+   «Lanzar canario» y «Lanzar censo» abren el modal de lanzar ya con el
+   cliente y el perfil (el del canario destaca su botón y explica que son 250
+   páginas que no cuentan en la evolución; nada se lanza sin confirmarlo en el
+   modal) y «Programar cada semana» abre la programación del perfil (decisión
+   193), lunes a las 03:00 de Madrid. El bloque sale mientras el cliente no
+   tenga ningún censo ni rastreo en marcha y tenga un perfil propio activo.
+   Test: `tests/test_programaciones_perfil.py` (alta con y sin perfil).
+
+<a id="d196"></a>
+196. **La configuración se edita con el mismo formulario en el cliente, el perfil y el rastreo; lo de la agencia va en Ajustes**
+
+   **Problema.** La configuración del cliente y la del perfil eran JSON a
+   mano y el modal de Nuevo rastreo un formulario de siete pestañas que abría
+   «Sin cliente», con lo avanzado desplegado y 32 concurrentes (revisión de UX
+   del 25-oct, V35 y V36). Nadie veía con qué saldría el próximo rastreo ni de
+   dónde venía cada valor, y el modal mantenía a mano una lista de claves que
+   «solo se mandan si se tocan» (sondas, WordPress, topes) para no pisar lo
+   heredado. El bot de Slack de toda la agencia se configuraba dentro de cada
+   cliente, igual que las llaves de Search Console.
+
+   **Decisión.**
+
+   - Un solo formulario (`CAMPOS_CONFIG` en `frontend/app.js`, una plantilla
+     `tpl-config-niveles`) para los tres niveles. Cada nivel guarda solo lo que
+     fija (`propia`); lo de arriba llega resuelto por la API con su procedencia
+     y cada campo dice «del cliente», «del perfil», «de serie» o «cambiado
+     aquí» con «volver al heredado». **Escribir lo mismo que lo heredado no lo
+     fija**: así un cambio del cliente sigue llegando al perfil. Al lanzar se
+     manda solo lo de ese rastreo, que `create_job` pone encima de lo heredado
+     (ya lo hacía con `exclude_unset`). El JSON queda en «Avanzado» para lo que
+     el formulario no tiene (plantillas, segmentos, marcas…).
+   - Los límites y las opciones del formulario son los de `JobConfig`:
+     `tests/test_config_niveles_frontend.py` los compara campo a campo con el
+     modelo. Una cabecera, cookie o tope heredado no se puede quitar desde un
+     nivel de abajo (la API no admite ahí un `null`): el formulario lo dice en
+     vez de perderlo en silencio. La contraseña del Basic, solo en un rastreo
+     (decisión 83).
+   - `config-resuelta` devuelve además `origen` (ruta → capa; un `null` cuenta
+     como decisión de esa capa), `serie`, `avisos` y las programaciones del
+     perfil con `config_propia` (decisión 193). `POST /api/clients/config-resuelta`
+     resuelve un **borrador** de un nivel sin guardarlo y lo valida como al
+     guardar: es el bloque «Así rastreará» mientras se edita.
+   - **Avisos solo con lo que se sabe** (`api/avisos_config.py`): el del WAF
+     sale si un rastreo anterior **del mismo sitio** se paró por un bloqueo
+     (`finish_reason`) o tuvo respuestas de muro (`health.por_clase`: WAF,
+     captcha o 429; no las binarias), con sus
+     cifras y la concurrencia de entonces frente a la de ahora; parado y con la
+     misma o más concurrencia es «peligro», muros sueltos un aviso. Sin ese
+     rastro no se dice nada del WAF. El resto sale de la propia configuración
+     (robots ignorado, se presenta como un buscador, sin tope de URLs…).
+   - Nuevo rastreo trae el cliente y su perfil principal y la configuración
+     plegada; sin cliente, un aviso y el botón «Iniciar sin cliente».
+   - Configuración del cliente en secciones plegables con índice, cada una con
+     su resumen y su «Guardar» (guardar los datos no se lleva un borrador de la
+     configuración).
+   - **Ajustes de la agencia** (`#/ajustes`, menú «…»): el bot de Slack, las
+     llaves de Search Console (se suben aquí; en el cliente se elige cuál y la
+     propiedad), si están las claves de los modelos y el tope mensual
+     (`GET /api/ajustes`: solo booleanos y la cifra del tope), importar backup
+     y el tema. Ningún secreto se enseña ni se guarda en el navegador; los de
+     la API siguen en el entorno o en `SECRETOS_DIR`.
+
+   **Lo que no cambia.** El esquema de la base de datos y lo que se guarda en
+   `clients.config_defecto`, `crawl_profiles.config` y `jobs.config`. Las
+   claves de Gemini del análisis semántico siguen donde estaban (en la base de
+   datos, como antes de esta decisión); Ajustes solo dice cuántas hay.
+
+   **Revisión del 26-oct** (revisor independiente, antes de subir):
+
+   - «Del mismo sitio» = alguna semilla del rastreo anterior en los hosts del
+     próximo (las semillas del perfil o, sin perfil, los dominios del cliente y
+     las semillas de sus perfiles propios; `www.` no cuenta). Antes miraba todo
+     el cliente, y el bloqueo del sitio de un competidor salía como «peligro»
+     en el sitio principal (reglas 67 y 70). Los rastreos limpios del mismo
+     sitio que vinieron después se dicen y rebajan el aviso (a «info» si uno
+     salió con la misma o más concurrencia que la de ahora), y «bajar la
+     concurrencia» ya no se propone si ahora sale más despacio que entonces.
+   - `config-resuelta` trae `origen_por_clave`: cabeceras, cookies, topes y
+     reglas con nombre se fusionan clave a clave, y atribuirlas enteras a la
+     última capa mandaba a quitar al perfil una cabecera que era del cliente.
+   - El JSON de «Avanzado» se aplica al dejar de escribir y antes de guardar o
+     lanzar; con un botón aparte, lo escrito sin pulsarlo se perdía en silencio
+     y la interfaz daba el guardado por bueno. Un JSON a medias bloquea el
+     guardado con su error.
+   - En los enteros el punto solo es de miles si lo parece (`5.000`): «1.5» en
+     el máximo de URLs era 15 sin aviso.
+   - El «Nuevo rastreo» visible de la ficha del cliente trae también el perfil
+     principal (solo lo hacía el atajo «n»).
+
+   Tests: `tests/test_config_niveles.py` (API: origen y origen por clave,
+   borrador, avisos del mismo sitio, ajustes sin secretos) y
+   `tests/test_config_niveles_frontend.py`.
+
+<a id="d199"></a>
+199. **Cada entrada de la barra del Explorador cuenta lo mismo que abre, con «0» cuando es cero, y dos cifras distintas llevan nombres distintos**
+
+   **Problema.** La barra lateral del Explorador decía «HTML 3.772» y la
+   tarjeta del Resumen «3.731 páginas HTML», y la tarjeta abría la entrada de
+   3.772 (revisión de UX del 25-oct, V30). No era un error de cuenta: la
+   tarjeta cuenta las HTML internas que responden 2xx (`/stats.paginas_html`) y
+   la barra todo lo que responde HTML, también los 4xx (en Lopesan, justo los
+   41 de diferencia). Además, JavaScript, CSS, 5xx, Indexables, No indexables,
+   Bloqueadas y todos los ámbitos SEO salían sin cifra: no se distinguía «no
+   hay ninguna» de «no se ha contado».
+
+   **Decisión.**
+
+   - Dos entradas con nombre propio: **«Páginas HTML»** (internas, HTML, 2xx:
+     la cifra de la tarjeta, que ahora abre esta) y **«Todo el HTML»** (la de
+     antes, con un `title` que dice que incluye las que dan error).
+     Indexables y No indexables llevan un `title` que dice que son de
+     cualquier tipo (PDF, redirecciones), porque no cuadran con la tarjeta
+     «Indexables», que es solo de páginas HTML.
+   - Lo que `/stats` agrupa del censo entero (tipo de recurso, grupo de
+     estado) da «0» cuando no sale: un `GROUP BY` completo no omite nada que
+     exista.
+   - Lo demás es el `total` de `GET /urls` con el mismo filtro que aplica la
+     entrada (`page_size=1`): una consulta cada vez, en orden y en segundo
+     plano, guardada por censo y por estado y versión del análisis: con el
+     rastreo sin terminar se recuenta cada vez que se entra, y al acabar el
+     análisis se tira lo contado a medias (y el resumen de problemas del que
+     salen los ámbitos) antes de recontar. En un ámbito SEO la cifra son las
+     **páginas** de esa vista con algún problema del ámbito (`issue_type` con
+     todos sus tipos), no la suma de incidencias: una página con dos problemas
+     del ámbito cuenta una vez. Y como la entrada tiene que abrir lo que cuenta,
+     **pulsar un ámbito abre «Con algún problema de este ámbito»** («Títulos
+     307» abre 307, no las 3.772 páginas HTML); «Todas las páginas» queda a un
+     clic en los chips. Una URL guardada con la pestaña y sin `problema` sigue
+     abriendo todas. Un ámbito sin ningún tipo en el resumen de problemas es 0
+     sin preguntar, pero solo si el resumen trae algo (vacío puede ser que
+     falló). Si una consulta falla, la entrada se queda sin cifra: nunca un 0
+     que no se ha contado.
+   - **Un censo sin analizar** (cancelado o fallido antes del análisis, o aún
+     en curso: sin `analisis_version` o con el estado sin cerrar) no tiene
+     problemas ni indexabilidad calculados, que no es «0»: los ámbitos,
+     Indexables y No indexables van sin cifra ni punto de color, el ámbito abre
+     todas las páginas y en lugar de «Ningún problema de este ámbito» dice que
+     no se analizó. El mismo criterio que la tarjeta «sin analizar todavía» del
+     Resumen. «Externas» sigue sin cifra con una API sin `/links/resumen`
+     (revisión 2.8).
+   - Con Search Console en el censo, las columnas de serie llevan los clics de
+     Google detrás de indexable y enlaces entrantes (`columnasPorDefecto`); sin
+     él no se añade una columna vacía.
+
+   Tests: `tests/test_movil_frontend.py` (la tarjeta y su entrada con la misma
+   cifra, un ámbito abre lo que cuenta, un censo sin analizar sin cifra en los
+   ámbitos, contadores en todas las entradas, columnas por defecto).
+<a id="d200"></a>
+200. **Lo editado en la ficha del cliente se guarda con una barra fija y salir con cambios pregunta; borrar va dentro de «⋯»**
+
+   **Problema.** La pestaña Configuración tenía un «Guardar» por sección (la
+   configuración, los datos, las integraciones, las reglas), cada uno al final
+   de su bloque, y nada avisaba de lo que quedaba sin guardar: cambiar un
+   umbral, irse a Producción y volver era perderlo sin saberlo. Guardar una
+   sección recargaba la ficha y se llevaba por delante lo cambiado en otra. Las
+   «×» de borrar perfiles y programaciones estaban junto a «Lanzar» y
+   «Pausar». Y el botón de aceptar de todas las preguntas sin texto que
+   escribir («Eliminar», «Restablecer», «Cancelar el rastreo») salía
+   desactivado: su `:disabled` daba `''` y Alpine pone el atributo con
+   cualquier valor que no sea `false`, `null` o `undefined` (revisión de UX
+   del 25-oct, 3.5).
+
+   **Decisión.**
+
+   - Una barra fija abajo, «Cambios sin guardar en … · Descartar · Guardar»,
+     aparece en cuanto algo de la ficha del cliente (cómo se rastrea, datos,
+     integraciones, reglas de alertas) o de Ajustes (un token de Slack pegado)
+     difiere de lo guardado. Su «Guardar» guarda todo lo pendiente: primero las
+     reglas y luego lo del cliente en un solo PATCH. Los botones por sección se
+     quitan. Escribir en un campo el mismo número que había («20» frente a 20)
+     no cuenta como cambio.
+   - Salir de la ficha (otro cliente u otra vista, por enlace o con atrás)
+     con cambios pregunta antes y, si no se acepta, se queda donde estaba;
+     recargar o cerrar la pestaña usa el aviso del navegador. Cambiar de
+     pestaña dentro del mismo cliente no pregunta: los formularios siguen ahí y
+     la barra también. El modal del perfil pregunta al cerrarse con cambios y
+     su pie dice «Cambios sin guardar».
+   - Eliminar un perfil, una programación o una regla propia va dentro de
+     «⋯», con lo que no se borra dicho al lado.
+   - El pie de los modales queda fijo (Lanzar y Guardar a la vista) y el
+     «Nuevo rastreo» de arriba solo es el botón verde donde la vista no tiene
+     uno propio (Nuevo cliente, Nueva programación, Informe para el cliente).
+   - El `:disabled` de las preguntas se fuerza a booleano.
+   - Recargar la ficha del mismo cliente (guardar o eliminar un perfil, lanzar
+     un rastreo desde la ficha, guardar o quitar Slack, guardar una sección)
+     conserva lo editado y sin guardar en los datos y en las integraciones; solo
+     se toma del servidor lo que se acaba de guardar (`abrirCliente(..., {
+     guardado })`). Las reglas y «cómo se rastrea» ya no se recargaban.
+   - El error de validación de las reglas nombra la regla en llano («Páginas
+     que ahora responden con error»: falta el número), no por su clave.
+
+   Tests: `tests/test_botones_jerga_frontend.py` (cambios por sección, salir
+   con y sin aceptar, el perfil, la recarga de la ficha con cambios a medias,
+   el error de las reglas, la expresión del `:disabled` tal cual está en
+   `index.html`, y los formatos de número).
+
+<a id="d201"></a>
+201. **Una escala de letra de cuatro tamaños (ninguno por debajo de 12 px) y los estilos en línea repetidos pasan a clases que dicen lo mismo**
+
+   **Problema.** Con `html` a 14px, el frontend usaba 39 tamaños de letra
+   distintos (de `.6rem` a `2.5rem`): `.8rem` eran 11,2 px, las insignias y
+   las cabeceras de tabla bajaban a 9 px, el texto de los ejes de la evolución
+   a 7 px pintado y `code`/`pre` a 11,4 px por una rareza de Chromium (una
+   familia `monospace` sola encoge el texto a 13/16). Leer «qué decide Google
+   / cómo se arregla» costaba (V43). Y `index.html` tenía 922 atributos
+   `style="..."` fijos, la mayoría repetidos (iconos de 14 px, filas flex,
+   márgenes), que nadie podía cambiar de una vez (UX-21).
+
+   **Decisión.**
+   - Cuatro tamaños de texto en `:root`: `--fs-sm` 12 px (notas, insignias,
+     cabeceras), `--fs-base` 14 px, `--fs-md` 16 px y `--fs-lg` 20 px; más dos
+     excepciones declaradas que no son texto corrido: `--fs-cifra` 24 px (la
+     cifra grande de una tarjeta) y `--fs-icono` 32 px (el icono de un estado
+     vacío y la nota del informe). Todo `font-size` del frontend usa una de
+     ellas, salvo la raíz; cada valor viejo va al más cercano (≤13 px → 12,
+     <15 → 14, <18 → 16, <22 → 20), y `.stat-value` a la cifra.
+   - `code`, `pre`, `kbd` y `samp` llevan otra familia delante de `monospace`;
+     el texto de un SVG cuenta por cómo se pinta (las columnas de la evolución
+     pasan a 320 px como poco para no encoger la gráfica, el anillo de la
+     puntuación a 14 unidades), y la barra lateral del Explorador pasa de 170 a
+     190 px para que sus entradas no partan.
+   - Los estilos en línea repetidos pasan a clases con el mismo contenido:
+     utilidades nombradas por su valor (`mt-35` = margin-top .35rem, `px-75`,
+     `w-5rem`, `ico-14`, `fs-sm`, `c-red`, `filete-orange`) y componentes con
+     nombre propio cuando se repetía la combinación entera (`btn-rojo`,
+     `campo-simple`, `caja-codigo`, `fila-extremos`). Llevan `!important`
+     porque sustituyen a un estilo en línea y deben ganar igual que él; las de
+     `display` van sin él, para que `x-show` pueda ocultar. Los `:style` que
+     dependen de datos y los fijos de una sola vez se quedan: 922 → 108.
+   - Se comprobó que el aspecto no cambia salvo por la escala comparando el
+     estilo calculado de cada elemento, antes y después, en las 21 rutas de la
+     revisión sobre producción: solo cambian lo que deriva del tamaño de letra
+     (`letter-spacing` y huecos en `em`, márgenes `auto`) y un
+     `justify-content: flex-end` que la clase `justify-end` ya pedía en
+     Configuración sin que existiera. Esa comparación miraba solo lo visible
+     y se le escapó una: `.mono` (de antes, sin `!important`) perdía contra
+     `input[type="text"] {font-family: inherit}`, y la cron de los dos
+     modales de programar, la propiedad de GSC, el canal de Slack y la
+     credencial dejaron de ser monoespaciados. Ahora `.mono` lleva
+     `!important` como el resto, y el test comprueba ejecutando que cada
+     utilidad con `!important` gana en el elemento que la lleva, oculto o no
+     (salvo en las tablas que en móvil pasan a tarjetas, que mandan a
+     propósito).
+   - Lo que la escala cortaba o dejaba fuera: las etiquetas de «Qué arreglar
+     primero» pasan de 130 px en una línea a 150 px en hasta dos («Error datos
+     estructurados» salía con puntos suspensivos), y los `h5`/`h6` de un
+     informe en markdown, que heredaban `.83em`/`.67em` del navegador (10 y 8
+     px), van a 12 px como el `h4`.
+   - Un solo ayudante de porcentaje: `fmt.pct` (se quita `pctEs`; con un
+     decimal fijo, «2,2 %», y «—» si no hay dato).
+
+   Tests: `tests/test_escala_letra_frontend.py` (21 vistas a 1440 y 390 px en
+   los dos temas: ningún texto visible calcula menos de 12 px, el de los SVG
+   con su escala; cada utilidad con `!important` gana donde se usa; titulares
+   de markdown y etiquetas largas de las barras; todo `font-size` usa la escala; los estilos en línea fijos
+   por debajo de la mitad y sus clases definidas; un solo ayudante de
+   porcentaje).
+
+
+<a id="d202"></a>
+202. **Las cifras de errores cuentan páginas en todas partes, y Problemas pinta una fila por tipo con el desglose de gravedad**
+
+   **Problema.** La auditoría independiente del 27-oct encontró cifras que no
+   cuadraban entre vistas del mismo censo. La portada, la tabla y la gráfica
+   del Historial decían «Errores 85» (incidencias de gravedad error) y la
+   tarjeta del censo y el Estado del cliente «72 páginas con error» (V10). El
+   contador de la pestaña Problemas era 11.681, todas las incidencias con las
+   info (V16). Problemas sacaba dos filas por tipo («Canibalización por
+   búsqueda» 39 aviso y 157 info, V14). La barra lateral de URLs decía
+   «Indexables 3.407» (contaba PDF e imágenes) y la tarjeta «3.216» (3.4). Y
+   en «Qué arreglar primero» la barra medía la prioridad con las páginas al
+   lado: 10 páginas llenaban la barra y 358 casi no se veían.
+
+   **Decisión.**
+   - `CensoDeSerie` (portada y `/clients/{id}/serie`) lleva
+     `paginas_con_error`: páginas distintas con algún error, la misma consulta
+     que `/stats`. `errores` sigue siendo incidencias. La tendencia del panel
+     (`tendencias_de_clientes`) pasa a `urls_con_error` (y lo dice en
+     `metrica`); cada serie de la evolución lleva también
+     `tendencia_paginas_error`. La gráfica del Historial pinta
+     `urls_con_error` como «Páginas con error». El MCP devuelve
+     `paginas_con_error` y `tendencia_paginas_con_error`.
+   - Con una API anterior, la ficha del cliente saca las páginas de la
+     evolución (`urls_con_error` del mismo rastreo, la misma cuenta) y la
+     portada dice «errores (incidencias)» en la cabecera: no llama páginas a
+     lo que son incidencias.
+   - `/issues/resumen` lleva `paginas_tipo`: páginas distintas del tipo en
+     cualquier gravedad. La interfaz junta las filas de un tipo en una
+     (`filasPorTipo`) con la gravedad más alta y «39 aviso · 157 info»; las
+     páginas del tipo solo si están todas sus gravedades y la API las trae.
+     Sumar las de cada gravedad contaría dos veces la página que tenga las dos,
+     y eso no se afirma: sin el dato, la fila dice solo el desglose. Lo mismo
+     en el desplegable de problemas de URLs (cada tipo en el grupo de su
+     gravedad más alta) y en «Qué arreglar primero».
+   - El contador de la pestaña Problemas son los tipos de error o aviso (los
+     que hay que mirar), sin los info.
+   - «Páginas indexables» y «Páginas no indexables» de la barra de URLs
+     cuentan y abren las páginas HTML internas con 2xx, las de la tarjeta (que
+     abre «no indexables» y antes llevaba a una lista con las redirecciones y
+     los errores dentro).
+   - «Qué arreglar primero» es lo primero del Resumen, seguido de lo que ha
+     cambiado y de Google (el orden de la propuesta), con cinco filas como el
+     Estado del cliente y en la misma lista numerada: sin barra.
+
+   Tests: `tests/test_pulido_frontend.py` (filas por tipo, páginas que no se
+   suman, contador, cifras de páginas con su respaldo), `tests/test_stats_api.py`
+   (`paginas_tipo`), `tests/test_evolucion_api.py` (portada y serie con dos
+   errores en la misma página, tendencia de páginas).
+
+<a id="d203"></a>
+203. **El tipo del rastreo se elige al lanzarlo (prueba de serie sin perfil), y la portada dice «topado en N URLs»**
+
+   **Problema.** Un rastreo sin marcar contaba como censo salvo que el nombre
+   llevara una pista (`tipo_de_rastreo`), y el modal de lanzar no pedía tipo:
+   la portada podía juzgar a un cliente por una prueba (V12, UX-07). Un censo
+   que se paraba en su tope salía en la portada como si fuera el sitio entero.
+
+   **Decisión.** `JobCreate` acepta `tipo` (`censo`, `prueba`, `canario`) y
+   lo guarda; sin él, como antes (los scripts y las programaciones no lo
+   mandan). El modal Nuevo rastreo siempre lleva uno marcado y a la vista:
+   censo si hay perfil, prueba si no; «Lanzar canario» manda canario. Con una
+   API anterior, que ignora el campo, se marca después con el `PATCH` que ya
+   existía. `CensoDeSerie.topado` es el `max_urls` de la config si el rastreo
+   acabó por tope (`MOTIVOS_TRUNCADO`); sin tope en la config, `null` (no se
+   inventa la cifra), y la portada lo dice en naranja bajo la cifra de errores.
+
+   Lo que queda en datos y no en código: `lopesan-remedicion` tiene su prueba
+   sin marcar y sigue contando como censo hasta que alguien la marque.
+
+   Tests: `tests/test_clientes.py` (el tipo al crear),
+   `tests/test_evolucion_api.py` (topado con y sin tope),
+   `tests/test_pulido_frontend.py` (el tipo de serie del modal).
+
+<a id="d204"></a>
+204. **En la pestaña Alertas, las alertas iguales del cliente se agrupan en pantalla y las informativas van a «Cambios a favor»**
+
+   **Problema.** En Cerradas salían por separado «Páginas que ya no se
+   encuentran» y «se han alejado de la home» del 19 y del 21 oct (dos series,
+   la misma regla), y la de tipo info iba mezclada con el resto (V08, 1.12).
+
+   **Decisión.** Solo presentación: cada incidente sigue siendo suyo
+   (decisión 139). La interfaz agrupa por `clave` (`agruparIncidentes`): un
+   grupo con su gravedad más alta, el titular de la más reciente, «Vista en
+   los censos del 19 oct y del 21 oct», el detalle de cierre de cada una y un
+   botón «Ver las N páginas» (Comparar del último censo que la vio, con las
+   páginas que guarda la alerta). Marcar como vista, volver a abierta y
+   silenciar se aplican a todas las vivas del grupo. Las de gravedad info van
+   en una sección «Cambios a favor».
+
+   Tests: `tests/test_pulido_frontend.py` (agrupado, gravedad, info aparte).
+
+<a id="d205"></a>
+205. **«No incluida en el sitemap» sale de los totales de «incidencias nuevas y resueltas» del Estado, del informe, de Slack y de Problemas si cualquiera de los dos censos leyó sus sitemaps a medias**
+
+   **Problema.** El V13 (revisión de UX del 25-oct, 3.6) solo estaba cerrado
+   en Problemas, y solo mirando el censo actual. El Estado de Lopesan decía
+   «240 incidencias nuevas y 775 resueltas» sin descontar ni avisar, con 370
+   de 396 ficheros de sitemap vacíos; el informe y el aviso de Slack, lo
+   mismo. Y si el parcial era el censo de referencia, sus «resueltas» de
+   `not_in_sitemap` tampoco se pueden afirmar y se contaban igual.
+
+   **Decisión.** Una regla en `shared/sitemaps_lectura.py`
+   (`lectura_dudosa`: lectura parcial, un fichero que no responde 200 o uno
+   que responde 200 sin un sitemap reconocible), la misma que
+   `resumenSitemaps().dudoso` del frontend; un test ejecuta las dos sobre los
+   mismos casos. Si cualquiera de los dos censos es dudoso, los totales
+   (`nuevas`, `resueltas`, `siguen`) no cuentan los tipos de sitemap
+   (`sin_tipos_de_sitemap`) y se dice: «Sin contar «No incluida en el
+   sitemap»: no se leyeron todos los sitemaps y su diferencia no se puede
+   afirmar». El informe (`comparacion.incidencias.sin_sitemap`) y el aviso de
+   «rastreo terminado» y el resumen semanal salen de
+   `_resumen_de_rastreo`; un censo de referencia que ya no está no se puede
+   comprobar y tampoco se afirma. En la interfaz, el Estado pide el censo de
+   referencia (`refDudaSitemaps`) y no pinta la línea hasta saberlo;
+   Problemas lo guarda en `versionAnterior.dudaSitemaps`; el informe usa el
+   campo de la API y, con una API anterior, el desglose por tipo del censo
+   cargado. No cambia nada guardado ni el análisis: los avisos siguen ahí,
+   como «no concluyente».
+
+   Tests: `tests/test_sitemaps_lectura.py` (la regla en Python y en el
+   frontend, el informe y el aviso con SQLite) y
+   `tests/test_revision_final_frontend.py` (Estado con Alpine en Chromium,
+   Problemas con el anterior dudoso, informe con una API anterior).
+
+<a id="d206"></a>
+206. **El markdown de una página rastreada se sanea con DOMPurify antes de pintarlo (x-html), porque marked@15 ya no sanea**
+
+   **Problema.** La pestaña «Contenido» de la ficha de URL pinta
+   `page_content.content_markdown` con `renderMarkdown()` (que devolvía
+   `marked.parse(md)`) inyectado por `x-html`. marked v15 quitó la opción de
+   saneo y no había DOMPurify en el frontend, así que el HTML embebido en el
+   markdown se ejecutaba en el navegador del analista (XSS almacenado): el
+   markdown lo controla el sitio que el crawler visita, no nosotros. Un
+   `<img onerror=...>` disparaba, y Alpine 3 además llama a `initTree()` sobre
+   lo inyectado por `x-html`, así que también correrían directivas
+   `x-data`/`x-init` incrustadas.
+
+   **Decisión.** `renderMarkdown()` pasa la salida de `marked.parse()` por
+   `DOMPurify.sanitize(html, { USE_PROFILES: { html: true } })` antes de
+   devolverla; DOMPurify quita los manejadores de evento, los esquemas
+   peligrosos (`javascript:`) y los atributos que no son HTML estándar (entre
+   ellos las directivas `x-*` de Alpine). DOMPurify se carga desde cdnjs con
+   versión fijada (`dompurify@3.2.4`). Si DOMPurify no está disponible (CDN
+   caído) o `marked.parse` lanza, se devuelve el markdown como texto escapado
+   dentro de `<pre>`, nunca HTML crudo. El markdown de una página rastreada es
+   dato no confiable como cualquier otro campo venido del sitio.
+
+   Tests: `tests/test_xss_markdown_frontend.py` (saneo de `renderMarkdown` en
+   Chromium: `<img onerror>` no dispara y el `javascript:` no sobrevive en el
+   href).
+
+<a id="d207"></a>
+207. **Una celda de CSV o XLSX que empieza por carácter de fórmula se escapa (inyección de fórmula)**
+
+   **Problema.** Los textos que el crawler trae del sitio rastreado (título,
+   meta, anchor de un enlace, contenido) se escribían tal cual en los CSV
+   (`/urls/export` de la vista, `/export` del censo entero,
+   `/urls/enlaces-entrantes`, `/links/export`, `/content/export`) y en el
+   XLSX. Una hoja de cálculo (Excel, Sheets) interpreta como fórmula toda celda
+   que empieza por `=`, `+`, `-`, `@`, tabulador o retorno: un sitio con un
+   título `=HYPERLINK("http://malo","clic")` ejecuta la fórmula en cuanto el
+   analista abre el fichero exportado. La defensa `celda_segura` existía desde
+   la decisión 104 pero solo cubría las columnas de extracción a medida, no las
+   estándar.
+
+   **Decisión.** Toda celda de texto sacada de la página se escapa con un
+   apóstrofo delante cuando empieza por uno de esos caracteres; los números no
+   se tocan. Se centraliza en `_val` (CSV de URLs, enlaces y contenido), se
+   aplica a las columnas de la vista del Explorador y a `urls/enlaces-entrantes`
+   con `celda_segura`, y en el XLSX en `api/excel._celda`.
+
+   Tests: `tests/test_seguridad_pentest.py`.
+
+<a id="d208"></a>
+208. **La API manda cabeceras de seguridad en todas las respuestas**
+
+   **Problema.** La API no mandaba ninguna cabecera de seguridad. Sin
+   `X-Content-Type-Options` había riesgo de rastreo de tipo MIME; sin
+   `X-Frame-Options`/`frame-ancestors` la interfaz autenticada era enmarcable
+   (clickjacking de acciones como lanzar o borrar); y sin `Content-Security-Policy`
+   un XSS no tenía ninguna contención.
+
+   **Decisión.** Un middleware ASGI (`api/cabeceras.py`), el más externo para
+   que cubra también los 401 de la autenticación y el MCP, añade en cada
+   respuesta `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+   `Referrer-Policy: no-referrer` y una CSP. Es ASGI puro, como la
+   autenticación, para no envolver el CSV en streaming ni el backup de 1 GB.
+
+   La CSP es de **contención**, no de prevención total: el frontend es
+   Alpine.js, que evalúa sus expresiones con `new Function` y usa atributos en
+   línea, así que necesita `unsafe-eval` y `unsafe-inline` en los scripts. Lo
+   que la CSP sí hace es limitar el daño de un XSS: `connect-src` acotado
+   impide exfiltrar datos a un servidor cualquiera, y `frame-ancestors`,
+   `object-src 'none'` y `base-uri 'self'` cierran enmarcado, plugins y el
+   secuestro de la URL base. Los orígenes de script y estilo son los CDN que ya
+   usa `index.html` (jsdelivr, cdnjs, unpkg, cdn.plot.ly), con `worker-src blob:`
+   para maplibre. La prevención del XSS la dan el saneo de la salida (decisión
+   206) y el `x-text` de Alpine, no la CSP.
+
+   Tests: `tests/test_seguridad_pentest.py`.

@@ -978,3 +978,170 @@
    y los vistos con su motivo y la API los devuelve; cambiar el nombre o
    reactivar no cierra nada; con perfil no se toca la serie del perfil; borrar
    la programación o el perfil cierra los suyos).
+
+<a id="d191"></a>
+191. **La comparación automática sella con qué versión del análisis estaban
+   los dos censos, y Problemas solo enseña la diferencia por tipo si los dos
+   siguen así** (revisión de UX del 25-oct, 2.10).
+
+   **Problema.** Problemas pasa a decir, por tipo, cuánto ha cambiado frente
+   al censo con el que se comparó al terminar («+12», «−5», «nuevo»,
+   «igual»), con las cifras que ya guarda `comparacion.incidencias`
+   (`nuevas`, `resueltas` y `siguen` por tipo; no se recalcula nada). Pero esas
+   cifras son las de las incidencias DE ESE MOMENTO: si después uno de los dos
+   censos se vuelve a analizar —el siguiente censo de la serie re-analiza a
+   este como referencia (93), o alguien lo re-analiza a mano—, sus incidencias
+   ya no son las comparadas y la diferencia se leería como del sitio.
+
+   **Decisión.** `comparar_con_el_anterior` guarda `analisis_version` (la del
+   censo nuevo) y `analisis_version_anterior` (la de la referencia, ya puesta al
+   día). La interfaz da la diferencia solo si la comparación es concluyente
+   (ni truncado, ni bloqueado, ni otro alcance: 67, 70), las incidencias se
+   compararon (91), el anterior estaba entero (hay `resueltas`) y las dos
+   versiones de hoy son las selladas. Para los censos anteriores a este sello
+   se exige que el anterior y este tengan hoy la misma versión (lo leído de
+   `GET /api/jobs/{anterior}`); si no se puede comprobar, no se afirma.
+   - **Y las incidencias de hoy tienen que cuadrar con las comparadas**: por
+     cada tipo, `nuevas + siguen` (+ las de axe sin muestra) es lo que el censo
+     tiene ahora (sin los tipos de Search Console que la comparación no mira,
+     `NO_COMPARABLES`). Sin el sello, si los dos censos se re-analizaron después
+     con la misma versión nueva, las versiones casan pero las cifras son de la
+     vieja; el cuadre lo destapa (en Lopesan, 26-oct, cuadran los 54 tipos
+     comparables). Un tipo nuevo del analizador que la comparación no vio
+     también lo descuadra, y es justo lo que hay que decir.
+   - En cualquiera de esos casos dice por qué («versión del análisis distinta:
+     no comparable») y no pinta etiquetas.
+   - La etiqueta va en la primera fila VISIBLE de cada tipo (con el filtro de
+     gravedad, la que se ve): la comparación cuenta por tipo con todas sus
+     gravedades juntas, y lo dice el título.
+   - Son incidencias, no páginas, y lo dice el título; las que estaban en
+     páginas no visitadas esta vez (`sin_pagina_en_el_nuevo`) se nombran y no
+     se cuentan como resueltas. Los tipos que ya no aparecen se listan al final.
+   - Con una sección elegida no se enseña: la diferencia es del sitio entero.
+   - El reparto por sección de cada tipo se pide con `segmentos_max=200`; si
+     llega lleno, «fuera de toda sección» se da como «al menos» y se avisa de
+     que puede faltar alguna sección pequeña.
+
+   Tests: `tests/test_comparacion.py::test_la_comparacion_sella_con_que_version_se_analizaron_los_dos`.
+
+<a id="d192"></a>
+192. **Validar una migración es una acción aparte, con casos comunes sin regex
+   que se traducen a las reglas de `map_rutas`; Comparar solo sigue censos y
+   abre con lo guardado** (revisión de UX del 25-oct, 2.13, V21-V23; solo
+   frontend).
+
+   **Problema.** El mapeo de una migración (131) era una casilla dentro de
+   Comparar que pedía expresiones regulares de Python: estorbaba en el
+   seguimiento de cada semana y nadie sin conocer regex podía validar una
+   migración. Además, Comparar volvía a pedir el diff entero aunque la
+   comparación automática ya estuviera guardada (V21), y su desplegable
+   separaba por tamaño, así que una réplica grande salía entre los censos (V22).
+
+   **Decisión.**
+   - «Validar migración» (`#/rastreos/<id>/migracion`, desde el menú «…» del
+     censo o desde Comparar) es un asistente: 1) censo de antes y de después,
+     cualquiera completado del cliente y de cualquier dominio, en grupos por
+     tipo (censo, canario, prueba); 2) cómo cambian las URLs; 3) el resultado.
+     El resultado es el mismo `GET /api/jobs/{id}/diff/{otro}` con `map_host` y
+     `map_rutas`: no se calcula nada nuevo ni hay endpoint nuevo (GET, se puede
+     abrir contra producción).
+   - **Casos comunes → reglas.** Dominio (`map_host`), carpeta que cambia
+     (prefijo), trozo que cambia (primera aparición) y el final (quitar la
+     extensión, quitarla y acabar en barra, añadir o quitar la barra final). El
+     servidor aplica solo la primera regla que casa con cada URL, así que dos
+     casos a la vez no pueden ir como dos reglas (la URL con carpeta y
+     extensión cambiaría una sola cosa): se genera **una regla por combinación
+     de casos**, de la más completa a la más simple. Cada combinación con
+     final lleva delante su **regla de borde**, para la ruta que acaba justo en
+     la carpeta o el trozo: estos ya se comen la barra o la extensión, la regla
+     con el final no casa y ganaría la del final solo, sin cambiar la carpeta
+     (con «/blog/ → /» y «quitar la barra», /blog/ quedaba en /blog y no en /;
+     hallazgo de la revisión). En el borde el final se aplica al texto que
+     entra, como si los cambios se hicieran uno detrás de otro, y la portada
+     «/» se queda como está. Son como mucho 13 reglas (el tope es 50). Cada regla se guarda como partes (texto o grupo), y de ellas salen a
+     la vez el reemplazo de Python (`\g<n>`, barras dobladas) y la vista previa
+     del navegador, que por eso no pueden discrepar. Las regex a mano quedan
+     plegadas en «Avanzado» (parten de lo marcado) y se previsualizan con una
+     traducción mínima (`(?P<`, `\g<n>`); lo que el navegador no lee se dice y
+     lo valida el servidor.
+   - **Vista previa con 5 URLs reales** del censo de antes (primero las que
+     cambian) y, para cada una, si la nueva está **tal cual** en el censo de
+     después (búsqueda ordenada por URL + igualdad exacta). Lo que no aparece
+     se dice como «no aparece tal cual» y, si el censo de después no terminó
+     entero, se añade: no se afirma que falte (67, 70). Si la búsqueda trae más
+     URLs de las que caben en una página (200) y la exacta no está entre ellas,
+     dice «no se ha podido comprobar» y no «no aparece».
+   - **Resultado:** cuántas URLs de antes tienen pareja (`mapeo_rutas` o
+     `urls`), cuántas cambian con lo marcado y cuántas de ellas casan, las
+     colisiones, y ejemplos de las que se quedan sin pareja y de las nuevas.
+     Sin concluir (truncado u otro alcance), «Sin pareja: no se puede afirmar».
+     Debajo, el mismo detalle que en Comparar (una sola copia del marcado). El
+     antes tiene que ser anterior al después: el servidor mapea siempre el más
+     antiguo, y si no, el asistente pide intercambiarlos.
+   - **Comparar** ya no manda mapeos. Si se compara con el censo de la
+     comparación automática, pinta al instante lo guardado (`job.comparacion`:
+     alertas, URLs, incidencias, avisos) y el detalle página a página llega
+     después, con un indicador visible. Las incidencias guardadas solo se
+     enseñan si se puede afirmar que siguen valiendo: este censo con la
+     `analisis_version` de la comparación y el anterior con su
+     `analisis_version_anterior` (191). Si cualquiera de los dos se re-analizó,
+     se dice cuál; si la comparación es de antes de la 191 (sin sello) o aún no
+     se sabe la versión del anterior, se espera al diff completo. Los
+     candidatos son los completados del mismo host (del cliente si lo tiene)
+     agrupados por tipo. Un enlace viejo a Comparar con `map_host`/`map_rutas`
+     abre el asistente con lo mismo.
+
+   Tests: `tests/test_migracion_frontend.py` (la vista previa de cada caso
+   contra `shared.comparacion._aplicar_rutas`, las combinaciones, las regex a
+   mano, las reglas de borde, la comprobación que no afirma sin haberlo visto
+   todo, la petición a `/diff`, el orden de los censos y la ruta) y
+   `tests/test_comparar_frontend.py` (sin mapeo, lo guardado al instante, la
+   vigencia de sus incidencias, la carrera de respuestas y el desplegable por
+   tipo).
+
+<a id="d197"></a>
+197. **La misma página en dos grupos del tráfico entre censos se escribe una
+   vez, y las frases se redactan al servir la ficha del rastreo** (revisión de
+   UX del 25-oct, 3.3, V46).
+
+   **Problema.** Una página con dos cambios está en los dos grupos (158), y
+   `textos` escribía una frase por grupo: en Lopesan (21-oct) salía «1 página
+   ganó 109 clics; coincide con que en ella cambia la indexabilidad» y debajo
+   «1 página ganó 109 clics; coincide con que en ella cambia el canonical». Era
+   la misma `/es`, y se leía como dos páginas y 218 clics. Además, la ficha del
+   rastreo enseñaba las frases guardadas en `comparacion.trafico.textos` el día
+   del análisis, mientras la del cliente (`/clients/{id}/trafico`) las
+   redactaba al servirlas: un cambio del redactor no llegaba a los censos ya
+   hechos.
+
+   **Decisión.**
+   - `textos` junta los grupos que tienen **exactamente las mismas páginas**:
+     «1 página ganó 109 clics; coincide con que en ella cambia la
+     indexabilidad y cambia el canonical». Solo si se sabe que son las mismas:
+     todas las páginas del grupo están en `ejemplos` (como mucho
+     `MAX_EJEMPLOS`) y el conjunto coincide. Dos grupos de 40 páginas con los
+     mismos 5 ejemplos no se juntan. Tampoco los que no nombran un cambio de
+     la página (trasvase, recibe trasvase, sin cambio, sin dato anterior).
+   - `GET /api/jobs/{id}` vuelve a redactar `comparacion.trafico.textos` con
+     `textos` al servirlo, como la ficha del cliente. Best-effort: si falla,
+     salen las guardadas. Slack ya usaba `textos` al enviar.
+   - El frontend junta el bloque de Search Console (142) y el de tráfico entre
+     censos (158) en un solo bloque «Google» (Resumen y Estado del cliente):
+     clics, impresiones y CTR medio con la ventana de los **datos** al lado
+     (el 26-oct la ventana llegaba al 26 y los datos al 23), una frase que dice
+     si los clics suben, bajan o se mantienen con la fecha de cada cifra, y si
+     la comparación espera a Search Console lo dice sin concluir nada. Las
+     páginas que más cambian salen una vez cada una, con todo lo que cambió en
+     ella y enlace a su ficha (se busca por la dirección en el censo; si no
+     está, se dice).
+
+   **Por qué el doble «2026-10-21 · 2026-10-21».** El nombre del rastreo ya
+   lleva la fecha (`lopesan.com (semanal) · 2026-10-21`) y la ficha del
+   cliente le añadía `fecha` detrás. Se cerró en la fase 2 (la fecha solo si
+   el nombre no la lleva); aquí se hace lo mismo con «Comparado con …
+   (2026-10-14)» del Resumen.
+
+   Tests: `tests/test_trafico_entre_censos.py` (la misma página una vez, no se
+   juntan sin saber que son las mismas, y la ficha del rastreo con las frases
+   redactadas al servirla) y `tests/test_google_limpieza_frontend.py` (cifras,
+   ventanas, frases y páginas en Chromium).
