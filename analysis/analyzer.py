@@ -56,6 +56,7 @@ from analysis import avisos_de_nofollow
 from analysis import avisos_de_wordpress
 from analysis import avisos_de_backlinks
 from analysis import avisos_de_logs
+from analysis import avisos_de_trampas
 from shared.rel_de_enlace import sql_nofollow_por_rel
 from shared.indexabilidad import (
     BOT_POR_DEFECTO, clave_url, es_noindex, estado_indexabilidad, limite_de_fragmento, misma_url,
@@ -484,6 +485,8 @@ class SEOAnalyzer:
         # Logs del servidor (decision 213): despues del PageRank, que es con
         # lo que se elige que paginas importantes no visita Googlebot.
         avisos_de_logs.avisar_sin_tumbar(self)
+        # Trampas de rastreo (decision 214): sobre todas las URLs del censo.
+        avisos_de_trampas.avisar_sin_tumbar(self)
         # Al final: sus condiciones pueden leer lo que acaba de escribir el
         # analisis (indexable, click_depth, in_sitemap...). No emite incidencias.
         self.segmentar()

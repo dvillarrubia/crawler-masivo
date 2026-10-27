@@ -7481,7 +7481,7 @@ const EXP_TABS = [
   // rastreo con `crawl_behavior.paridad_movil_muestra`.
   { key: 'a_movil',    label: 'Móvil',         icon: 'smartphone',   filter: HTML_INTERNO, ambito: ['paridad_movil_indexacion','paridad_movil_contenido','paridad_movil_respuesta'],
     columns: ['url','status_code','title','canonical_href','meta_robots','content_word_count','indexable'] },
-  { key: 'a_urls',     label: 'Forma de la URL', icon: 'link',       filter: { is_internal: true }, ambito: ['url_too_long','url_non_ascii','url_uppercase','url_underscores','url_multiple_slashes','url_has_parameters','url_non_seo_friendly','url_cms_faceted'],
+  { key: 'a_urls',     label: 'Forma de la URL', icon: 'link',       filter: { is_internal: true }, ambito: ['url_too_long','url_non_ascii','url_uppercase','url_underscores','url_multiple_slashes','url_has_parameters','url_non_seo_friendly','url_cms_faceted','trampa_de_rastreo'],
     columns: ['url','status_code','url_length','indexable','inlinks_count'] },
   // Lo del servidor (decisiones 109 y 110): tiempo hasta el primer byte,
   // compresion y certificado. Sobre las internas: un host con el certificado

@@ -174,6 +174,13 @@ const ISSUE_INFO = {
     google: 'Aún la muestra en los resultados: todavía no ha consolidado la señal en la nueva. Es normal justo después de una migración; si dura meses, algo (enlaces internos, sitemap, hreflang) sigue apuntando a la vieja.',
     arreglo: 'Que los enlaces internos, el sitemap y el hreflang apunten a la URL final. Informativo.',
   },
+  // ----- Trampas de rastreo (decision 214) -----
+  'trampa_de_rastreo': {
+    que: 'Una plantilla que genera URLs sin fin: un calendario con «mes siguiente», un identificador de sesión en la URL, filtros que se combinan entre sí, la búsqueda interna o un enlace relativo que se repite a sí mismo (`/a/b/a/b/`). El detalle dice de qué tipo, cuántas URLs del rastreo genera y qué parte del rastreo se lleva.',
+    google: 'Gasta su presupuesto de rastreo en copias y variantes, y tarda más en llegar (y en volver) a las páginas que importan. Las de sesión y búsqueda, además, son contenido duplicado.',
+    arreglo: 'Según el tipo: quitar la sesión de la URL (cookie), poner nofollow o bloquear en robots.txt los filtros que no se quieran indexar y los resultados de búsqueda, acotar el calendario y corregir el enlace relativo. Se mide lo que el rastreo ya gastó: el sitio puede tener más.',
+  },
+
   // ----- Logs del servidor (decision 213) -----
   'indexable_sin_visitas_googlebot': {
     que: 'Página indexable de las más importantes del sitio (el cuarto con más PageRank) a la que Googlebot no ha ido en todo el periodo del log subido. Solo se afirma con 7 días de log o más.',
@@ -994,6 +1001,7 @@ const ISSUE_LABEL_EXTRA = {
   google_tiene_canonical_antiguo: 'Google tiene un canonical antiguo',
   trafico_en_redireccion: 'Tráfico en una URL que redirige',
   huerfana_con_trafico: 'Huérfana con tráfico de Google',
+  trampa_de_rastreo: 'Trampa de rastreo',
   indexable_sin_visitas_googlebot: 'Importante y sin visitas de Googlebot',
   googlebot_recibe_error: 'Googlebot recibe errores',
   backlinks_a_error: 'Backlinks a una página con error',
@@ -1126,6 +1134,8 @@ const DETALLE_LABEL = {
   origenes: 'páginas que la enlazan', con_ancla_generica: 'con ancla genérica', anclas: 'anclas',
   cobertura: 'según Google', canonical_hoy: 'declarada en el censo', canonical_visto_por_google: 'visto por Google', canonical_declarado: 'declarado', canonical_de_google: 'de Google', inspeccionada: 'inspeccionada el', en: 'en', ultimo_rastreo_google: 'última visita de Google',
   // Backlinks del cliente (decision 212); tambien en el detalle de una huerfana.
+  trampa: 'tipo', parte_del_censo: 'parte del rastreo', fechas_distintas: 'fechas distintas', fuera_de_rango: 'fechas fuera de rango',
+  combinaciones: 'combinaciones de filtros', mismo_filtro_en_otro_orden: 'mismos filtros en otro orden',
   dias_de_log: 'días de log', con_error: 'con error', codigos: 'códigos',
   backlinks: 'backlinks', dominios: 'dominios que enlazan', autoridad: 'autoridad que aporta', origenes: 'enlazada desde',
   clics: 'clics', impresiones: 'impresiones', ventana_dias: 'días', clics_variantes: 'clics en variantes', clics_pagina: 'clics en la página', variantes: 'variantes',
