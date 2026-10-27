@@ -70,7 +70,8 @@ def _job(S):
 
 
 def _decision(S, job_id, ruta, *, pregunta="es_soft_404", respuesta="false", confianza=0.7,
-              estado="incierto", clave=None, origen="modelo", url_id=None, run_id=None):
+              estado="incierto", clave=None, origen="modelo", url_id=None, run_id=None,
+              modelo=None, probabilidades=None):
     p = CATALOGO[pregunta]
     with S() as s:
         if url_id is None:
@@ -81,7 +82,7 @@ def _decision(S, job_id, ruta, *, pregunta="es_soft_404", respuesta="false", con
         d = Decision(job_id=job_id, url_id=url_id, run_id=run_id, ambito="url",
                      clave=clave or f"clave{ruta}", pregunta=pregunta,
                      version_pregunta=p.version, estado=estado, origen=origen, respuesta=respuesta,
-                     confianza=confianza, modelo=p.modelo,
+                     confianza=confianza, modelo=modelo or p.modelo, probabilidades=probabilidades,
                      estado_enviado={"ruta": ruta, "titulo": f"Título de {ruta}"})
         s.add(d)
         s.commit()
@@ -111,10 +112,12 @@ def test_un_estado_en_dos_urls_se_revisa_una_vez(entorno):
     _decision(S, jid, "/a/", clave="misma")
     _decision(S, otro, "/a/?www", clave="misma")
     _decision(S, jid, "/b/")
-    filas = api.get("/api/decisiones/revision").json()
+    q = {"pregunta": "es_soft_404"}
+    filas = api.get("/api/decisiones/revision", params=q).json()
     assert len(filas) == 2
-    api.put(f"/api/decisiones/{filas[0]['decision_id']}/etiqueta", json={"etiqueta": False})
-    assert len(api.get("/api/decisiones/revision").json()) == 1, "la etiqueta vale para sus copias"
+    misma = next(f for f in filas if f["estado"]["ruta"].startswith("/a/"))
+    api.put(f"/api/decisiones/{misma['decision_id']}/etiqueta", json={"etiqueta": False})
+    assert len(api.get("/api/decisiones/revision", params=q).json()) == 1, "la etiqueta vale para sus copias"
 
 
 def test_una_etiqueta_fuera_del_vocabulario_se_rechaza(entorno):
@@ -138,11 +141,12 @@ def test_corregir_una_etiqueta_no_duplica(entorno):
         assert (e.etiqueta, e.autor) == ("false", "dvillarrubia")
 
 
-def test_lo_decidido_lo_de_regla_y_las_versiones_viejas_no_se_ofrecen(entorno):
+def test_lo_decidido_lo_de_regla_otro_modelo_y_las_versiones_viejas_no_se_ofrecen(entorno):
     api, S = entorno
     jid = _job(S)
     _decision(S, jid, "/dec/", estado="decidido")
-    _decision(S, jid, "/regla/", origen="regla")
+    regla, _ = _decision(S, jid, "/regla/", origen="regla")
+    _decision(S, jid, "/otro-modelo/", modelo="typesafe/jev-antiguo")
     did_viejo, _ = _decision(S, jid, "/vieja/")
     with S() as s:
         s.get(Decision, did_viejo).version_pregunta = CATALOGO["es_soft_404"].version - 1
@@ -150,6 +154,8 @@ def test_lo_decidido_lo_de_regla_y_las_versiones_viejas_no_se_ofrecen(entorno):
     assert api.get("/api/decisiones/revision", params={"pregunta": "es_soft_404"}).json() == []
     todas = api.get("/api/decisiones/revision", params={"pregunta": "es_soft_404", "estado": "todas"}).json()
     assert [f["estado"]["ruta"] for f in todas] == ["/dec/"], "con «todas», también lo decidido"
+    assert api.put(f"/api/decisiones/{regla}/etiqueta", json={"etiqueta": "true"}).status_code == 409
+    assert api.put(f"/api/decisiones/{did_viejo}/etiqueta", json={"etiqueta": "true"}).status_code == 409
 
 
 def test_solo_si_lo_que_no_aplica_no_se_revisa(entorno):
@@ -239,3 +245,75 @@ def test_la_orden_etiquetas_del_script(entorno, tmp_path, monkeypatch):
     assert fila["etiqueta"] == "false" and fila["estado"]["ruta"] == "/a/"
     (r,) = [json.loads(x) for x in resp.read_text().splitlines()]
     assert (r["respuesta"], r["id"]) == ("true", fila["id"])
+
+
+def _job_con_taxonomia(S, taxonomia):
+    from shared.models import Client
+
+    with S() as s:
+        c = Client(id=uuid.uuid4(), nombre="Acme", slug=f"acme-{uuid.uuid4().hex[:6]}", dominios=[],
+                   config_defecto={"taxonomia": taxonomia}, integraciones=[])
+        s.add(c)
+        s.flush()
+        j = Job(id=uuid.uuid4(), name="censo", seeds=["https://x.com/"], status="completed", config={},
+                cliente_id=c.id)
+        s.add(j)
+        s.commit()
+        return j.id, c.id
+
+
+def _opciones(taxonomia):
+    from shared.preguntas.tipo_pagina import opciones_de_taxonomia
+
+    return opciones_de_taxonomia(taxonomia)
+
+
+def test_opciones_del_cliente_un_juego_por_taxonomia_y_la_de_hoy(entorno):
+    """categoria_cliente (decision 178): las opciones son de cada cliente. Dos
+    clientes no van en un juego (`evaluar` normaliza con las de la primera
+    fila), y una taxonomia cambiada deja de ofrecer lo respondido con la vieja."""
+    from shared.models import Client
+
+    api, S = entorno
+    tax_a, tax_b = ["hoteles", "ofertas"], ["cursos", "becas", "blog"]
+    ja, ca = _job_con_taxonomia(S, tax_a)
+    jb, _ = _job_con_taxonomia(S, tax_b)
+    da, _ = _decision(S, ja, "/a/", pregunta="categoria_cliente", respuesta="hoteles",
+                      probabilidades={k: 0.1 for k in _opciones(tax_a)})
+    db_, _ = _decision(S, jb, "/b/", pregunta="categoria_cliente", respuesta="cursos",
+                       probabilidades={k: 0.1 for k in _opciones(tax_b)})
+    q = {"pregunta": "categoria_cliente"}
+    filas = api.get("/api/decisiones/revision", params=q).json()
+    assert sorted(f["estado"]["ruta"] for f in filas) == ["/a/", "/b/"]
+    assert {o["valor"] for o in next(f for f in filas if f["estado"]["ruta"] == "/a/")["opciones"]} == set(_opciones(tax_a))
+    assert api.put(f"/api/decisiones/{da}/etiqueta", json={"etiqueta": "ofertas"}).status_code == 200
+    assert api.put(f"/api/decisiones/{db_}/etiqueta", json={"etiqueta": "hoteles"}).status_code == 422, \
+        "el vocabulario es el de SU cliente"
+    assert api.put(f"/api/decisiones/{db_}/etiqueta", json={"etiqueta": "becas"}).status_code == 200
+    assert api.get("/api/decisiones/etiquetas/categoria_cliente/juego.jsonl").status_code == 409
+    (fila,) = [f for f in api.get("/api/decisiones/revision/resumen").json() if f["pregunta"] == "categoria_cliente"]
+    assert len(fila["variantes"]) == 2
+    for v in fila["variantes"]:
+        r = api.get("/api/decisiones/etiquetas/categoria_cliente/juego.jsonl", params={"variante": v["variante"]})
+        assert r.status_code == 200 and len(r.text.splitlines()) == 1
+
+    # El cliente A cambia su taxonomia: lo que Jev eligio entre las viejas ya no se ofrece.
+    _decision(S, ja, "/a2/", pregunta="categoria_cliente", respuesta="hoteles", clave="otra",
+              probabilidades={k: 0.1 for k in _opciones(tax_a)})
+    with S() as s:
+        s.get(Client, ca).config_defecto = {"taxonomia": ["hoteles", "ofertas", "spa"]}
+        s.commit()
+    assert [f["estado"]["ruta"] for f in api.get("/api/decisiones/revision", params=q).json()] == []
+    assert api.put(f"/api/decisiones/{da}/etiqueta", json={"etiqueta": "ofertas"}).status_code == 409
+
+
+def test_al_exportar_solo_van_las_respuestas_del_modelo_de_hoy(entorno):
+    api, S = entorno
+    did, _ = _decision(S, _job(S), "/a/", respuesta="true")
+    api.put(f"/api/decisiones/{did}/etiqueta", json={"etiqueta": "true"})
+    with S() as s:
+        s.query(DecisionLabel).one().modelo_jev = "typesafe/jev-antiguo"
+        s.commit()
+    juego = api.get("/api/decisiones/etiquetas/es_soft_404/juego.jsonl").text.splitlines()
+    resp = api.get("/api/decisiones/etiquetas/es_soft_404/respuestas.jsonl").text.splitlines()
+    assert len(juego) == 1 and resp == [], "la etiqueta sigue; la respuesta de otro modelo no"

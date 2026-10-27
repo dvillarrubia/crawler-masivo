@@ -1695,6 +1695,28 @@
      - Una pregunta con `solo_si` (la recomendación de una canibalización,
        175) solo donde la otra respondió lo que pide.
      - Las de regla, arrastre o humano no son de Jev y no salen.
+   - **Solo lo que mide la pregunta de hoy**: su versión y su **modelo** del
+     catálogo. Con las opciones del cliente (178), además, las mismas que vio
+     Jev: si el cliente cambió su taxonomía, la respuesta vieja se eligió
+     entre otras opciones y no se ofrece ni se puede etiquetar (409). Es el
+     mismo filtro que la caché. La etiqueta humana vale para cualquier modelo,
+     pero su `respuesta_jev` no: se guarda con `modelo_jev` y al exportar solo
+     va la del modelo de hoy. Sin ella la fila cuenta como no evaluable y
+     `responder` la vuelve a preguntar.
+   - **Un juego por taxonomía.** `evaluar` normaliza todas las filas con las
+     opciones de la primera, así que dos clientes en un juego contarían unas
+     contra el vocabulario del otro. Con las opciones del cliente se exporta
+     con `?variante=` (409 si hay varias y no se elige).
+   - **Sin sesgo de orden.** Se ofrece por la clave del estado (un hash, así
+     que el orden es pseudoaleatorio y estable), con cursor y no con OFFSET.
+     Por `id` salían primero los censos viejos, agrupados por sitio, y
+     `evaluar` trata el juego como una muestra.
+   - Un índice parcial `ix_decisions_revision (pregunta, version_pregunta,
+     estado) WHERE origen IN ('modelo', 'cache')`, porque ninguno de
+     `decisions` empezaba por la pregunta. Dos personas que guardan el mismo
+     estado a la vez no dan un 500: la segunda reintenta y corrige. En la
+     pantalla, dos pulsaciones seguidas mandan un solo PUT. Cmd/Ctrl+número,
+     un diálogo abierto o una tanda cargando no etiquetan.
    - **La etiqueta se valida** con `normalizar_etiqueta`, la misma de
      `evaluar`: «sí» es `true` en un noul, y en un score se elige el nivel.
      Lo que no es del vocabulario da 422.
@@ -1717,6 +1739,8 @@
 
    Tests:
    - `tests/test_revision_decisiones.py`, la API sobre SQLite:
+     - un juego por taxonomía y la taxonomía cambiada;
+     - solo el modelo de hoy, también al exportar;
      - a ciegas;
      - un estado y una etiqueta;
      - el vocabulario y los scores;
@@ -1730,5 +1754,7 @@
      - etiquetar con clic o con número;
      - la respuesta de Jev solo después;
      - saltar sin guardar;
-     - la tanda siguiente.
+     - la tanda siguiente;
+     - un solo PUT por doble pulsación, y los modificadores y los diálogos
+       no etiquetan.
    - `tests/test_decisiones_no_se_disparan.py`: lo que importa el módulo.

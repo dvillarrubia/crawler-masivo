@@ -498,6 +498,7 @@ def main(argv: list[str] | None = None) -> int:
     h.add_argument("pregunta")
     h.add_argument("--juego", required=True)
     h.add_argument("--respuestas", required=True)
+    h.add_argument("--variante", default=None)
     g = sub.add_parser("huellas")
     g.add_argument("juegos", nargs="+")
     g.add_argument("--salida", required=True)
@@ -558,8 +559,8 @@ def main(argv: list[str] | None = None) -> int:
 
         s = SessionLocal()
         try:
-            juego, respuestas = exportar(s, args.pregunta)
-        except LookupError as exc:
+            juego, respuestas = exportar(s, args.pregunta, args.variante)
+        except (LookupError, ValueError) as exc:
             raise SystemExit(str(exc)) from exc
         finally:
             s.close()

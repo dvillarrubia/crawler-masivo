@@ -1561,6 +1561,10 @@ class Decision(Base):
         Index("ix_decisions_url_id", "url_id"),
         Index("ix_decisions_cache", "clave", "pregunta", "version_pregunta", "modelo"),
         Index("ix_decisions_run_id", "run_id"),
+        # La revision humana (decision 211); en una base ya creada lo pone
+        # `init_db.migrar_enriquecido`.
+        Index("ix_decisions_revision", "pregunta", "version_pregunta", "estado",
+              postgresql_where=sql_text("origen IN ('modelo', 'cache')")),
     )
 
 
@@ -1598,6 +1602,9 @@ class DecisionLabel(Base):
     opciones = Column(JSON, nullable=True)
     respuesta_jev = Column(Text, nullable=True)
     confianza_jev = Column(Float, nullable=True)
+    # El modelo que dio `respuesta_jev`: la etiqueta humana vale para cualquier
+    # modelo, pero su respuesta no. Al exportar solo va la del modelo actual.
+    modelo_jev = Column(String(64), nullable=True)
     # En el vocabulario de la pregunta (`normalizar_etiqueta`): "true"/"false",
     # la opcion o el indice del nivel.
     etiqueta = Column(Text, nullable=False)

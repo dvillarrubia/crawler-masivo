@@ -939,7 +939,7 @@ function app() {
     // Ajustes de la agencia (revision de UX del 25-oct, 2.5)
     ajustes: null,
     // «Revisar a Jev» (#8, decision 211): a ciegas, lo de Jev se ve al guardar.
-    revision: { resumen: [], pregunta: '', items: [], resultado: null, nota: '', autor: '', cargando: false },
+    revision: { resumen: [], pregunta: '', items: [], resultado: null, nota: '', autor: '', cargando: false, enviando: false },
 
     // Detalle del trabajo
     job: null,
@@ -3629,6 +3629,7 @@ function app() {
 
     async cargarPendientesRevision() {
       this.revision.cargando = true;
+      this.revision.items = [];
       try {
         this.revision.items = await api('/decisiones/revision?limite=20&pregunta=' + encodeURIComponent(this.revision.pregunta));
       } catch (e) {
@@ -3645,7 +3646,10 @@ function app() {
 
     async etiquetarRevision(valor) {
       const item = this.revision.items[0];
-      if (!item || this.revision.resultado) return;
+      // Dos pulsaciones seguidas mandaban dos PUT: la guardada era la segunda
+      // y la pantalla ensenaba la primera.
+      if (!item || this.revision.resultado || this.revision.enviando || this.revision.cargando) return;
+      this.revision.enviando = true;
       try {
         try { localStorage.setItem('seo-crawler-revisor', this.revision.autor || ''); } catch (_) { /* sin storage */ }
         const r = await api('/decisiones/' + item.decision_id + '/etiqueta', {
@@ -3655,6 +3659,8 @@ function app() {
         this.revision.resultado = { ...r, item };
       } catch (e) {
         this.error = 'No se pudo guardar la etiqueta: ' + e.message;
+      } finally {
+        this.revision.enviando = false;
       }
     },
 
@@ -3676,9 +3682,11 @@ function app() {
     },
 
     teclaRevision(ev) {
-      if (this.view !== 'revision' || !this.revision.pregunta) return;
+      if (this.view !== 'revision' || !this.revision.pregunta || this.dialogo || this.revision.cargando) return;
+      // Cmd/Ctrl+1 es cambiar de pestana, no etiquetar.
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
       const t = ev.target && ev.target.tagName;
-      if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT') return;
+      if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT' || (ev.target && ev.target.isContentEditable)) return;
       if (this.revision.resultado && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); this.siguienteRevision(); return; }
       const item = this.revision.items[0];
       const n = Number(ev.key);

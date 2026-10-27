@@ -13,11 +13,16 @@ Lo que se sujeta:
 - **Un estado, una etiqueta.** El mismo estado en dos URLs o dos censos es la
   misma entrada para Jev (decision 169): se revisa una vez, y la etiqueta vale
   para todas sus copias.
-- **Lo que no aplica no se revisa.** Una pregunta con `solo_si` (la
-  recomendacion de una canibalizacion, decision 175) solo donde la otra
-  respondio lo que pide.
-- **Una version nueva se etiqueta otra vez** (decision 180): la etiqueta es
-  de (estado, pregunta, version, opciones).
+- **Lo que se ofrece es lo que mide la pregunta de hoy**: su version y su
+  modelo del catalogo, y con las opciones de su cliente las mismas que vio Jev
+  (si el cliente cambio su taxonomia, la respuesta vieja se eligio entre otras
+  opciones y no se puede comparar; el mismo filtro que la cache, decision 178).
+  Una pregunta con `solo_si` (la recomendacion de una canibalizacion, 175),
+  solo donde la otra respondio lo que pide.
+- **Sin sesgo de orden.** Se ofrece por la clave del estado (un hash, asi que
+  un orden pseudoaleatorio estable), no por antiguedad: por `id` salian
+  primero los censos viejos, agrupados por sitio, y `evaluar` trata el juego
+  como una muestra.
 """
 
 from __future__ import annotations
@@ -32,12 +37,14 @@ from sqlalchemy.orm import aliased
 # cache, que es una respuesta suya anterior). Las de regla, arrastre o humano
 # no son de Jev.
 ORIGENES_DE_JEV = ("modelo", "cache")
-# Cuantas filas se leen por cada una que se devuelve: varias copias del mismo
-# estado salen juntas y se quedan en una.
-_LOTE_POR_FILA = 5
+_LOTE = 200
 
 
 class EtiquetaInvalida(ValueError):
+    pass
+
+
+class NoRevisable(LookupError):
     pass
 
 
@@ -52,21 +59,27 @@ def modulo_de(pregunta: str):
 
 
 def pregunta_de(db, decision):
-    """La `Pregunta` con la que se juzgo la decision, con las opciones de su
-    cliente si son suyas (decision 178). None si ya no esta en el catalogo."""
+    """La `Pregunta` con la que hoy se juzgaria la decision, o None si ya no
+    sirve para medirla: fuera del catalogo, otra version u otro modelo, o (con
+    las opciones del cliente, decision 178) un cliente sin taxonomia o con una
+    distinta de la que vio Jev."""
     from shared.models import Job
     from shared.preguntas import CATALOGO
 
     p = CATALOGO.get(decision.pregunta)
-    if p is None or not p.opciones_del_cliente:
+    if p is None or decision.version_pregunta != p.version or decision.modelo != p.modelo:
+        return None
+    if not p.opciones_del_cliente:
         return p
     modulo = modulo_de(decision.pregunta)
     job = db.get(Job, decision.job_id) if decision.job_id else None
     if modulo is None or job is None:
         return None
     for pc in modulo.preguntas_para(db, job):
-        if pc.nombre == p.nombre:
-            return pc if pc.variante else None
+        if pc.nombre == p.nombre and pc.variante:
+            if set(decision.probabilidades or {}) != set(pc.opciones):
+                return None
+            return pc
     return None
 
 
@@ -84,58 +97,74 @@ def _aplica(Decision, pregunta):
                           c.url_id == Decision.url_id, c.pregunta == otra, c.respuesta == valor)
 
 
-def _consulta(db, *, pregunta: str | None, job_id, estado: str | None):
+def _consulta(db, p, *, job_id=None, estado: str | None = "incierto"):
+    """Las decisiones de Jev de la pregunta `p` (del catalogo) que se pueden
+    revisar. Sin etiquetar, en SQL, salvo las de opciones del cliente: ahi la
+    etiqueta es por variante y `decisions` no la guarda (se mira despues)."""
     from shared.models import Decision, DecisionLabel
-    from shared.preguntas import CATALOGO
 
     q = (db.query(Decision)
-         .filter(Decision.origen.in_(ORIGENES_DE_JEV), Decision.estado_enviado.isnot(None),
-                 Decision.respuesta.isnot(None), ~_etiquetada(Decision, DecisionLabel)))
+         .filter(Decision.pregunta == p.nombre, Decision.version_pregunta == p.version,
+                 Decision.modelo == p.modelo, Decision.origen.in_(ORIGENES_DE_JEV),
+                 Decision.estado_enviado.isnot(None), Decision.respuesta.isnot(None)))
     if estado:
         q = q.filter(Decision.estado == estado)
     if job_id:
         q = q.filter(Decision.job_id == job_id)
-    if pregunta:
-        q = q.filter(Decision.pregunta == pregunta)
-        p = CATALOGO.get(pregunta)
-        if p is not None:
-            # Solo la version del catalogo: etiquetar la vieja no mide nada
-            # que se vaya a usar.
-            q = q.filter(Decision.version_pregunta == p.version)
-            if p.solo_si is not None:
-                q = q.filter(_aplica(Decision, p))
+    if p.opciones_del_cliente:
+        # Sin censo no hay cliente, ni taxonomia con la que ensenarla.
+        q = q.filter(Decision.job_id.isnot(None))
+    else:
+        q = q.filter(~_etiquetada(Decision, DecisionLabel))
+    if p.solo_si is not None:
+        q = q.filter(_aplica(Decision, p))
     return q
 
 
-def pendientes(db, *, pregunta: str | None = None, job_id=None, estado: str | None = "incierto",
-               limite: int = 20) -> list[dict[str, Any]]:
-    """Lo que falta por revisar, una fila por estado, SIN la respuesta de Jev."""
-    from shared.models import Decision, Url
+def _ya_etiquetada(db, d, p) -> bool:
+    from shared.models import DecisionLabel
 
-    vistas: set[tuple[str, str, int]] = set()
+    return db.query(DecisionLabel.id).filter(
+        DecisionLabel.clave == d.clave, DecisionLabel.pregunta == d.pregunta,
+        DecisionLabel.version_pregunta == d.version_pregunta,
+        DecisionLabel.variante == (p.variante or "")).first() is not None
+
+
+def pendientes(db, *, pregunta: str, job_id=None, estado: str | None = "incierto",
+               limite: int = 20) -> list[dict[str, Any]]:
+    """Lo que falta por revisar, una fila por estado, SIN la respuesta de Jev.
+    Por la clave del estado (orden pseudoaleatorio estable), con cursor."""
+    from shared.models import Decision, Url
+    from shared.preguntas import CATALOGO
+
+    p = CATALOGO.get(pregunta)
+    if p is None:
+        return []
+    vistas: set[str] = set()
     salida: list[dict[str, Any]] = []
-    desde = 0
-    lote = max(limite * _LOTE_POR_FILA, 50)
+    tras: tuple[str, int] | None = None
     while len(salida) < limite:
-        filas = (_consulta(db, pregunta=pregunta, job_id=job_id, estado=estado)
-                 .order_by(Decision.id).offset(desde).limit(lote).all())
+        q = _consulta(db, p, job_id=job_id, estado=estado)
+        if tras is not None:
+            q = q.filter((Decision.clave > tras[0]) | and_(Decision.clave == tras[0], Decision.id > tras[1]))
+        filas = q.order_by(Decision.clave, Decision.id).limit(_LOTE).all()
         if not filas:
             break
-        desde += len(filas)
+        tras = (filas[-1].clave, filas[-1].id)
         for d in filas:
-            k = (d.clave, d.pregunta, d.version_pregunta)
-            if k in vistas:
+            if d.clave in vistas:
                 continue
-            vistas.add(k)
-            p = pregunta_de(db, d)
-            if p is None:
+            pc = pregunta_de(db, d)
+            if pc is None or (pc.opciones_del_cliente and _ya_etiquetada(db, d, pc)):
                 continue
+            vistas.add(d.clave)
             url = db.query(Url.url).filter(Url.id == d.url_id).scalar() if d.url_id else None
             salida.append({
-                "decision_id": d.id, "pregunta": p.nombre, "version": p.version,
-                "tipo": p.tipo, "instrucciones": p.instrucciones, "descripcion": p.descripcion,
-                "opciones": opciones_para_pantalla(p), "url": url, "job_id": str(d.job_id) if d.job_id else None,
-                "ambito": d.ambito, "estado": d.estado_enviado,
+                "decision_id": d.id, "pregunta": pc.nombre, "version": pc.version,
+                "tipo": pc.tipo, "instrucciones": pc.instrucciones, "descripcion": pc.descripcion,
+                "opciones": opciones_para_pantalla(pc), "url": url,
+                "job_id": str(d.job_id) if d.job_id else None, "ambito": d.ambito,
+                "estado": d.estado_enviado,
             })
             if len(salida) >= limite:
                 break
@@ -160,8 +189,9 @@ def etiquetar(db, decision_id: int, etiqueta, *, nota: str | None = None,
     """Guarda (o corrige) la etiqueta humana del estado de la decision.
 
     Devuelve lo que dijo Jev para ensenarlo DESPUES. Sin commit: lo hace quien
-    llama. `EtiquetaInvalida` si no esta en el vocabulario de la pregunta, y
-    `LookupError` si la decision no existe o su pregunta ya no esta.
+    llama. `EtiquetaInvalida` si no esta en el vocabulario de la pregunta;
+    `NoRevisable` si la decision no existe o no es algo que se revise (de
+    regla, de otra version o modelo, con una taxonomia que ya no es la suya).
     """
     from shared.evaluacion_decisiones import etiqueta_de_respuesta, normalizar_etiqueta
     from shared.models import Decision, DecisionLabel
@@ -169,9 +199,12 @@ def etiquetar(db, decision_id: int, etiqueta, *, nota: str | None = None,
     d = db.get(Decision, decision_id)
     if d is None:
         raise LookupError("decision no encontrada")
+    if d.origen not in ORIGENES_DE_JEV or d.respuesta is None:
+        raise NoRevisable("no es una respuesta de Jev")
     p = pregunta_de(db, d)
     if p is None:
-        raise LookupError("su pregunta ya no esta en el catalogo")
+        raise NoRevisable("ya no se puede medir con la pregunta de hoy (otra version, otro modelo "
+                          "u otras opciones del cliente)")
     valor = normalizar_etiqueta(p.tipo, etiqueta, p.opciones)
     if valor is None:
         raise EtiquetaInvalida(f"«{etiqueta}» no es una respuesta de {p.nombre}")
@@ -191,6 +224,7 @@ def etiquetar(db, decision_id: int, etiqueta, *, nota: str | None = None,
     fila.opciones = dict(p.opciones) if p.opciones_del_cliente else None
     fila.respuesta_jev = d.respuesta
     fila.confianza_jev = d.confianza
+    fila.modelo_jev = d.modelo
     fila.etiqueta = valor
     fila.nota = (nota or "").strip() or None
     fila.autor = (autor or "").strip()[:128] or None
@@ -201,51 +235,74 @@ def etiquetar(db, decision_id: int, etiqueta, *, nota: str | None = None,
 
 def resumen(db) -> list[dict[str, Any]]:
     """Por pregunta (version del catalogo): cuanto falta por revisar, cuanto
-    esta etiquetado y en cuanto coincide Jev con la persona."""
+    esta etiquetado y en cuanto coincide Jev. Con las opciones del cliente,
+    `por_revisar` es aproximado (no sabe que estados ya tienen etiqueta con su
+    variante) y lo etiquetado va tambien por variante, que es como se exporta."""
     from shared.evaluacion_decisiones import etiqueta_de_respuesta
     from shared.models import Decision, DecisionLabel
     from shared.preguntas import CATALOGO
 
     salida = []
     for nombre, p in sorted(CATALOGO.items()):
-        q = _consulta(db, pregunta=nombre, job_id=None, estado="incierto")
-        por_revisar = q.with_entities(func.count(func.distinct(Decision.clave))).scalar() or 0
-        etiquetas = (db.query(DecisionLabel.etiqueta, DecisionLabel.respuesta_jev, DecisionLabel.opciones)
+        por_revisar = (_consulta(db, p, estado="incierto")
+                       .with_entities(func.count(func.distinct(Decision.clave))).scalar() or 0)
+        etiquetas = (db.query(DecisionLabel.etiqueta, DecisionLabel.respuesta_jev, DecisionLabel.variante)
                      .filter(DecisionLabel.pregunta == nombre, DecisionLabel.version_pregunta == p.version)
                      .all())
         if not por_revisar and not etiquetas:
             continue
         niveles = len(p.opciones) if p.tipo == "score" else None
         coinciden = sum(1 for e, r, _ in etiquetas if etiqueta_de_respuesta(p.tipo, r, niveles) == e)
+        variantes: dict[str, int] = {}
+        for _, _, v in etiquetas:
+            variantes[v or ""] = variantes.get(v or "", 0) + 1
         salida.append({"pregunta": nombre, "version": p.version, "descripcion": p.descripcion,
                        "por_revisar": int(por_revisar), "etiquetadas": len(etiquetas),
-                       "coinciden_con_jev": coinciden, "umbral": p.umbral, "ejemplo": p.ejemplo})
+                       "coinciden_con_jev": coinciden, "umbral": p.umbral, "ejemplo": p.ejemplo,
+                       "opciones_del_cliente": p.opciones_del_cliente,
+                       "variantes": [{"variante": v, "etiquetadas": n} for v, n in sorted(variantes.items())]})
     return salida
 
 
-def exportar(db, pregunta: str) -> tuple[list[dict], list[dict]]:
+def exportar(db, pregunta: str, variante: str | None = None) -> tuple[list[dict], list[dict]]:
     """(juego, respuestas) de lo etiquetado, con la forma de `extraer` y de
     `responder` de `scripts/evaluar_decisiones.py`, para pasarlo a `evaluar`.
-    Solo la version del catalogo; el `id` de cada fila es el del estado."""
+
+    Solo la version del catalogo. Con las opciones del cliente, un juego por
+    variante (taxonomia): `evaluar` normaliza todas las filas con las opciones
+    de la primera, y dos clientes juntos contarian unas contra el vocabulario
+    del otro. Las respuestas, solo las del modelo del catalogo: la etiqueta
+    humana vale para cualquiera, la respuesta no (sin ella la fila cuenta como
+    no evaluable, y `responder` la vuelve a preguntar).
+    """
     from shared.models import DecisionLabel
     from shared.preguntas import CATALOGO
 
     p = CATALOGO.get(pregunta)
     if p is None:
         raise LookupError(f"{pregunta} no esta en el catalogo")
-    filas = (db.query(DecisionLabel)
-             .filter(DecisionLabel.pregunta == pregunta, DecisionLabel.version_pregunta == p.version)
-             .order_by(DecisionLabel.id).all())
+    q = db.query(DecisionLabel).filter(DecisionLabel.pregunta == pregunta,
+                                       DecisionLabel.version_pregunta == p.version)
+    if p.opciones_del_cliente:
+        hay = sorted({v for (v,) in q.with_entities(DecisionLabel.variante).distinct()})
+        if variante is None:
+            if len(hay) > 1:
+                raise ValueError(f"{pregunta} tiene etiquetas de {len(hay)} taxonomias: un juego por "
+                                 f"variante ({', '.join(hay)})")
+            variante = hay[0] if hay else ""
+        q = q.filter(DecisionLabel.variante == variante)
     juego, respuestas = [], []
-    for f in filas:
+    for f in q.order_by(DecisionLabel.id).all():
         ident = f"{f.ambito}|{f.clave}|{f.variante}" if f.variante else f"{f.ambito}|{f.clave}"
         juego.append({"id": ident, "ambito": f.ambito, "pregunta": pregunta, "version": p.version,
                       "estado": f.estado_enviado, "etiqueta": f.etiqueta,
                       "etiquetado_por": f.autor or "revision", "nota": f.nota or "",
                       "origen_etiqueta": "revision",
                       **({"opciones": f.opciones} if f.opciones else {})})
-        respuestas.append({"id": ident, "pregunta": pregunta, "version": p.version,
-                           "respuesta": f.respuesta_jev, "confianza": f.confianza_jev})
+        if f.respuesta_jev is not None and (f.modelo_jev or p.modelo) == p.modelo:
+            respuestas.append({"id": ident, "pregunta": pregunta, "version": p.version,
+                               "respuesta": f.respuesta_jev, "confianza": f.confianza_jev,
+                               "modelo": f.modelo_jev})
     return juego, respuestas
 
 

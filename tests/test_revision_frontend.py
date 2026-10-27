@@ -99,3 +99,18 @@ def test_los_campos_del_estado():
     assert r[0]["largo"] is False and r[1]["largo"] is True and r[2]["largo"] is True
     assert json.loads(r[1]["valor"]) == ["x", "y"]
     assert _evaluar("() => camposDeEstado(null)") == []
+
+
+def test_dos_pulsaciones_seguidas_mandan_un_solo_put_y_los_modificadores_no_etiquetan():
+    r = _evaluar(_app("""
+        await a.verRevision('es_soft_404');
+        a.teclaRevision({ key: '1', metaKey: true, target: { tagName: 'BODY' }, preventDefault() {} });
+        const uno = a.etiquetarRevision('true'), dos = a.etiquetarRevision('false');
+        await Promise.all([uno, dos]);
+        a.dialogo = { titulo: 'x' };
+        a.revision.resultado = null;
+        a.revision.items = a.revision.items.slice(1);
+        a.teclaRevision({ key: '1', target: { tagName: 'BODY' }, preventDefault() {} });
+        await new Promise(r => setTimeout(r, 0));
+        return llamadas.filter(l => l[1] === 'PUT').map(l => l[2].etiqueta);"""))
+    assert r == ["true"], "Cmd+1 no etiqueta, la segunda pulsación no sale y con un diálogo abierto tampoco"

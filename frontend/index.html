@@ -2153,9 +2153,14 @@
                       <td class="ta-r nowrap">
                         <a class="btn btn-sm" :class="f.por_revisar ? 'btn-primary' : ''" :href="'#/revision?pregunta=' + encodeURIComponent(f.pregunta)"
                            x-text="f.por_revisar ? 'Revisar' : 'Ver'"></a>
-                        <a class="btn btn-sm" x-show="f.etiquetadas" :href="API + '/decisiones/etiquetas/' + f.pregunta + '/juego.jsonl'"
-                           data-tip="El juego etiquetado y lo que dijo Jev, para «evaluar_decisiones.py evaluar»">Juego</a>
-                        <a class="btn btn-sm" x-show="f.etiquetadas" :href="API + '/decisiones/etiquetas/' + f.pregunta + '/respuestas.jsonl'">Respuestas</a>
+                        <!-- Con las opciones del cliente, un juego por taxonomia (decision 211). -->
+                        <template x-for="v in (f.etiquetadas ? (f.opciones_del_cliente ? f.variantes : [{ variante: '' }]) : [])" :key="v.variante">
+                          <span>
+                            <a class="btn btn-sm" :href="API + '/decisiones/etiquetas/' + f.pregunta + '/juego.jsonl' + (v.variante ? '?variante=' + v.variante : '')"
+                               data-tip="El juego etiquetado, para «evaluar_decisiones.py evaluar»" x-text="v.variante ? 'Juego ' + v.variante.slice(0, 6) : 'Juego'"></a>
+                            <a class="btn btn-sm" :href="API + '/decisiones/etiquetas/' + f.pregunta + '/respuestas.jsonl' + (v.variante ? '?variante=' + v.variante : '')">Respuestas</a>
+                          </span>
+                        </template>
                       </td>
                     </tr>
                   </template>

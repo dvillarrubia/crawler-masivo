@@ -37,7 +37,7 @@ def resumen(db: Session = Depends(get_session)):
 
 
 @router.get("/revision")
-def pendientes(pregunta: str | None = None, job_id: uuid.UUID | None = None,
+def pendientes(pregunta: str, job_id: uuid.UUID | None = None,
                estado: str | None = Query("incierto", pattern="^(incierto|decidido|todas)$"),
                limite: int = Query(20, ge=1, le=100), db: Session = Depends(get_session)):
     """Lo que falta por revisar, una fila por estado, sin la respuesta de Jev.
@@ -49,26 +49,41 @@ def pendientes(pregunta: str | None = None, job_id: uuid.UUID | None = None,
 
 @router.put("/{decision_id}/etiqueta")
 def etiquetar(decision_id: int, cuerpo: EtiquetaCrear, db: Session = Depends(get_session)):
-    """Guarda (o corrige) la etiqueta humana y devuelve lo que dijo Jev."""
-    try:
-        r = R.etiquetar(db, decision_id, cuerpo.etiqueta, nota=cuerpo.nota, autor=cuerpo.autor)
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except R.EtiquetaInvalida as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    db.commit()
-    return r
+    """Guarda (o corrige) la etiqueta humana y devuelve lo que dijo Jev.
+    Dos personas guardando el mismo estado a la vez chocan en la restriccion
+    unica: la segunda vuelve a intentarlo y corrige la de la primera."""
+    from sqlalchemy.exc import IntegrityError
+
+    for intento in (1, 2):
+        try:
+            r = R.etiquetar(db, decision_id, cuerpo.etiqueta, nota=cuerpo.nota, autor=cuerpo.autor)
+            db.commit()
+            return r
+        except R.NoRevisable as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except R.EtiquetaInvalida as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except IntegrityError:
+            db.rollback()
+            if intento == 2:
+                raise HTTPException(status_code=409, detail="otra persona acaba de etiquetarla: vuelve a cargar")
 
 
 @router.get("/etiquetas/{pregunta}/{que}", response_class=PlainTextResponse)
-def exportar(pregunta: str, que: str, db: Session = Depends(get_session)):
-    """`juego.jsonl` o `respuestas.jsonl` de lo etiquetado, para `evaluar`."""
+def exportar(pregunta: str, que: str, variante: str | None = Query(None, max_length=16, pattern="^[0-9a-f]*$"),
+             db: Session = Depends(get_session)):
+    """`juego.jsonl` o `respuestas.jsonl` de lo etiquetado, para `evaluar`.
+    Con las opciones del cliente, `?variante=` (un juego por taxonomia)."""
     if que not in ("juego.jsonl", "respuestas.jsonl"):
         raise HTTPException(status_code=404, detail="juego.jsonl o respuestas.jsonl")
     try:
-        juego, respuestas = R.exportar(db, pregunta)
+        juego, respuestas = R.exportar(db, pregunta, variante)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return PlainTextResponse(R.jsonl(juego if que == "juego.jsonl" else respuestas),
                              media_type="application/x-ndjson",
                              headers={"Content-Disposition": f'attachment; filename="{pregunta}-{que}"'})
