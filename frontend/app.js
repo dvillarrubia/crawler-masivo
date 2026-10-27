@@ -421,6 +421,9 @@ const fmt = {
     if (m === 'su perfil ya no existe') return 'no se lanzó: su perfil ya no existe';
     if (m === 'el perfil esta desactivado') return 'no se lanzó: el perfil está desactivado';
     if (m === 'el perfil no tiene semillas') return 'no se lanzó: el perfil no tiene semillas';
+    // decision 209
+    if (m === 'lanzada a mano') return 'lanzada a mano con «Lanzar ahora»';
+    if (m.startsWith('no se pudo encolar')) return 'no se lanzó: la cola de rastreos no respondía';
     return m;
   },
   // Una expresion cron en castellano. Solo los patrones que se usan de
@@ -3866,6 +3869,21 @@ function app() {
         else await this.cargarProgramaciones();
       } catch (e) {
         this.error = 'No se pudo cambiar: ' + e.message;
+      }
+    },
+
+    // «Lanzar ahora» (decision 209): el mismo rastreo que lanzaria a su hora,
+    // sin esperar. Si hay uno vivo, el servidor dice por que no (409).
+    async lanzarProgramacionAhora(p) {
+      if (!await this.preguntar({ titulo: `Lanzar ahora «${p.nombre}»`,
+        mensaje: 'Lanza ya el rastreo que haría a su hora. La próxima ejecución no cambia.', aceptar: 'Lanzar' })) return;
+      try {
+        const r = await api('/programaciones/' + p.id + '/ejecutar', { method: 'POST' });
+        this.showToast('Lanzado: ' + r.nombre);
+        if (this.view === 'client') await this.cargarProgramacionesCliente();
+        else await this.cargarProgramaciones();
+      } catch (e) {
+        this.error = 'No se pudo lanzar: ' + fmt.motivo(e.message).replace(/^no se lanzó: /, '');
       }
     },
 

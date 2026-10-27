@@ -24,16 +24,20 @@ class RedisDeMentira:
     """rpush al final, blpop por la cabeza y lrange como Redis (bytes)."""
 
     def __init__(self):
-        self.lista: list[bytes] = []
+        self.listas: dict[str, list[bytes]] = {}
 
-    def rpush(self, _clave, valor):
-        self.lista.append(str(valor).encode())
+    def rpush(self, clave, valor):
+        self.listas.setdefault(clave, []).append(str(valor).encode())
 
-    def blpop(self, _clave, timeout=0):
-        return ("jobs:pending", self.lista.pop(0).decode()) if self.lista else None
+    def blpop(self, claves, timeout=0):
+        for clave in ([claves] if isinstance(claves, str) else claves):
+            if self.listas.get(clave):
+                return (clave, self.listas[clave].pop(0).decode())
+        return None
 
-    def lrange(self, _clave, inicio, fin):
-        return list(self.lista[inicio:] if fin == -1 else self.lista[inicio:fin + 1])
+    def lrange(self, clave, inicio, fin):
+        lista = self.listas.get(clave) or []
+        return list(lista[inicio:] if fin == -1 else lista[inicio:fin + 1])
 
 
 def test_en_orden_es_el_orden_en_que_salen():

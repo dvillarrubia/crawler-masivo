@@ -13,16 +13,31 @@ significaria que un job que se atasca y se reencola varias veces (hasta
 `STALL_AUTO_RESUME`) pisa indefinidamente a los que esperan.
 
 El nombre de la cola estaba escrito a mano en cinco sitios.
+
+Los rastreos que lanza el planificador van a una segunda lista
+(`COLA_PROGRAMADOS`, decision 209) que solo se atiende con la primera vacia:
+quien lanza a mano esta mirando la pantalla, y el semanal de las 3:00 puede
+esperar a que acabe su rastreo. Dentro de cada lista, el FIFO de siempre.
 """
 
 from __future__ import annotations
 
 COLA_JOBS = "jobs:pending"
+COLA_PROGRAMADOS = "jobs:programados"
+# En el orden en que se atienden: `blpop` con varias claves mira la primera
+# antes que la segunda.
+COLAS = (COLA_JOBS, COLA_PROGRAMADOS)
 
 
-def encolar(conexion, job_id) -> None:
-    """Pone un job al FINAL de la cola."""
-    conexion.rpush(COLA_JOBS, str(job_id))
+def encolar(conexion, job_id, *, programado: bool = False) -> None:
+    """Pone un job al FINAL de su cola.
+
+    `programado` solo para el PRIMER encolado de un disparo del planificador.
+    Una reanudacion o un job recuperado tras un reinicio van a la cola normal
+    aunque vinieran de una programacion: es trabajo ya empezado, y dejarlo
+    detras de cada rastreo a mano lo podria tener parado dias.
+    """
+    conexion.rpush(COLA_PROGRAMADOS if programado else COLA_JOBS, str(job_id))
 
 
 def siguiente(conexion, timeout: int):
@@ -31,7 +46,7 @@ def siguiente(conexion, timeout: int):
     `blpop` saca por la CABEZA, que es el extremo opuesto al que escribe
     `encolar`: ahi esta la diferencia entre una cola y una pila.
     """
-    resultado = conexion.blpop(COLA_JOBS, timeout=timeout)
+    resultado = conexion.blpop(list(COLAS), timeout=timeout)
     if not resultado:
         return None
     _clave, job_id = resultado
@@ -45,10 +60,12 @@ def en_orden(conexion) -> list[str]:
     y no con `created_at`: una reanudacion o un job recuperado tras un
     reinicio se ponen al final aunque se crearan hace dias (revision de UX
     del 25-oct, 2.12). Un id repetido (un job reencolado dos veces) cuenta
-    por su primera aparicion, que es la que el worker sacara antes.
+    por su primera aparicion, que es la que el worker sacara antes. Los
+    programados van detras de toda la cola normal, que es como salen.
     """
     vistos: list[str] = []
-    for valor in conexion.lrange(COLA_JOBS, 0, -1) or []:
+    valores = [v for cola in COLAS for v in (conexion.lrange(cola, 0, -1) or [])]
+    for valor in valores:
         texto = valor.decode() if isinstance(valor, bytes) else str(valor)
         texto = texto.strip()
         if texto and texto not in vistos:
@@ -59,7 +76,7 @@ def en_orden(conexion) -> list[str]:
 def pendientes(conexion) -> int:
     """Cuantos jobs esperan. Para logs y para la interfaz."""
     try:
-        return int(conexion.llen(COLA_JOBS))
+        return sum(int(conexion.llen(cola)) for cola in COLAS)
     except Exception:
         return 0
 

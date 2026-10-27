@@ -1430,89 +1430,54 @@ def _generar_resumenes() -> None:
 
 
 def _lanzar_programados(rconn) -> None:
-    """Encola los rastreos cuya hora ha llegado."""
+    """Encola los rastreos cuya hora ha llegado.
+
+    De UNA en una y con candado (decision 209). Produccion tiene dos replicas
+    del worker y las dos pasan por aqui cada minuto: leer todas las pendientes
+    y decidir sin candado dejaba que las dos crearan el job del mismo disparo
+    si coincidian. Con `FOR UPDATE SKIP LOCKED` la que llega segunda salta la
+    fila que tiene la otra, y al soltarla ya lleva la proxima hora, asi que no
+    vuelve a salir. SQLite (los tests) no tiene candados de fila y SQLAlchemy
+    no emite el `FOR UPDATE`: alli hay un solo proceso.
+
+    Se encola DESPUES del commit: encolar antes dejaba a la otra replica sacar
+    de Redis un id que todavia no estaba en la base de datos.
+    """
     from datetime import datetime, timezone
 
-    from shared.cola import encolar
     from shared.database import SessionLocal
-    from shared.models import Job, Programacion
-    from shared.programaciones import (
-        motivo_rastreo_vivo, proxima_desde, resolver_disparo, toca_lanzar,
-    )
+    from shared.models import Programacion
 
     session = None
+    vistas: set = set()
     try:
         session = SessionLocal()
         ahora = datetime.now(timezone.utc)
-        pendientes = (
-            session.query(Programacion)
-            .filter(Programacion.activa.is_(True),
-                    Programacion.proxima_ejecucion.isnot(None),
-                    Programacion.proxima_ejecucion <= ahora)
-            .all()
-        )
-        for prog in pendientes:
-            proxima = prog.proxima_ejecucion
-            if proxima is not None and proxima.tzinfo is None:
-                # Postgres devuelve timestamptz con zona, pero SQLite no: sin
-                # esto la comparacion revienta en los tests y, peor, en
-                # cualquier motor que no guarde la zona.
-                proxima = proxima.replace(tzinfo=timezone.utc)
-
-            lanzar, motivo = toca_lanzar(proxima, ahora)
-            vivo = motivo_rastreo_vivo(session, prog) if lanzar else None
-            if vivo:
-                lanzar, motivo = False, vivo
-
-            datos = None
-            if lanzar:
-                # Colgada de un perfil (decision 193): semillas y config del
-                # MOMENTO (cliente -> perfil -> lo suyo). De copia fija: lo que
-                # guardo al crearse, como siempre. Si su perfil ya no existe o
-                # esta desactivado, no se lanza y se dice por que.
-                datos, sin_lanzar = resolver_disparo(session, prog)
-                if datos is None:
-                    lanzar, motivo = False, sin_lanzar
-
-            if lanzar:
-                # El cliente y el perfil se copian tal cual de la programacion
-                # (#36). El worker NO crea clientes a partir del texto: si la
-                # programacion es anterior a la migracion, el job sale solo
-                # con su `client_id` y la siguiente pasada de `init_db.py` lo
-                # cuelga de su cliente. Crear filas desde aqui haria que un
-                # fallo de esa tabla impidiera lanzar el rastreo.
-                job = Job(name=datos["name"], client_id=datos["client_id"],
-                          cliente_id=datos.get("cliente_id"),
-                          profile_id=datos.get("profile_id"),
-                          seeds=datos["seeds"], config=datos["config"],
-                          status="pending", programacion_id=prog.id)
-                session.add(job)
-                session.flush()
-                if job.profile_id is not None:
-                    from shared.models import CrawlProfile
-
-                    session.query(CrawlProfile).filter(
-                        CrawlProfile.id == job.profile_id
-                    ).update({CrawlProfile.last_job_id: job.id},
-                             synchronize_session=False)
-                encolar(rconn, job.id)
-                prog.ultima_ejecucion = ahora
-                prog.ultimo_job_id = job.id
-                logger.info(
-                    "Programacion %s (%s): encolado %s — %s",
-                    prog.id, prog.nombre, job.id, motivo)
-            else:
-                logger.info("Programacion %s (%s): no se lanza — %s",
-                            prog.id, prog.nombre, motivo)
-
-            prog.ultimo_motivo = motivo
-            # La proxima se recalcula SIEMPRE, se haya lanzado o no. Si no, una
-            # programacion que se salta un disparo se queda con la hora pasada
-            # y vuelve a intentarlo en cada vuelta del bucle, cada minuto.
-            prog.proxima_ejecucion = proxima_desde(
-                prog.cron, prog.zona_horaria, ahora)
-        if pendientes:
-            session.commit()
+        while True:
+            consulta = (
+                session.query(Programacion)
+                .filter(Programacion.activa.is_(True),
+                        Programacion.proxima_ejecucion.isnot(None),
+                        Programacion.proxima_ejecucion <= ahora)
+                .order_by(Programacion.proxima_ejecucion)
+            )
+            if vistas:
+                # Por si `proxima_desde` devolviera una hora que sigue en el
+                # pasado: una vuelta por programacion y pasada, nunca un bucle.
+                consulta = consulta.filter(Programacion.id.notin_(vistas))
+            prog = consulta.with_for_update(skip_locked=True).first()
+            if prog is None:
+                break
+            pid = prog.id
+            vistas.add(pid)
+            try:
+                _disparar(session, rconn, prog, ahora)
+            except Exception:
+                # Una programacion que revienta no puede dejar sin lanzar a las
+                # demas: antes se perdia la pasada entera, y como va la primera
+                # por hora, se perdia en cada vuelta.
+                session.rollback()
+                logger.exception("Programacion %s: fallo el disparo", pid)
     except Exception:
         if session is not None:
             session.rollback()
@@ -1520,6 +1485,74 @@ def _lanzar_programados(rconn) -> None:
     finally:
         if session is not None:
             session.close()
+
+
+def _disparar(session, rconn, prog, ahora) -> None:
+    """Un disparo: decide, crea el job, guarda y, despues, encola."""
+    from datetime import timezone
+
+    from shared.cola import encolar
+    from shared.models import Job
+    from shared.programaciones import (
+        crear_job_de_disparo, motivo_rastreo_vivo, proxima_desde,
+        resolver_disparo, toca_lanzar,
+    )
+
+    proxima = prog.proxima_ejecucion
+    if proxima is not None and proxima.tzinfo is None:
+        # Postgres devuelve timestamptz con zona, pero SQLite no: sin
+        # esto la comparacion revienta en los tests y, peor, en
+        # cualquier motor que no guarde la zona.
+        proxima = proxima.replace(tzinfo=timezone.utc)
+
+    lanzar, motivo = toca_lanzar(proxima, ahora)
+    vivo = motivo_rastreo_vivo(session, prog) if lanzar else None
+    if vivo:
+        lanzar, motivo = False, vivo
+
+    datos = None
+    if lanzar:
+        # Colgada de un perfil (decision 193): semillas y config del
+        # MOMENTO (cliente -> perfil -> lo suyo). De copia fija: lo que
+        # guardo al crearse, como siempre. Si su perfil ya no existe o
+        # esta desactivado, no se lanza y se dice por que.
+        datos, sin_lanzar = resolver_disparo(session, prog)
+        if datos is None:
+            lanzar, motivo = False, sin_lanzar
+
+    job_id = None
+    if lanzar:
+        job_id = crear_job_de_disparo(session, prog, datos, ahora).id
+    else:
+        logger.info("Programacion %s (%s): no se lanza — %s",
+                    prog.id, prog.nombre, motivo)
+
+    prog.ultimo_motivo = motivo
+    # La proxima se recalcula SIEMPRE, se haya lanzado o no. Si no, una
+    # programacion que se salta un disparo se queda con la hora pasada
+    # y vuelve a intentarlo en cada vuelta del bucle, cada minuto.
+    prog.proxima_ejecucion = proxima_desde(
+        prog.cron, prog.zona_horaria, ahora)
+    # El commit suelta el candado de ESTA fila: la otra replica puede
+    # seguir con las demas mientras esta encola.
+    session.commit()
+
+    if job_id is not None:
+        try:
+            encolar(rconn, job_id, programado=True)
+        except Exception:
+            # Sin Redis el job se quedaria «pending» para siempre y,
+            # peor, bloquearia el disparo siguiente (`motivo_rastreo_vivo`).
+            logger.exception("Programacion %s: no se pudo encolar %s",
+                             prog.id, job_id)
+            session.query(Job).filter(Job.id == job_id).update(
+                {Job.status: "failed"}, synchronize_session=False)
+            prog.ultimo_motivo = "no se pudo encolar: la cola no responde"
+            session.commit()
+        else:
+            logger.info(
+                "Programacion %s (%s): encolado %s — %s",
+                prog.id, prog.nombre, job_id, motivo)
 
 
 # ---------------------------------------------------------------------------

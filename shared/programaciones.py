@@ -397,6 +397,40 @@ def resolver_disparo(db, programacion) -> tuple[dict[str, Any] | None, str | Non
     }, None
 
 
+# Lo que dice `ultimo_motivo` tras «Ejecutar ahora» (decision 209). La interfaz
+# lo traduce (fmt.motivo).
+LANZADA_A_MANO = "lanzada a mano"
+
+
+def crear_job_de_disparo(db, programacion, datos: dict[str, Any], ahora: datetime):
+    """Crea el job de un disparo y lo deja ligado a su programacion y a su
+    perfil. Sin commit y sin encolar: eso lo hace quien llama, y en ese orden
+    (decision 209). Lo comparten el planificador y «Ejecutar ahora», para que
+    un job lanzado a mano desde la programacion sea el mismo que el de su hora.
+
+    El cliente y el perfil se copian tal cual de `datos` (#36). Aqui NO se
+    crean clientes a partir del texto: si la programacion es anterior a la
+    migracion, el job sale solo con su `client_id` y la siguiente pasada de
+    `init_db.py` lo cuelga de su cliente.
+    """
+    from shared.models import CrawlProfile, Job
+
+    job = Job(name=datos["name"], client_id=datos["client_id"],
+              cliente_id=datos.get("cliente_id"),
+              profile_id=datos.get("profile_id"),
+              seeds=datos["seeds"], config=datos["config"],
+              status="pending", programacion_id=programacion.id)
+    db.add(job)
+    db.flush()
+    if job.profile_id is not None:
+        db.query(CrawlProfile).filter(
+            CrawlProfile.id == job.profile_id
+        ).update({CrawlProfile.last_job_id: job.id}, synchronize_session=False)
+    programacion.ultima_ejecucion = ahora
+    programacion.ultimo_job_id = job.id
+    return job
+
+
 def semillas_efectivas(programacion, perfiles: dict | None = None) -> list[str]:
     """Las semillas que lanzaria hoy: las del perfil si hereda, las suyas si no."""
     if getattr(programacion, "hereda_perfil", False):
