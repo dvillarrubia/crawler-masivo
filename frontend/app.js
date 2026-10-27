@@ -904,6 +904,8 @@ function app() {
     incidentes: null,         // GET /clients/{id}/incidentes (decision 139)
     // Search Console del cliente (decision 141)
     gsc: { estado: null, llaves: [], llave: '', nombreNueva: '', propiedades: null, propiedad: '', error: '', ocupado: false },
+    // Backlinks del cliente en CSV (#31, decision 212)
+    backlinks: { lista: null, fichero: null, fecha: '', ocupado: false, error: '', ultimo: null },
     // Slack del cliente (decision 149)
     slack: { estado: null, tokens: [], token: '', nombreNuevo: '', tokenTexto: '', canales: null, canal: '', canalNombre: '',
              alertas: true, resumen: true, informe: true, error: '', ocupado: false, prueba: null },
@@ -2504,6 +2506,52 @@ function app() {
     },
 
     // --- Search Console (decision 141) ---------------------------------
+    // ------- Backlinks del cliente (#31, decision 212) -------
+    // Un CSV de Ahrefs, Semrush o Majestic. Se aplica al analizar: el proximo
+    // censo lo lleva solo, y uno ya hecho, re-analizandolo.
+    async cargarBacklinks() {
+      if (!this.cliente) return;
+      const id = this.cliente.id;
+      try {
+        const lista = await api(`/clients/${id}/backlinks`);
+        if (this.cliente && this.cliente.id === id) this.backlinks.lista = lista;
+      } catch (e) { this.backlinks.error = e.message; }
+    },
+
+    async subirBacklinks() {
+      const b = this.backlinks;
+      if (!this.cliente || !b.fichero || b.ocupado) return;
+      b.ocupado = true; b.error = ''; b.ultimo = null;
+      try {
+        const fd = new FormData();
+        fd.append('fichero', b.fichero);
+        if (b.fecha) fd.append('fecha_dato', b.fecha);
+        const res = await fetch(`${API}/clients/${this.cliente.id}/backlinks`, { method: 'POST', body: fd });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error(mensajeDeError(err));
+        }
+        b.ultimo = await res.json();
+        b.fichero = null;
+        await this.cargarBacklinks();
+        this.showToast('Backlinks subidos: se aplican en el próximo análisis');
+      } catch (e) {
+        b.error = 'No se pudieron subir: ' + e.message;
+      } finally {
+        b.ocupado = false;
+      }
+    },
+
+    async borrarBacklinks(i) {
+      if (!await this.preguntar({ titulo: 'Quitar estos backlinks',
+        mensaje: i.en_uso ? 'Es la importación que usa el análisis: el próximo usará la anterior, si la hay.' : 'Es una importación anterior: el análisis no la usa.',
+        aceptar: 'Quitar', peligro: true })) return;
+      try {
+        await api(`/clients/${this.cliente.id}/backlinks/${i.id}`, { method: 'DELETE' });
+        await this.cargarBacklinks();
+      } catch (e) { this.backlinks.error = 'No se pudo quitar: ' + e.message; }
+    },
+
     async cargarGsc() {
       if (!this.cliente) return;
       const id = this.cliente.id;
@@ -2931,6 +2979,10 @@ function app() {
         const e = ((this.gsc && this.gsc.estado) || []).find(x => x.propiedad);
         if (e) return this.textoEstadoGsc(e) + ' · ' + e.propiedad;
         return (c.integraciones || []).some(i => i.tipo === 'gsc') ? '' : 'sin conectar';
+      }
+      if (id === 'cfg-backlinks') {
+        const u = ((this.backlinks && this.backlinks.lista) || [])[0];
+        return u ? fmt.num(u.filas) + ' backlinks de ' + (FUENTE_BACKLINKS[u.fuente] || u.fuente) + ' · subidos el ' + fmt.dia(u.subido) : 'sin subir';
       }
       if (id === 'cfg-slack') {
         const canal = ((this.slack && this.slack.estado && this.slack.estado.canales) || [])[0];
@@ -6986,6 +7038,9 @@ const EXP_COLUMN_DEFS = {
   // queda en 0,00xx y no se distingue la 250 de la 25.000. La 0-10 se queda por
   // compatibilidad con informes ya entregados.
   pagerank_score:       { label: 'PageRank (0-100)',  type: 'numeric', sortable: true,  filterKey: 'pagerank_score',          width: 160, fmt: r => r.pagerank_score != null ? String(r.pagerank_score) : '' },
+  // Con los backlinks del cliente (decision 212): vacias sin CSV subido.
+  pagerank_externo_score: { label: 'PageRank desde fuera', type: 'numeric', sortable: true, filterKey: 'pagerank_externo_score', width: 170, fmt: r => r.pagerank_externo_score != null ? String(r.pagerank_externo_score) : '' },
+  backlinks_externos:   { label: 'Backlinks',         type: 'numeric', sortable: true,  filterKey: 'backlinks_externos',      width: 110, fmt: r => r.backlinks_externos != null ? fmt.num(r.backlinks_externos) : '' },
   pagerank_raw:         { label: 'PageRank (x media)', grupo: 'otros', type: 'numeric', sortable: true, filterKey: 'pagerank_raw',            width: 170, fmt: r => r.pagerank_raw != null ? fmt.dec(r.pagerank_raw * 1e4, 2) : '' },
   pagerank:             { label: 'PageRank (0-10, antiguo)', grupo: 'otros', type: 'numeric', sortable: true,  filterKey: 'pagerank',                width: 140, fmt: r => r.pagerank != null ? fmt.dec(r.pagerank, 4) : '' },
   near_duplicate_count: { label: 'Casi duplicadas', type: 'numeric', sortable: true,  filterKey: 'near_duplicate_count',    width: 150, fmt: r => r.near_duplicate_count ?? '' },
@@ -7051,7 +7106,7 @@ const EXP_GRUPOS_COLUMNAS = [
   ['Indexación',  ['indexable','indexability_status','bloqueada_googlebot','canonical_href','canonical_header','meta_robots','x_robots_tag','meta_refresh','redireccion_js','in_sitemap','rel_next','rel_prev']],
   ['Títulos y snippet', ['title','title_len','title_pixel_width','meta_description','meta_description_len','meta_description_pixel_width','h1','h1_count']],
   ['Contenido',   ['word_count','content_word_count','near_duplicate_count','closest_similarity']],
-  ['Enlazado',    ['enlazada_desde','origenes','inlinks_count','unique_inlinks_count','outlinks_count','external_outlinks_count','pagerank_score','click_depth','crawl_depth','folder_depth','url_length']],
+  ['Enlazado',    ['enlazada_desde','origenes','inlinks_count','unique_inlinks_count','outlinks_count','external_outlinks_count','pagerank_score','pagerank_externo_score','backlinks_externos','click_depth','crawl_depth','folder_depth','url_length']],
   ['Redes sociales', ['og_title','og_image','og_type','og_url','twitter_card']],
   ['Móvil e idioma', ['viewport','html_lang']],
   ['Search Console (90 días)', ['gsc_clics','gsc_impresiones','gsc_posicion']],
@@ -7212,6 +7267,9 @@ const EXP_TABS = [
     columns: ['url','status_code','title','indexable','pagerank_score'] },
   { key: 'a_enlazado', label: 'Enlazado',      icon: 'share-2',      filter: HTML_INTERNO, ambito: ['orphan_page','sitemap_orphan','solo_enlazada_por_redireccion','not_reachable_from_home','high_outlink_count','not_in_sitemap','enlace_no_rastreable','enlace_interno_a_error','enlace_interno_a_redireccion','utm_en_enlace_interno','enlace_sin_ancla','ancla_generica','solo_enlazada_con_nofollow','enlace_interno_nofollow','pagina_nofollow','solo_enlazada_desde_paginacion_excluida','enlace_externo_roto','dominio_externo_muerto'],
     columns: ['url','status_code','inlinks_count','origenes','click_depth','pagerank_score','in_sitemap','indexable'] },
+  // Backlinks del CSV del cliente (decision 212).
+  { key: 'a_backlinks', label: 'Backlinks', icon: 'external-link', filter: { is_internal: true }, ambito: ['backlinks_a_error','backlinks_a_noindex','backlinks_a_bloqueada_robots','huerfana_con_backlinks'],
+    columns: ['url','status_code','backlinks_externos','pagerank_externo_score','inlinks_count','pagerank_score','indexable'] },
   // Paginacion (decision 122): las paginas 2+ y lo que solo cuelga de ellas.
   { key: 'a_paginacion', label: 'Paginación', icon: 'list-ordered', filter: HTML_INTERNO, ambito: ['paginacion_canonical_a_la_primera','paginacion_noindex','solo_enlazada_desde_paginacion_excluida','solo_enlazada_desde_paginacion_profunda','paginacion_sin_enlace','paginacion_siguiente_rota','paginacion_rel_incorrecto'],
     columns: ['url','status_code','rel_next','rel_prev','canonical_href','indexable','inlinks_count'] },
@@ -7625,6 +7683,33 @@ function paginasDeFraseTrafico(texto, t) {
     : g.texto && !['trasvase', 'sin_cambio', 'sin_dato_anterior'].includes(g.cambio) && texto.includes(g.texto)));
   if (candidatos.length !== 1) return [];
   return (candidatos[0].ejemplos || []).map(e => e.url).filter(Boolean).slice(0, 3);
+}
+
+// La autoridad que entra de fuera (#31, decision 212), de
+// `jobs.pagerank_resumen.externo`. null sin backlinks subidos. El reparto es
+// de lo que llega DESDE FUERA (lo casado): donde cae de entrada.
+function bloqueBacklinks(job) {
+  const e = job && job.pagerank_resumen && job.pagerank_resumen.externo;
+  if (!e) return null;
+  const pct = x => fmt.pct(100 * (x || 0), 0);
+  const entra = e.entra_en || {};
+  const frases = [];
+  frases.push(fmt.num(e.casados) + ' de ' + fmt.num(e.backlinks) + ' backlinks (' + pct(e.parte_casada) + ') llegan a ' + fmt.num(e.paginas_con_backlinks)
+    + (e.paginas_con_backlinks === 1 ? ' página de este rastreo.' : ' páginas de este rastreo.'));
+  const perdida = (entra.error || 0) + (entra.sin_respuesta || 0);
+  if (perdida > 0) frases.push(pct(perdida) + ' de la autoridad que entra de fuera cae en páginas con error o sin respuesta: se pierde.');
+  if ((entra.no_indexable || 0) > 0) frases.push(pct(entra.no_indexable) + ' cae en páginas no indexables (noindex o canonicalizadas).');
+  if ((entra.redireccion || 0) > 0) frases.push(pct(entra.redireccion) + ' llega a redirecciones, que la pasan a su destino.');
+  return {
+    fuente: (FUENTE_BACKLINKS[e.fuente] || e.fuente),
+    fecha: e.fecha_dato || e.subido,
+    frases,
+    // Por debajo del 90 % el cruce falla (otro dominio, URLs muy viejas) o el
+    // rastreo no cubre lo que tiene enlaces (criterio de #31).
+    poco_casado: e.parte_casada != null && e.parte_casada < 0.9,
+    no_rastreadas: e.no_rastreadas || [],
+    beta: e.beta,
+  };
 }
 
 // Lo que lee la plantilla mientras el x-if que la envuelve aun no ha
@@ -8081,9 +8166,11 @@ const CAMPO_CONFIG = Object.fromEntries(CAMPOS_CONFIG.map(c => [c.ruta, c]));
 
 // Las secciones plegables de Configuracion del cliente, en orden (revision de
 // UX del 25-oct, 2.4): el indice de arriba lleva a cada una y la abre.
+const FUENTE_BACKLINKS = { ahrefs: 'Ahrefs', semrush: 'Semrush', majestic: 'Majestic', generico: 'un CSV' };
+
 const SECCIONES_CONFIG_CLIENTE = [
   ['cfg-perfiles', 'Perfiles'], ['cfg-rastreo', 'Cómo se rastrea'], ['cfg-datos', 'Datos'],
-  ['cfg-gsc', 'Search Console'], ['cfg-slack', 'Slack'], ['cfg-enlace', 'Enlace para el cliente'],
+  ['cfg-gsc', 'Search Console'], ['cfg-backlinks', 'Backlinks'], ['cfg-slack', 'Slack'], ['cfg-enlace', 'Enlace para el cliente'],
   ['cfg-integraciones', 'Otras integraciones'], ['reglas-alertas', 'Reglas de alertas'],
 ];
 

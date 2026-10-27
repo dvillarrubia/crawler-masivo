@@ -700,6 +700,14 @@ class Url(Base):
     pagerank = Column(Float, nullable=True, default=None)    # 0-10 lineal (compatibilidad)
     pagerank_raw = Column(Float, nullable=True, default=None)    # probabilidad, suma 1
     pagerank_score = Column(Integer, nullable=True, default=None)  # 0-100 logaritmico
+    # Con la autoridad que entra de fuera (#31, decision 212): la misma escala
+    # 0-100, otro teletransporte. NULL = el cliente no tiene backlinks subidos.
+    # Nunca sustituye a `pagerank_score`: son dos preguntas (como reparte el
+    # sitio, y por donde entra la autoridad).
+    pagerank_externo_score = Column(Integer, nullable=True, default=None)
+    # Backlinks dofollow del CSV que caen en esta URL, y lo que aportan.
+    backlinks_externos = Column(Integer, nullable=True, default=None)
+    autoridad_externa = Column(Float, nullable=True, default=None)
     # Casi duplicados (MinHash). NULL = no se midio (sin contenido, o texto
     # por debajo del minimo de palabras); 0 = se midio y no tiene ninguna.
     near_duplicate_count = Column(Integer, nullable=True, default=None)
@@ -1316,6 +1324,50 @@ class SitemapEntry(Base):
     __table_args__ = (
         Index("ix_sment_job_hash", "job_id", "url_hash"),
     )
+
+
+class BacklinkImport(Base):
+    """Un CSV de backlinks subido para un cliente (#31, decision 212).
+
+    Por cliente y no por censo, como Search Console (decision 141): los
+    backlinks son del sitio, no de cuando lo rastreamos. El analisis de un
+    censo usa la importacion mas reciente de su cliente y dice cual.
+    """
+
+    __tablename__ = "backlink_imports"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    cliente_id = Column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    fuente = Column(String(16), nullable=False)        # ahrefs | semrush | majestic | generico
+    fichero = Column(String(255), nullable=True)
+    # La fecha del dato del proveedor (cuando lo exporto), no la de subida:
+    # el censo es de hoy y el indice de backlinks, de cuando sea.
+    fecha_dato = Column(Date, nullable=True)
+    filas = Column(Integer, nullable=False, default=0)
+    # Lo que se tiro al leer: nofollow/ugc/sponsored, perdidos, sin URL.
+    descartadas = Column(JSON, nullable=True)
+    columnas = Column(JSON, nullable=True)
+    cortado = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
+class ExternalLink(Base):
+    """Un backlink dofollow de una importacion (decision 212).
+
+    Se guardan TODOS, tambien los que no casan con ningun censo: las URLs
+    antiguas con enlaces son de lo mas valioso (un 404 con autoridad).
+    """
+
+    __tablename__ = "external_links"
+    __table_args__ = (Index("ix_external_links_import", "import_id"),)
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    import_id = Column(BigInteger, ForeignKey("backlink_imports.id", ondelete="CASCADE"), nullable=False)
+    url_to = Column(Text, nullable=False)
+    url_from = Column(Text, nullable=False)
+    dominio_from = Column(String(255), nullable=True)
+    aportacion = Column(Float, nullable=False, default=1.0)
 
 
 class AdapterEntity(Base):

@@ -1392,6 +1392,13 @@ NO_COMPARABLES = frozenset({
     "oportunidad_posicion",
     "ctr_bajo_para_posicion",
     "canibalizacion_por_consulta",
+    # Los de backlinks (decision 212) dependen del CSV que haya subido el
+    # cliente al analizar cada censo, no del sitio: subir uno nuevo no es «el
+    # sitio empeoro».
+    "backlinks_a_error",
+    "backlinks_a_noindex",
+    "backlinks_a_bloqueada_robots",
+    "huerfana_con_backlinks",
 })
 
 

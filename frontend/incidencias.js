@@ -174,6 +174,27 @@ const ISSUE_INFO = {
     google: 'Aún la muestra en los resultados: todavía no ha consolidado la señal en la nueva. Es normal justo después de una migración; si dura meses, algo (enlaces internos, sitemap, hreflang) sigue apuntando a la vieja.',
     arreglo: 'Que los enlaces internos, el sitemap y el hreflang apunten a la URL final. Informativo.',
   },
+  // ----- Backlinks del cliente (decision 212) -----
+  'backlinks_a_error': {
+    que: 'Una página que da error (4xx o 5xx) o no responde y a la que enlazan otros sitios. El detalle dice cuántos backlinks tiene, de cuántos dominios y cuánta autoridad aportan, según el CSV de backlinks subido.',
+    google: 'La autoridad de esos enlaces llega a una página que no existe y se pierde: no pasa al resto del sitio.',
+    arreglo: 'Redirigirla con 301 a la página más parecida que sí exista. Empezar por las que más autoridad reciben: son las que más se recupera.',
+  },
+  'backlinks_a_noindex': {
+    que: 'Página con noindex a la que enlazan otros sitios.',
+    google: 'No la muestra en los resultados, y con el tiempo deja de seguir sus enlaces: la autoridad que recibe de fuera no llega al resto del sitio.',
+    arreglo: 'Si debe posicionar, quitar el noindex. Si no, redirigirla a la página que sí deba recibir esa autoridad.',
+  },
+  'backlinks_a_bloqueada_robots': {
+    que: 'Página bloqueada en robots.txt a la que enlazan otros sitios.',
+    google: 'No puede leerla, así que no ve sus enlaces: la autoridad se queda ahí.',
+    arreglo: 'Desbloquearla si debe rastrearse, o redirigirla a una que no lo esté.',
+  },
+  'huerfana_con_backlinks': {
+    que: 'Página indexable que recibe enlaces de otros sitios y que ninguna página del propio sitio enlaza.',
+    google: 'Le llega autoridad de fuera, pero el sitio no la conecta con nada: ni la reparte ni le da contexto.',
+    arreglo: 'Enlazarla desde su sección y desde las páginas relacionadas. Es de las oportunidades más baratas.',
+  },
   'huerfana_con_trafico': {
     que: 'Página indexable que recibe clics de Google y que ninguna otra página del sitio enlaza.',
     google: 'La conoce por el sitemap o por enlaces externos, pero el sitio no le pasa autoridad ni contexto: posiciona a pesar de la arquitectura, no gracias a ella.',
@@ -966,6 +987,10 @@ const ISSUE_LABEL_EXTRA = {
   google_tiene_canonical_antiguo: 'Google tiene un canonical antiguo',
   trafico_en_redireccion: 'Tráfico en una URL que redirige',
   huerfana_con_trafico: 'Huérfana con tráfico de Google',
+  backlinks_a_error: 'Backlinks a una página con error',
+  backlinks_a_noindex: 'Backlinks a una página noindex',
+  backlinks_a_bloqueada_robots: 'Backlinks a una página bloqueada en robots.txt',
+  huerfana_con_backlinks: 'Huérfana con backlinks',
   indexable_sin_impresiones: 'Indexable sin impresiones (90 días)',
   trafico_en_variante_con_parametros: 'Tráfico en variantes con parámetros',
   oportunidad_posicion: 'Oportunidad: posición 4-20 con poco enlazado',

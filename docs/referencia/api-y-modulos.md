@@ -45,6 +45,7 @@
 | `near_duplicates.py` | Contenido casi duplicado — MinHash + LSH. Funciones puras sobre texto; las escrituras sin espacios (CJK, tailandés…) se parten en caracteres (decisión 118) |
 | `sd_validation.py` | Validación conservadora de datos estructurados |
 | `avisos_de_wordpress.py` | WordPress (decision 161): cruza `adapter_entities` con el censo; ver la tabla de checks |
+| `avisos_de_backlinks.py` | Decision 212, del cruce que deja `compute_pagerank` (`an._backlinks`) con el CSV del cliente: **backlinks_a_error**, **backlinks_a_noindex**, **backlinks_a_bloqueada_robots** y **huerfana_con_backlinks** (warning, por página; la huérfana sustituye a `orphan_page`/`sitemap_orphan`). Una 301 con backlinks no se avisa. `pagerank_resumen.externo` y `urls.pagerank_externo_score`/`backlinks_externos`/`autoridad_externa` los escribe `compute_pagerank`; `β` es `analysis_thresholds.pagerank_externo_beta` (0,5) |
 | `soft404.py` | Soft 404 determinista (decision 105): cruza las sondas de `jobs.soft404` y las senales de `shared/soft404.py` con el censo |
 
 ### Shared (`shared/`)
@@ -95,6 +96,8 @@
 | GET/POST | `/api/clients/{id}/profiles` | Perfiles de rastreo del cliente. El POST acepta `desde_job_id`: el perfil guarda lo que la config de ese rastreo tiene de distinto respecto al cliente, y lo que no puede guardar lo dice en `avisos` (decisión 193) |
 | GET/PATCH/DELETE | `/api/clients/{id}/profiles/{pid}` | Un perfil |
 | GET | `/api/clients/{id}/config-resuelta` | Lo que heredaria un job (`?profile_id=`): `config` (completa), `config_heredada` (solo lo que fijan cliente y perfil), `origen` (ruta → «cliente»/«perfil»; lo que falta es de serie), `origen_por_clave` (cabeceras, cookies, topes y reglas con nombre: la capa de cada clave), `serie` (los valores de `JobConfig`), `avisos` (`nivel` peligro/aviso/info, `texto`, `campo`) y `programaciones` del perfil con `config_propia`. Es el bloque «Así rastreará» (decisión 196) |
+| GET/POST | `/api/clients/{id}/backlinks` | Las importaciones de backlinks del cliente (la primera, `en_uso`) / subir un CSV de Ahrefs, Semrush o Majestic (multipart `fichero`, opcional `fecha_dato`, `fuente`): `filas`, `leidas`, `descartadas`, `destinos`, `dominios`. Se guardan las 3 últimas (decision 212) |
+| DELETE | `/api/clients/{id}/backlinks/{import_id}` | Quita una importación y sus filas |
 | POST | `/api/clients/config-resuelta` | Lo mismo con un **borrador** en lugar de la config guardada de un nivel: `{cliente_id?, profile_id?, nivel: cliente\|perfil\|rastreo, config}`. No guarda nada; valida como al guardar (claves desconocidas, límites, la contraseña del Basic solo en `rastreo`). Sin cliente, lo de serie con el borrador encima (decisión 196) |
 | GET | `/api/ajustes` | Ajustes de la agencia (decisión 196): `modelos.clave_modelo`, `clave_autorizacion`, `activada` (booleanos: si la variable está puesta, nunca su valor) y `tope_mensual_usd` |
 | GET | `/api/clients/{id}/serie` | Los `?limite=` (30) rastreos mas recientes del cliente con sus cifras (`urls`, `paginas_html`, `indexables`, `errores` —incidencias—, `paginas_con_error` —páginas, decisión 202—, `avisos`), `topado` (el `max_urls` si acabó por tope, decisión 203) y, de su comparacion automatica, `alertas`, `alertas_criticas`, `comparado_con` y `fecha_anterior` (la fecha de la referencia, aunque no este en la serie) |

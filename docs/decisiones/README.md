@@ -12,7 +12,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga, robots.txt y sitemaps en la cola | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140, 172, 173, 174, 186 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124, 153, 154, 155, 187, 198 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137, 156, 160, 164, 167, 170, 171 |
-| [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152, 183, 195 |
+| [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152, 183, 195, 212 |
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157, 161, 168, 190 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165, 188, 191, 192, 197 |
@@ -235,6 +235,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 206 | El markdown de una página rastreada se sanea con DOMPurify antes de pintarlo (x-html), porque marked@15 ya no sanea | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d206) |
 | 207 | Una celda de CSV/XLSX que empieza por `=`/`+`/`-`/`@` se escapa (inyección de fórmula desde el sitio rastreado) | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d207) |
 | 208 | La API manda cabeceras de seguridad (CSP de contención, X-Frame-Options, nosniff, Referrer-Policy) en todas las respuestas | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d208) |
+| 212 | Un segundo PageRank con la autoridad que entra de fuera (CSV de Ahrefs, Semrush o Majestic por cliente; salto β·uniforme + (1−β)·externo, masa colgante a las indexables) y avisos de backlinks a errores, noindex, bloqueadas y huérfanas | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d212) |
 
 ## Anadir una decision
 

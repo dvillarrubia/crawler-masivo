@@ -155,6 +155,28 @@ def categoria(
     return SIN_RESPUESTA
 
 
+def _distribucion(n: int, pesos: np.ndarray | None) -> np.ndarray:
+    """Una mascara booleana o unos pesos >= 0, normalizados a suma 1. Vacio o
+    None: todos por igual."""
+    if pesos is None or not np.any(pesos):
+        return np.full(n, 1.0 / n)
+    p = np.asarray(pesos, dtype=np.float64)
+    p = np.where(p > 0, p, 0.0)
+    return p / p.sum()
+
+
+def teletransporte_externo(indexables: np.ndarray, externo: np.ndarray, beta: float) -> np.ndarray:
+    """El salto del PageRank personalizado (#31, decision 212): una parte
+    `beta` por igual entre las indexables (lo de siempre) y el resto donde
+    entra la autoridad de fuera, en proporcion a ella. Con `beta = 1`, o sin
+    nada de fuera, es exactamente el teletransporte interno."""
+    base = _distribucion(len(indexables), indexables)
+    ext = np.asarray(externo, dtype=np.float64)
+    if beta >= 1.0 or not np.any(ext > 0):
+        return base
+    return beta * base + (1.0 - beta) * _distribucion(len(ext), ext)
+
+
 def pagerank(
     n: int,
     src: np.ndarray,
@@ -164,13 +186,19 @@ def pagerank(
     damping: float = 0.85,
     max_iter: int = 100,
     tol: float = 1e-6,
+    colgante: np.ndarray | None = None,
 ) -> np.ndarray:
     """PageRank ponderado con teletransporte restringido. Suma 1.
 
     `src`, `dst` son indices 0..n-1 y `w` el peso de cada arista (se
     normaliza por el peso saliente de su origen). `teletransporte` es una
-    mascara booleana de los nodos que reciben el salto aleatorio y la masa de
-    los nodos sin salida; si es None o esta vacia, entran todos.
+    mascara booleana de los nodos que reciben el salto aleatorio, o unos pesos
+    (el personalizado de la decision 212); si es None o esta vacia, entran
+    todos. `colgante` es a donde va la masa de los nodos sin salida; por
+    defecto, al mismo sitio que el salto. Con autoridad externa NO puede ir
+    ahi: un 404 con backlinks no tiene salida, y su masa volveria a el mismo
+    por el salto, inflando lo que se pierde. Se pasa la mascara de las
+    indexables, como en el interno.
     """
     if n == 0:
         return np.zeros(0, dtype=np.float64)
@@ -178,11 +206,8 @@ def pagerank(
     dst = np.asarray(dst, dtype=np.int64)
     w = np.asarray(w, dtype=np.float64)
 
-    if teletransporte is None or not np.any(teletransporte):
-        v = np.full(n, 1.0 / n)
-    else:
-        mascara = np.asarray(teletransporte, dtype=bool)
-        v = mascara / mascara.sum()
+    v = _distribucion(n, teletransporte)
+    c = v if colgante is None else _distribucion(n, colgante)
 
     peso_saliente = np.bincount(src, weights=w, minlength=n)
     colgantes = peso_saliente == 0
@@ -192,7 +217,7 @@ def pagerank(
     pr = v.copy()
     for _ in range(max_iter):
         aporte = np.bincount(dst, weights=pr[src] * w_norm, minlength=n)
-        nuevo = damping * aporte + ((1.0 - damping) + damping * pr[colgantes].sum()) * v
+        nuevo = damping * aporte + (1.0 - damping) * v + damping * pr[colgantes].sum() * c
         dif = np.abs(nuevo - pr).max()
         pr = nuevo
         if dif < tol:

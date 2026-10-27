@@ -1222,3 +1222,98 @@
      filtros) y la vista por destino de un censo archivado gigante (Druni,
      ~42 M filas) recorre el fichero entero la primera vez: unos segundos
      estimados, sin medir con ese censo.
+
+<a id="d212"></a>
+212. **Un segundo PageRank, con la autoridad que entra de fuera, a partir de un CSV de backlinks por cliente; y avisos de lo que se pierde por el camino** (#31)
+
+   **Problema.** El PageRank interno supone que la autoridad entra a partes
+   iguales por todas las páginas indexables: mide cómo la **reparte** el sitio,
+   no por dónde **entra**. Un 404 con veinte backlinks y uno sin ninguno pesaban
+   lo mismo. Una huérfana enlazada desde fuera no se distinguía de otra que no
+   le importa a nadie. Las tres fuentes de #31 de pago (DataForSEO, Ahrefs API)
+   piden presupuesto y credenciales. Un export de Ahrefs, Semrush o Majestic lo
+   tiene cualquier agencia.
+
+   **Decisión.**
+   - **Un CSV por cliente, no por censo**, como Search Console (141). Se sube
+     en la Configuración del cliente (sección «Backlinks») y se guardan las
+     tres últimas importaciones (`backlink_imports`, `external_links`).
+     - El análisis de cada censo usa la más reciente de su cliente y lo dice
+       (`pagerank_resumen.externo`: fuente, fecha del dato, importación).
+     - Se aplica al analizar: el próximo censo lo lleva solo, y uno ya hecho,
+       re-analizándolo.
+     - Sin importación, las columnas quedan a NULL: un re-análisis tras
+       borrarla no enseña las de antes.
+   - **La lectura** (`shared/backlinks.py`):
+     - Reconoce las columnas de los tres proveedores por su nombre.
+     - Detecta el separador y la codificación (Ahrefs exporta UTF-16 con
+       tabuladores).
+     - Solo guarda lo dofollow y vivo: fuera nofollow, ugc, sponsored y los
+       perdidos, y se dice cuántos.
+     - **La aportación es la de cada backlink**: autoridad de la página de
+       origen / (enlaces externos de esa página + 1), como reparte el
+       PageRank. No es el UR ni el `rank` de la página de destino, que ya
+       incluyen los enlaces internos del sitio vistos por el proveedor y se
+       contarían dos veces.
+   - **El cruce no pasa la ruta a minúsculas** (`/Producto` y `/producto`
+     son dos URLs). Sí normaliza el esquema, `www.`, la barra final, el
+     fragmento y la codificación. Si la URL con su query no está en el
+     censo, prueba sin ella (un `?utm_`). Lo que no casa se guarda y se
+     enseña: las URLs con backlinks que el rastreo no encontró, por autoridad.
+     Por debajo del 90 % casado se avisa en el bloque, porque o el cruce falla
+     o el rastreo no cubre lo que tiene enlaces.
+   - **El modelo** (`analysis/pagerank.py`):
+     - Personalizado: `salto = β · uniforme(indexables) + (1 − β) · externo / Σ externo`,
+       en la misma pasada de carga de aristas que el interno.
+     - Con `β = 1`, o sin backlinks, sale exactamente el interno (test).
+     - `β` es `analysis_thresholds.pagerank_externo_beta`, 0,5 de serie. Es un
+       juicio: el índice de cada proveedor es incompleto, y sin parte uniforme
+       la home, que se lleva casi todos los backlinks, lo domina.
+     - **La masa colgante va a las indexables, no al salto.** Si fuera al
+       salto, un 404 con backlinks recibiría otra vez su propia masa en cada
+       vuelta y lo perdido saldría inflado (test).
+     - Lo que llega a una 301 pasa a su destino por la arista de
+       redirección. Lo que llega a un error se queda y cuenta como
+       desperdiciado.
+   - **Dos métricas, nunca una por otra.** `pagerank_score` sigue siendo el
+     interno. `pagerank_externo_score` (la misma escala 0-100),
+     `backlinks_externos` y `autoridad_externa` van en `urls`. En la interfaz:
+     - en el Explorador, columnas y un ámbito «Backlinks»;
+     - en la ficha de cada URL;
+     - en el bloque «Autoridad desde fuera» del Resumen, que dice dónde cae
+       la autoridad que llega de fuera (indexables, errores, no indexables,
+       redirecciones).
+   - **Avisos** (`analysis/avisos_de_backlinks.py`, warning, uno por página),
+     con los backlinks, dominios, autoridad y orígenes en el detalle:
+     - `backlinks_a_error`, ordenable por la autoridad que se recupera
+       redirigiendo;
+     - `backlinks_a_noindex`;
+     - `backlinks_a_bloqueada_robots`;
+     - `huerfana_con_backlinks`, que sustituye a la huérfana normal (un
+       aviso por hallazgo, 36), como hace Search Console.
+
+     Una 301 con backlinks no se avisa: pasar la autoridad es lo que tiene
+     que hacer. Los cuatro son `NO_COMPARABLES` entre censos, porque
+     dependen del CSV subido y no del sitio.
+
+   **Fuera** (lo demás de #31):
+   - DataForSEO y Ahrefs por API, con su presupuesto.
+   - Sembrar como semillas las URLs con backlinks que el rastreo no
+     encuentra.
+   - El reparto por tipo de página (espera a #12).
+   - Los callejones sin salida.
+   - Validar con exportaciones reales de dos clientes. Los tests usan las
+     cabeceras de los tres proveedores, no un export real.
+
+   Tests:
+   - `tests/test_backlinks.py`:
+     - los tres formatos, lo descartado y la aportación;
+     - la clave sin minúsculas y el cruce con y sin query;
+     - `β = 1` igual al interno, la 301 que llega a su destino, el 404 que
+       se pierde y la masa colgante.
+   - `tests/test_backlinks_db.py`, el análisis contra Postgres sobre el blog
+     de `test_pagerank_db.py`: el resumen, las columnas, los avisos, la 301
+     sin aviso y sin importación a NULL.
+   - `tests/test_backlinks_api.py`: subir, las tres que se guardan, lo que
+     no se lee y borrar.
+   - `tests/test_backlinks_frontend.py`: el bloque del Resumen.
