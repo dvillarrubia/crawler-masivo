@@ -138,7 +138,7 @@ def test_un_rastreo_programado_no_lanza_el_enriquecido(monkeypatch, tmp_path):
     s.commit()
     cola = _ColaQueApunta()
     worker._lanzar_programados(cola)
-    assert cola.claves == ["jobs:pending"]
+    assert cola.claves == ["jobs:programados"]
     assert s.query(EnrichmentRun).count() == 0
     s.close()
 

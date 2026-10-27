@@ -632,6 +632,9 @@
                           <i data-lucide="more-horizontal" class="ico-16"></i>
                         </button>
                         <div class="menu" x-show="menuAbierto === 'prog-' + p.id" role="menu">
+                          <button role="menuitem" @click="menuAbierto = ''; lanzarProgramacionAhora(p)" data-testid="prog-lanzar">
+                            <i data-lucide="play" class="ico-14"></i>
+                            <span>Lanzar ahora<span class="menu-sub">El mismo rastreo que a su hora, sin esperar. La próxima no cambia</span></span></button>
                           <button role="menuitem" class="danger" @click="menuAbierto = ''; borrarProgramacion(p)" data-testid="prog-eliminar">
                             <i data-lucide="trash-2" class="ico-14"></i>
                             <span>Eliminar la programación<span class="menu-sub">Deja de lanzarse sola. Los rastreos que ya lanzó no se borran</span></span></button>

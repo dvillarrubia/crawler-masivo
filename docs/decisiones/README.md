@@ -8,7 +8,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 
 | Fichero | Tema | Decisiones |
 |---|---|---|
-| [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76, 193 |
+| [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76, 193, 209 |
 | [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga, robots.txt y sitemaps en la cola | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140, 172, 173, 174, 186 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124, 153, 154, 155, 187, 198 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137, 156, 160, 164, 167, 170, 171 |
@@ -235,6 +235,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 206 | El markdown de una página rastreada se sanea con DOMPurify antes de pintarlo (x-html), porque marked@15 ya no sanea | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d206) |
 | 207 | Una celda de CSV/XLSX que empieza por `=`/`+`/`-`/`@` se escapa (inyección de fórmula desde el sitio rastreado) | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d207) |
 | 208 | La API manda cabeceras de seguridad (CSP de contención, X-Frame-Options, nosniff, Referrer-Policy) en todas las respuestas | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d208) |
+| 209 | Un disparo programado se toma con candado (`FOR UPDATE SKIP LOCKED`, por si hay varias réplicas) y se encola después del commit; lo programado espera en `jobs:programados`, detrás de lo lanzado a mano; y «Lanzar ahora» (`POST /api/programaciones/{id}/ejecutar`) | [`worker-y-cola`](worker-y-cola.md#d209) |
 | 210 | Lo que Search Console no cuenta (IA sin separar, búsquedas anonimizadas, impresiones infladas de 2025-26, fin de `num=100`) se dice junto a sus cifras, y la parte de clics sin búsqueda se mide en el sitio (`sin_busqueda`) | [`incidencias`](incidencias.md#d210) |
 
 ## Anadir una decision

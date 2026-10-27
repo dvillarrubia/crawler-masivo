@@ -244,3 +244,93 @@
    migración en simulación y de verdad sobre el caso Lopesan, con claves
    deducidas y sin perfil huérfano, serie única en la evolución, defaults al
    día).
+
+<a id="d209"></a>
+209. **Un disparo programado se toma con candado y se encola después de guardarlo; los programados esperan en su propia cola, detrás de lo lanzado a mano; y una programación se puede lanzar ahora**
+
+   **Problema.** Con más de un worker, cada uno pasa por `_lanzar_programados`
+   cada minuto. Los dos leían las pendientes, decidían sin candado y creaban
+   el job: si coincidían en el mismo instante, un disparo salía dos veces, con
+   dos rastreos del mismo sitio a la vez. Contra Postgres, forzando el cruce,
+   salen 2 jobs de 1 disparo. **Corrección tras desplegar:** se escribió que
+   producción corre dos réplicas, por el `replicas: 2` de
+   `docker-compose.prod.yml`. No es así: el despliegue usa
+   `docker-compose.vps.yml` y en el VPS hay un solo worker
+   (`crawler-masivo-worker`). El fallo no podía darse hoy. El candado es para
+   cuando se escale, y el resto de la decisión vale igual. Había otros dos
+   fallos en el mismo código: el id se encolaba ANTES del commit, así que la
+   otra réplica podía sacarlo de Redis y no encontrarlo en la base de datos; y
+   una programación que reventaba hacía perder la pasada entera, y como va
+   primero la que tiene la hora más antigua, se perdía en cada vuelta. #36 F2
+   pedía además una cola de menor prioridad para lo programado y un «Ejecutar
+   ahora».
+
+   **Decisión.**
+   - Las programaciones se toman de **una en una** con `SELECT … FOR UPDATE SKIP
+     LOCKED`, por hora. La réplica que llega segunda salta la fila que tiene
+     cogida la otra, y cuando la otra la suelta ya lleva la próxima hora, así
+     que no vuelve a salir. En SQLite (los tests) SQLAlchemy no emite el `FOR
+     UPDATE`: allí hay un solo proceso.
+   - Cada disparo hace su propio commit y **encola después**. Si Redis no
+     responde, el job queda `failed` y `ultimo_motivo` lo dice. Sin eso se
+     quedaba `pending` para siempre, y además bloqueaba el disparo siguiente
+     por «el rastreo anterior sigue sin terminar».
+   - Un disparo que revienta se deshace él solo y la pasada sigue con las
+     demás. Él se reintenta en la pasada siguiente, porque su hora no avanzó.
+   - **Dos colas**: lo programado va a `jobs:programados` (`encolar(…,
+     programado=True)`) y `siguiente()` hace `BLPOP` sobre
+     `[jobs:pending, jobs:programados]`. Redis mira las claves en orden, así
+     que lo programado solo sale con la cola normal vacía. Quien lanza a mano
+     está mirando la pantalla; el semanal de las 3:00 puede esperar a que acabe
+     ese rastreo. Solo el PRIMER encolado de un disparo va a la cola de
+     programados. Una reanudación o una recuperación tras un reinicio va a la
+     normal: es trabajo ya empezado, y detrás de cada rastreo a mano podría
+     quedarse parado días. `en_orden()` y `pendientes()` cuentan las dos colas,
+     con los programados detrás, que es como salen.
+   - **«Lanzar ahora»**: `POST /api/programaciones/{id}/ejecutar`, en el menú
+     «⋯» de la fila. Crea el mismo job que el planificador
+     (`crear_job_de_disparo`, compartido) y lo pone en la cola normal. Da 409
+     con el motivo si hay un rastreo vivo, o si el perfil no existe, está
+     desactivado o no tiene semillas. No toca la próxima hora: si el rastreo
+     lanzado a mano sigue vivo cuando llega, ese disparo se salta y lo dice,
+     como siempre. Funciona con la programación en pausa: pausar es «que no se
+     lance sola», no «que no se pueda lanzar». `ultimo_motivo` queda en
+     «lanzada a mano».
+
+   - **Un rastreo vivo por perfil, también entre réplicas.** El candado de la
+     programación no basta: dos programaciones colgadas del mismo perfil son
+     dos filas, y las dos réplicas veían «nada vivo» a la vez.
+     `bloquear_perfil` coge la fila del perfil antes de `motivo_rastreo_vivo`,
+     con el mismo orden (programación, luego perfil) en el worker y en «Lanzar
+     ahora».
+   - **Un job solo arranca si está `pending`**: `_run_job` lo marca `running`
+     con un `UPDATE … WHERE status = 'pending'`. Un id repetido en las colas
+     ya no rastrea otra vez un censo terminado, ni uno que corre en la otra
+     réplica. Con dos colas, una copia vieja puede esperar días en la de
+     programados.
+   - **Huérfanos.** Encolar después del commit tiene su propio hueco: un
+     proceso que muere entre los dos deja un job `pending` fuera de las colas.
+     La recuperación periódica (`_reencolar_huerfanos`) lo vuelve a encolar si
+     se creó hace más de `STALE_JOB_MINUTES` y no tiene latido reciente. Un
+     job reanudado mientras su proceso anterior se cierra está fuera de la cola
+     a propósito, y su latido lo delata. «Lanzar ahora» sin Redis da 503 y deja
+     el job `failed`, como el worker.
+
+   **Fuera.** Lo demás de #36 F2: `ignore_patterns`, confirmar una alerta en
+   dos ejecuciones y el criterio de dos semanas sobre un cliente real.
+
+   Tests: `tests/test_programaciones_candado.py`.
+   - Cola de programados y encolado después del commit, comprobado desde otra
+     sesión.
+   - Redis caído, y que el siguiente disparo no se lo salte.
+   - Una programación que revienta no frena a las demás.
+   - «Lanzar ahora»: crea el job, no toca la próxima hora, funciona en pausa,
+     da 409 con un rastreo vivo y 404 si no existe, y el planificador respeta
+     lo lanzado a mano.
+   - **Dos réplicas contra Postgres de verdad**: sin el candado salen 2 jobs
+     y con él sale 1. Lo mismo con dos programaciones del mismo perfil.
+   - Un job que no está `pending` no arranca, los huérfanos se reencolan y
+     «Lanzar ahora» sin Redis no deja la programación bloqueada.
+
+   `tests/test_cola.py` añade la prioridad entre las dos colas, también contra
+   Redis de verdad.
