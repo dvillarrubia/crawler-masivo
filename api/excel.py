@@ -63,6 +63,11 @@ def catalogo() -> tuple[dict[str, str], dict[str, dict[str, str]]]:
     return nombres, fichas
 
 
+# Una cadena que empieza por uno de estos la trata Excel/Sheets (y openpyxl) como
+# formula; escapandola con un apostrofo se escribe como texto (decision 207).
+_FORMULA = ("=", "+", "-", "@", "\t", "\r")
+
+
 def _celda(v: Any) -> Any:
     if v is None:
         return None
@@ -72,6 +77,8 @@ def _celda(v: Any) -> Any:
         return "sí" if v else "no"
     if hasattr(v, "tzinfo") and getattr(v, "tzinfo", None) is not None:
         return v.replace(tzinfo=None)
+    if isinstance(v, str) and v.startswith(_FORMULA):
+        return "'" + v
     return v
 
 

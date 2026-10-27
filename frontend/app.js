@@ -5883,10 +5883,16 @@ function app() {
 
     renderMarkdown(md) {
       if (!md) return '';
+      // El markdown viene del sitio rastreado, no es de confianza: marked@15 ya
+      // no sanea, asi que pasamos su HTML por DOMPurify antes del x-html. Sin el
+      // (p.ej. CDN caido), devolvemos texto escapado, nunca HTML crudo. Decision 206.
+      const escapar = (t) => '<pre>' + String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>';
       try {
-        return marked.parse(md);
+        const html = marked.parse(md);
+        if (typeof DOMPurify === 'undefined' || !DOMPurify.sanitize) return escapar(md);
+        return DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
       } catch {
-        return '<pre>' + md.replace(/</g, '&lt;') + '</pre>';
+        return escapar(md);
       }
     },
 

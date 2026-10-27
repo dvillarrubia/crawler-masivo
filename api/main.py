@@ -17,6 +17,7 @@ from shared.database import init_db
 
 from api import dependencies
 from api.auth import AutenticacionMiddleware, desactivada, token_configurado
+from api.cabeceras import CabecerasSeguridadMiddleware
 from api.mcp_despacho import DespachoMcp, EstadoMcp
 from api.routers import (
     ajustes, almacenamiento, cleaning, clientes, compartido, credenciales, enriquecido, extraccion, jobs, programaciones,
@@ -106,6 +107,11 @@ if _ORIGENES:
 # El servidor MCP remoto (decision 151) por fuera de todo: `/mcp` y las rutas
 # de OAuth llevan su propia autenticacion (token del conector), no la de `/api`.
 app.add_middleware(DespachoMcp, estado=estado_mcp)
+
+# Cabeceras de seguridad (decision 208). La ultima en anadirse es la mas
+# externa, asi que envuelve a todas: las respuestas de `/api`, las de 401 de la
+# autenticacion, el MCP y los estaticos llevan las cabeceras.
+app.add_middleware(CabecerasSeguridadMiddleware)
 
 # Routers
 app.include_router(jobs.router)
