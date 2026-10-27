@@ -13,7 +13,9 @@ Lo que se sujeta:
 - en la pestaña URLs la barra lateral no se ve y sus entradas estan en un
   desplegable, con su cifra; a 1440 px es al reves, y la busqueda va primero;
 - la tarjeta «Páginas HTML» y la entrada de la barra que abre dicen la misma
-  cifra (V30).
+  cifra (V30), y un ambito SEO abre las paginas que cuenta su cifra;
+- en un censo sin analizar (cancelado antes del analisis) los ambitos no
+  llevan cifra: no hay problemas calculados, que no es «0».
 
 Necesita Chromium y poder bajar Alpine de su CDN: si no, se salta.
 """
@@ -34,6 +36,8 @@ FRONT = RAIZ / "frontend"
 BASE = "http://prueba.local"
 CLI = "11111111-1111-1111-1111-111111111111"
 JOB = "22222222-2222-2222-2222-222222222222"
+# Un censo cancelado antes de analizar: sin analisis_version ni problemas.
+SIN = "44444444-4444-4444-4444-444444444444"
 LARGO = "lopesan.com (semanal) con un nombre larguisimo para ver si la tarjeta lo parte bien"
 URL_LARGA = "https://www.ejemplo-de-un-dominio-bastante-largo.com/blog/una-ruta-muy-larga-que-no-cabe-en-un-movil-de-ninguna-manera/"
 
@@ -115,13 +119,29 @@ RESPUESTAS = {
 }
 
 
+def _total_urls(q: dict) -> int:
+    """Lo que la API real contaria con ese filtro, igual en la cuenta de la
+    barra (page_size=1) que en la lista que abre la entrada."""
+    if q.get("issue_type"):
+        return 307 if "title_too_long" in q["issue_type"].split("%2C") else 0
+    if q.get("status_group") == "2xx" and q.get("resource_type") == "html":
+        return 3731
+    return 5578 if q.get("page_size") != "1" else 7
+
+
 def _respuesta_api(ruta: str, query: str):
+    if ruta.startswith(f"jobs/{SIN}"):
+        if ruta == f"jobs/{SIN}":
+            return _job(0, id=SIN, status="cancelled", finish_reason="cancelled", analisis_version=None)
+        if ruta.endswith("/issues/resumen"):
+            return []
+        ruta = ruta.replace(SIN, JOB)
     if ruta == f"jobs/{JOB}/urls":
         q = dict(p.split("=", 1) for p in query.split("&") if "=" in p)
-        if q.get("page_size") == "1":
-            total = 3731 if q.get("status_group") == "2xx" and q.get("resource_type") == "html" else 7
-            return {"items": [], "total": total, "page": 1, "page_size": 1, "pages": total}
-        return {"items": [_url(i) for i in range(30)], "total": 5578, "page": 1, "page_size": 100, "pages": 56}
+        total = _total_urls(q)
+        n = 1 if q.get("page_size") == "1" else 100
+        items = [] if n == 1 else [_url(i) for i in range(min(30, total))]
+        return {"items": items, "total": total, "page": 1, "page_size": n, "pages": max(1, -(-total // n))}
     if ruta in RESPUESTAS:
         return RESPUESTAS[ruta]
     return None
@@ -287,3 +307,44 @@ def test_columnas_por_defecto_deciden_y_los_clics_solo_con_search_console():
     assert r["sin"] == ["url", "status_code", "indexable", "inlinks_count", "title"]
     assert r["con"] == ["url", "status_code", "indexable", "inlinks_count", "gsc_clics", "title"]
     assert r["trafico"] == 1
+
+
+AMBITO = """async () => {
+  const espera = ms => new Promise(r => setTimeout(r, ms));
+  const t = e => e.textContent.replace(/\\s+/g, ' ').trim();
+  const barra = () => [...document.querySelectorAll('.exp-sidebar .exp-tab')].map(t);
+  const antes = barra();
+  const titulos = [...document.querySelectorAll('.exp-sidebar .exp-tab')].find(b => t(b).startsWith('Títulos'));
+  if (!titulos) return { antes, abre: null };
+  titulos.click();
+  await espera(1200);
+  return {
+    antes,
+    abre: t(document.querySelector('.exp-results-count')),
+    chips: [...document.querySelectorAll('.exp-ambito .chip-ambito.on, .exp-ambito span.text-dim')].map(t),
+  };
+}"""
+
+
+def test_un_ambito_abre_lo_que_cuenta_y_sin_analizar_no_lleva_cifra():
+    salida, errores = _medir([f"#/rastreos/{JOB}/urls", f"#/rastreos/{SIN}/urls"], 1440, AMBITO)
+    assert errores == []
+    hecho = salida[f"#/rastreos/{JOB}/urls"]["extra"]
+    # La cifra de la entrada y los resultados que abre, la misma.
+    assert "Títulos 307" in hecho["antes"], hecho["antes"]
+    assert hecho["abre"] == "307 resultados", hecho
+    assert any("algún problema" in c for c in hecho["chips"]), hecho["chips"]
+    # Un ambito sin ningun tipo en el resumen: «0», contado.
+    assert "Canonicals 0" in hecho["antes"]
+    sin = salida[f"#/rastreos/{SIN}/urls"]["extra"]
+    ambitos = ("Títulos", "Canonicals", "Enlazado", "Redirecciones")
+    entradas = [b for b in sin["antes"] if b.startswith(ambitos)]
+    assert entradas and all(not re.search(r"\d$", b) for b in entradas), entradas
+    # Las de /stats si cuentan: el rastreo existe aunque no se analizara.
+    assert any(re.fullmatch(r"Páginas HTML 3\.731", b) for b in sin["antes"]), sin["antes"]
+    # La indexabilidad la calcula el analisis: sin el, sin cifra.
+    assert "Indexables" in sin["antes"] and "No indexables" in sin["antes"], sin["antes"]
+    # Y la entrada abre todas las paginas, sin decir «ningún problema».
+    assert sin["abre"] == "5.578 resultados", sin  # sin filtro de problema
+    assert not any("Ningún problema" in c for c in sin["chips"]), sin["chips"]
+    assert any("no se analizó" in c for c in sin["chips"]), sin["chips"]

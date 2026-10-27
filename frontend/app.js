@@ -2852,13 +2852,17 @@ function app() {
             if (['completed','failed','cancelled'].includes(this.progress.status)) {
               this._stopProgress();
               this.job = await api(`/jobs/${this.job.id}`);
-              await this.loadStats();
-              this.cargarVeredicto();
               // Analysis just finished: drop cached tab data so the active
               // tab refetches fresh issues/insights instead of the empty/
-              // partial snapshot loaded mid-analysis.
+              // partial snapshot loaded mid-analysis. Antes de loadStats: la
+              // barra del Explorador se recuenta ahi y no debe leer el
+              // resumen de problemas de mitad de rastreo (revision de UX del
+              // 25-oct, 3.4).
               this._invalidateResultCaches();
+              await this.loadStats();
+              this.cargarVeredicto();
               this._reloadActiveTab();
+              if (this.view === 'explorer') this.loadExplorerUrls();
             }
           }
         } catch {}
@@ -2873,11 +2877,17 @@ function app() {
       this.issues = []; this.issuesPage = 1;
       this.links = []; this.linksPage = 1;
       this.urls = []; this.urlsPage = 1;
+      // Lo contado con el rastreo a medias: la barra del Explorador y el
+      // resumen de problemas del que saca sus ambitos (revision de UX del
+      // 25-oct, 3.4).
+      this.issuesResumen = null;
+      this._expContadores = null;
     },
 
     _reloadActiveTab() {
       const t = this.detailTab;
       if (t === 'overview') this.cargarPrincipales();
+      if (t === 'issues' && !this.issuesResumen) this.loadIssuesResumen();
       if (t === 'urls') this.loadUrls();
       else if (t === 'issues') this.loadIssues();
       else if (t === 'links') this.loadLinks();
@@ -5818,11 +5828,30 @@ function app() {
       b.bloqueadas = b.blocked || 0;
       // Lo que /stats no cuenta con el mismo filtro que la pestaña se pide
       // aparte (cargarContadoresExplorador) y se guarda por censo.
-      // Un rastreo que no ha terminado cambia de cifras: se vuelven a contar.
-      if (['pending', 'running', 'analyzing'].includes(this.job.status) && this._expContadores && !this._expContadores.pidiendo) this._expContadores = null;
-      const c = this._expContadores && this._expContadores.job === this.job.id ? this._expContadores.valores : {};
+      // Un rastreo que no ha terminado cambia de cifras: se vuelven a contar
+      // cada vez que se entra, y otra vez al cambiar de estado o de analisis
+      // (lo contado a medias no se queda en la barra cuando acaba).
+      const clave = this._claveContadores();
+      const e = this._expContadores;
+      if (e && (e.job !== this.job.id || e.clave !== clave || (this._censoEnCurso() && !e.pidiendo))) this._expContadores = null;
+      const c = this._expContadores ? this._expContadores.valores : {};
       this.expBadgeCounts = { ...b, ...c };
       this.cargarContadoresExplorador();
+    },
+
+    // El censo esta analizado y ya no cambia: sin eso, los ambitos SEO no
+    // llevan cifra ni punto de color. Un censo cancelado o fallido antes del
+    // analisis no tiene problemas calculados, no «0 problemas»: el mismo
+    // criterio que la tarjeta «sin analizar todavía» del Resumen (revision
+    // de UX del 25-oct, 3.4; lo que no se puede afirmar no se afirma).
+    _censoEnCurso() {
+      return !!this.job && ['pending', 'running', 'analyzing'].includes(this.job.status);
+    },
+    explorerAnalizado() {
+      return !!this.job && !!this.job.analisis_version && !this._censoEnCurso();
+    },
+    _claveContadores() {
+      return this.job ? this.job.status + '|' + (this.job.analisis_version || '') : '';
     },
 
     // Las entradas cuya cifra no sale de /stats: Páginas HTML, Indexables,
@@ -5832,24 +5861,34 @@ function app() {
     // /urls con el filtro de la pestaña, una consulta cada vez y en orden,
     // para no cargar la API. Si una falla, esa entrada se queda sin cifra:
     // nunca un 0 que no se ha contado. Un ambito sin ningun tipo en el
-    // resumen de problemas es 0 sin preguntar.
+    // resumen de problemas es 0 sin preguntar, pero solo si el resumen trae
+    // algo (vacio puede ser que fallo). Sin analizar, los ambitos y las
+    // indexables sin cifra.
     async cargarContadoresExplorador() {
       const job = this.job;
       if (!job || !this.stats) return;
-      if (!this._expContadores || this._expContadores.job !== job.id) this._expContadores = { job: job.id, valores: {}, pidiendo: false };
+      const clave = this._claveContadores();
+      if (!this._expContadores || this._expContadores.job !== job.id || this._expContadores.clave !== clave) {
+        this._expContadores = { job: job.id, clave, valores: {}, pidiendo: false };
+      }
       const cache = this._expContadores;
       if (cache.pidiendo) return;
       cache.pidiendo = true;
+      // Una cuenta que se pidio antes de acabar el rastreo no pisa la nueva.
+      const vigente = () => this.job && this.job.id === job.id && this._expContadores === cache;
       try {
-        if (!this.issuesResumen) await this.loadIssuesResumen();
+        const analizado = this.explorerAnalizado();
+        if (analizado && !this.issuesResumen) await this.loadIssuesResumen();
         const tipos = new Set((this.issuesResumen || []).map(r => r.issue_type));
         for (const tab of EXP_TABS) {
-          if (!this.job || this.job.id !== job.id) return;
+          if (!vigente()) return;
           if (tab.divider || tab.header || cache.valores[tab.key] != null) continue;
           const fuera = ['paginas_html', 'indexable', 'noindex', 'a_medida'];
           if (!tab.ambito && !fuera.includes(tab.key)) continue;
+          // La indexabilidad tambien la calcula el analisis: sin el, «0».
+          if ((tab.ambito || tab.key === 'indexable' || tab.key === 'noindex') && !analizado) continue;
           if (tab.requiere && !this.expAMedida.length) continue;
-          if (tab.ambito && this.issuesResumen && !this.issuesSegmento && !tab.ambito.some(t => tipos.has(t))) {
+          if (tab.ambito && tipos.size && !this.issuesSegmento && !tab.ambito.some(t => tipos.has(t))) {
             cache.valores[tab.key] = 0;
           } else {
             const q = new URLSearchParams({ page: '1', page_size: '1', ligero: 'true' });
@@ -5857,10 +5896,11 @@ function app() {
             if (tab.ambito) q.set('issue_type', tab.ambito.join(','));
             try {
               const r = await api(`/jobs/${job.id}/urls?${q}`);
+              if (!vigente()) return;
               cache.valores[tab.key] = r.total;
             } catch (_) { continue; }
           }
-          if (this.job && this.job.id === job.id) this.expBadgeCounts = { ...this.expBadgeCounts, [tab.key]: cache.valores[tab.key] };
+          if (vigente()) this.expBadgeCounts = { ...this.expBadgeCounts, [tab.key]: cache.valores[tab.key] };
         }
       } finally { cache.pidiendo = false; }
     },
@@ -5928,7 +5968,16 @@ function app() {
       if (antes && antes.ambito && this.expProblema && this.expProblema.split(',').every(t => antes.ambito.includes(t))) {
         this.expProblema = '';
       }
-      if (EXP_TABS.find(t => t.key === tab)?.ambito && !this.issuesResumen) this.loadIssuesResumen();
+      // Un ambito abre las paginas con algun problema suyo: lo mismo que
+      // cuenta su cifra en la barra («Títulos 307» abre 307, no las 3.772
+      // páginas HTML). «Todas las páginas» sigue a un clic en los chips
+      // (revision de UX del 25-oct, 3.4; decision 199). Sin analizar no hay
+      // problemas que filtrar: todas.
+      const nueva = EXP_TABS.find(t => t.key === tab);
+      if (nueva && nueva.ambito && !this.expProblema && !this.expGravedad && this.explorerAnalizado()) {
+        this.expProblema = nueva.ambito.join(',');
+      }
+      if (nueva && nueva.ambito && !this.issuesResumen && this.explorerAnalizado()) this.loadIssuesResumen();
       this.expPage = 1;
       this.expDetailOpen = false;
       this.expSelectedUrl = null;
@@ -6068,7 +6117,7 @@ function app() {
 
     // Gravedad mas alta del ambito: el punto de color de la barra lateral.
     gravedadDelAmbito(tab) {
-      if (!tab.ambito || !this.issuesResumen) return '';
+      if (!tab.ambito || !this.issuesResumen || !this.explorerAnalizado()) return '';
       const sev = this.issuesResumen.filter(r => tab.ambito.includes(r.issue_type)).map(r => r.severity);
       return sev.includes('error') ? 'error' : sev.includes('warning') ? 'warning' : sev.includes('info') ? 'info' : 'ok';
     },

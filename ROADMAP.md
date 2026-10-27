@@ -1131,7 +1131,9 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   al desplazar, las columnas de serie empiezan por indexable, enlaces
   entrantes y clics de Google (si hay Search Console), y todas las entradas de
   la barra llevan su cifra («0» si es cero). «Páginas HTML» (la cifra de la
-  tarjeta) y «Todo el HTML» son dos entradas (V30). Solo frontend.
+  tarjeta) y «Todo el HTML» son dos entradas (V30); cada ámbito abre las
+  páginas que cuenta, y un censo sin analizar no dice «0» en lo que el análisis
+  no ha calculado. Solo frontend.
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 

@@ -422,7 +422,13 @@ Cosas que no estaban en la auditoría y aparecieron al hacerla:
 - [x] **Contadores en todas las entradas, con «0» cuando es cero** (V30,
   decisión 199): JavaScript, CSS, 5xx y Bloqueadas salen de `/stats`; Páginas
   HTML, Indexables, No indexables y cada ámbito SEO, del `total` de `/urls` con
-  su filtro (en un ámbito, páginas con algún problema del ámbito).
+  su filtro (en un ámbito, páginas con algún problema del ámbito). Pulsar un
+  ámbito abre esas mismas páginas («Con algún problema de este ámbito»): antes
+  «Títulos 307» abría 3.772. En un censo sin analizar los ámbitos, Indexables
+  y No indexables van sin cifra (no hay nada calculado, no es «0»), y lo
+  contado con el rastreo a medias se recuenta al acabar el análisis.
+- [x] **Tema terminal**: la columna URL fija y las tarjetas del móvil usan el
+  fondo del tema (eran blancas, con el texto verde claro ilegible).
 - [x] **«HTML 3.772» frente a «3.731 páginas HTML»** (V30): no era un fallo de
   cuenta. La tarjeta son las HTML internas que responden 2xx; la barra, todo
   lo que responde HTML (también los 41 4xx de Lopesan). Ahora son «Páginas

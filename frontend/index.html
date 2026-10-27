@@ -6704,12 +6704,13 @@
                 </template>
                 <template x-if="!tab.divider && !tab.header && (!tab.requiere || expAMedida.length)">
                   <button type="button" class="exp-tab" :class="expTab === tab.key && !expWp && 'active'" @click="setExplorerTab(tab.key)"
-                          :title="tab.titulo || (tab.ambito ? 'Páginas de esta vista con algún problema de ' + tab.label.toLowerCase() : '')">
+                          :title="tab.titulo || (tab.ambito ? (explorerAnalizado() ? 'Páginas con algún problema de ' + tab.label.toLowerCase() : 'Sin analizar: no hay problemas calculados') : '')">
                     <i :data-lucide="tab.icon" class="exp-tab-icon"></i>
                     <span x-text="tab.label"></span>
                     <!-- Contador en todas las entradas, tambien en los ambitos
                          (revision de UX del 25-oct, 3.4): «0» si no hay ninguna;
-                         sin cifra solo mientras se cuenta o si no se pudo. -->
+                         sin cifra mientras se cuenta, si no se pudo o, en los ambitos,
+                         si el censo no esta analizado. -->
                     <span class="exp-tab-badge" x-text="expBadgeCounts[tab.key] != null ? fmt.num(expBadgeCounts[tab.key]) : ''"></span>
                     <template x-if="tab.ambito">
                       <span class="exp-tab-punto" :class="'p-' + gravedadDelAmbito(tab)"
@@ -6988,9 +6989,11 @@
           <template x-if="(EXP_TABS.find(t => t.key === expTab) || {}).ambito">
             <div class="exp-ambito">
               <button class="chip-ambito" :class="!expProblema && 'on'" @click="elegirTipoDelAmbito('')">Todas las páginas</button>
-              <template x-if="tiposDelAmbito().length > 1">
+              <!-- Lo que abre la entrada de la barra y lo que cuenta su cifra
+                   (revision de UX del 25-oct, 3.4): siempre a la vista. -->
+              <template x-if="explorerAnalizado()">
                 <button class="chip-ambito" :class="expProblema === (EXP_TABS.find(t => t.key === expTab).ambito.join(',')) && 'on'"
-                        @click="elegirTipoDelAmbito('*')">Con cualquier problema de este ámbito</button>
+                        @click="elegirTipoDelAmbito('*')">Con algún problema de este ámbito</button>
               </template>
               <template x-for="r in tiposDelAmbito()" :key="r.issue_type">
                 <button class="chip-ambito" :class="[expProblema === r.issue_type && 'on', 'sev-' + r.severity]"
@@ -6998,8 +7001,12 @@
                   <span x-text="fmt.issue(r.issue_type)"></span> <strong x-text="fmt.num(r.paginas)"></strong>
                 </button>
               </template>
-              <template x-if="issuesResumen && !tiposDelAmbito().length">
+              <template x-if="explorerAnalizado() && issuesResumen && !tiposDelAmbito().length">
                 <span class="text-dim text-sm">Ningún problema de este ámbito en este rastreo.</span>
+              </template>
+              <!-- Sin analizar no hay problemas calculados: no es «ninguno». -->
+              <template x-if="!explorerAnalizado()">
+                <span class="text-dim text-sm" x-text="['pending', 'running', 'analyzing'].includes((job || {}).status) ? 'Los problemas salen al acabar el análisis.' : 'Este rastreo no se analizó: no hay problemas calculados.'"></span>
               </template>
             </div>
           </template>

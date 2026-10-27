@@ -1921,10 +1921,10 @@ a.tab{display:flex;align-items:center;gap:.35rem;white-space:nowrap;flex-shrink:
 .menu.menu-izq{left:0;right:auto}
 /* La columna URL fija al desplazar en horizontal. */
 .exp-table.url-fija th:first-of-type,.exp-table.url-fija td:first-of-type{position:sticky;left:0;box-shadow:inset -1px 0 0 var(--border)}
-.exp-table.url-fija td:first-of-type{z-index:2;background:#fff}
+.exp-table.url-fija td:first-of-type{z-index:2;background:var(--bg-card)}
 .exp-table.url-fija thead th:first-of-type{z-index:7}
 .exp-table.url-fija thead tr.exp-filter-row th:first-of-type{z-index:6}
-.exp-table.url-fija tbody tr:nth-child(even) td:first-of-type{background:#f7f8fa}
+.exp-table.url-fija tbody tr:nth-child(even) td:first-of-type{background:var(--bg-input)}
 .exp-table.url-fija tbody tr:hover td:first-of-type{background:#eef5e6}
 .exp-table.url-fija tbody tr.exp-row-selected td:first-of-type{background:#dbedc8}
 @media (max-width:768px){
@@ -1955,4 +1955,9 @@ a.tab{display:flex;align-items:center;gap:.35rem;white-space:nowrap;flex-shrink:
   .panel-cartera td:first-of-type{display:block}
   .panel-cartera tr,.tabla-rastreos tr{grid-template-columns:repeat(3,minmax(0,1fr)) !important}
   .panel-cartera td .truncate{max-width:100% !important}
+  /* En un tercio de tarjeta el sparkline y «≠ versión» no caben en fila. */
+  .panel-cartera .evo-tendencia{flex-wrap:wrap;row-gap:.1rem}
+  /* Las tarjetas con el fondo del tema (en terminal, blanco con cifras
+     verde claro no se leia). */
+  .tabla-tarjetas tr{background:var(--bg-card)}
 }

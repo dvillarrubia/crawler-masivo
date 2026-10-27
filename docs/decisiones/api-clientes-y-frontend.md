@@ -685,17 +685,32 @@
      exista.
    - Lo demás es el `total` de `GET /urls` con el mismo filtro que aplica la
      entrada (`page_size=1`): una consulta cada vez, en orden y en segundo
-     plano, guardada por censo (se vuelve a contar si el rastreo no ha
-     terminado). En un ámbito SEO la cifra son las **páginas** de esa vista con
-     algún problema del ámbito (`issue_type` con todos sus tipos), no la suma de
-     incidencias: una página con dos problemas del ámbito cuenta una vez. Un
-     ámbito sin ningún tipo en el resumen de problemas es 0 sin preguntar. Si
-     una consulta falla, la entrada se queda sin cifra: nunca un 0 que no se ha
-     contado. «Externas» sigue sin cifra con una API sin `/links/resumen`
+     plano, guardada por censo y por estado y versión del análisis: con el
+     rastreo sin terminar se recuenta cada vez que se entra, y al acabar el
+     análisis se tira lo contado a medias (y el resumen de problemas del que
+     salen los ámbitos) antes de recontar. En un ámbito SEO la cifra son las
+     **páginas** de esa vista con algún problema del ámbito (`issue_type` con
+     todos sus tipos), no la suma de incidencias: una página con dos problemas
+     del ámbito cuenta una vez. Y como la entrada tiene que abrir lo que cuenta,
+     **pulsar un ámbito abre «Con algún problema de este ámbito»** («Títulos
+     307» abre 307, no las 3.772 páginas HTML); «Todas las páginas» queda a un
+     clic en los chips. Una URL guardada con la pestaña y sin `problema` sigue
+     abriendo todas. Un ámbito sin ningún tipo en el resumen de problemas es 0
+     sin preguntar, pero solo si el resumen trae algo (vacío puede ser que
+     falló). Si una consulta falla, la entrada se queda sin cifra: nunca un 0
+     que no se ha contado.
+   - **Un censo sin analizar** (cancelado o fallido antes del análisis, o aún
+     en curso: sin `analisis_version` o con el estado sin cerrar) no tiene
+     problemas ni indexabilidad calculados, que no es «0»: los ámbitos,
+     Indexables y No indexables van sin cifra ni punto de color, el ámbito abre
+     todas las páginas y en lugar de «Ningún problema de este ámbito» dice que
+     no se analizó. El mismo criterio que la tarjeta «sin analizar todavía» del
+     Resumen. «Externas» sigue sin cifra con una API sin `/links/resumen`
      (revisión 2.8).
    - Con Search Console en el censo, las columnas de serie llevan los clics de
      Google detrás de indexable y enlaces entrantes (`columnasPorDefecto`); sin
      él no se añade una columna vacía.
 
    Tests: `tests/test_movil_frontend.py` (la tarjeta y su entrada con la misma
-   cifra, contadores en todas las entradas, columnas por defecto).
+   cifra, un ámbito abre lo que cuenta, un censo sin analizar sin cifra en los
+   ámbitos, contadores en todas las entradas, columnas por defecto).
