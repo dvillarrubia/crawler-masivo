@@ -16,6 +16,27 @@
                          └──────────┘
 ```
 
+## Colas de Redis (`shared/cola.py`)
+
+| Cola | Qué lleva | Quién la llena | Decisión |
+|---|---|---|---|
+| `jobs:pending` | ids de rastreos lanzados a mano, reanudados o recuperados | API, worker | 31 |
+| `jobs:programados` | ids de rastreos que dispara el planificador; solo se atienden con `jobs:pending` vacía | worker (`_lanzar_programados`) | 209 |
+| `enrichment:pending` | ejecuciones del análisis con IA | API (con token) | 85 |
+| `logs:pending` | logs del servidor subidos, para leer en un hilo del worker | API | 213 |
+
+Las pruebas en vivo de la extracción a medida van por su propia cola
+(`shared/prueba_en_vivo.py`, decisión 166).
+
+## Volúmenes
+
+- **`archivo`** (`ARCHIVO_DIR=/data/archivo`), compartido por la API y el
+  worker: los enlaces de los censos superados en Parquet (95, 150), las
+  capturas de pantalla (173) y los logs subidos mientras se leen (213; se
+  borran al acabar).
+- **`secretos`** (`SECRETOS_DIR=/secretos`): llaves de Search Console, token
+  de Slack y claves por cliente (141, 149). Nunca en la base de datos (83).
+
 ## Componentes
 
 | Component | Path | Technology | Description |
@@ -46,4 +67,4 @@
 - **postgres** — PostgreSQL 16 Alpine, port 5432, healthcheck via `pg_isready`
 - **redis** — Redis 7 Alpine, port 6379, healthcheck via `redis-cli ping`
 - **api** — FastAPI app, port 8000, depends on postgres + redis
-- **crawler** — Scrapy worker, 1 replica by default (local), resource-limited (2GB RAM, 2 CPUs)
+- **crawler** — Scrapy worker, 1 replica by default (local), resource-limited (2GB RAM, 2 CPUs). En el VPS también es uno solo (`crawler-masivo-worker`, por `docker-compose.vps.yml`; ver `despliegue-y-entorno.md`)

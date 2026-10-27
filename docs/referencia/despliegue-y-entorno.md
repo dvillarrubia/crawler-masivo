@@ -17,13 +17,33 @@ docker compose up -d
 
 Default crawler limits: 1 replica, 2GB RAM, 2 CPUs, 8 concurrent JS requests, 4 max browser tabs.
 
-### VPS / Production
+### El VPS de Lin3s (producción de verdad)
+
+**Comprobado el 2026-10-28** (`ssh vps 'docker ps'`): el despliegue
+(`.github/workflows/deploy.yml`) hace
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d
+```
+
+`docker-compose.vps.yml` **no está en el repo**: vive solo en
+`/opt/crawler-masivo` del VPS. Pone Traefik delante de la API
+(`crawler-masivo.srv817047.hstgr.cloud`, TLS), cierra los puertos de Postgres
+y Redis, y deja **un solo worker** (`container_name: crawler-masivo-worker`,
+`replicas: 1`, 4 GB y 2 CPU). Con un `container_name` fijo no se puede escalar.
+Si hiciera falta más de un worker, hay que quitarlo. Lo que el worker hace con
+varias réplicas (el candado del planificador, decisión 209; la lectura de logs
+con latido, 213) está preparado, pero hoy no se usa.
+
+### `docker-compose.prod.yml` (genérico, no es el del VPS)
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
-Production crawler limits: 2 replicas, 4GB RAM, 4 CPUs, 16 concurrent JS requests, 8 max browser tabs.
+Límites para un servidor genérico: 2 réplicas, 4 GB, 4 CPU, 16 peticiones JS
+a la vez y 8 pestañas. **No es lo que corre en el VPS de Lin3s** (arriba):
+la decisión 209 lo dio por bueno y se corrigió.
 
 Adjust `docker-compose.prod.yml` values based on your VPS specs. Examples:
 

@@ -40,7 +40,7 @@ tres), `frontend/`, `mcp_servidor/` y `scripts/`. Detalle y servicios de Docker:
 
 ```bash
 docker compose up -d                                                      # local
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d     # VPS
+docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d      # VPS (vps.yml solo esta en el servidor; un worker)
 docker compose up -d --build                                              # tras cambiar codigo
 docker compose exec api python scripts/init_db.py                         # tablas
 docker compose logs -f crawler
