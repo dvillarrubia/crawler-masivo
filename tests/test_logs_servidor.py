@@ -108,11 +108,19 @@ def test_comillas_escapadas_en_el_user_agent():
     assert ("/a", "googlebot", True) in a.por_ruta, "un referer con comillas no tira el user-agent"
 
 
+def test_un_falso_googlebot_no_le_quita_el_sitio_al_de_verdad():
+    falsos = [f'1.2.3.4 - - [20/Oct/2026:10:00:00 +0200] "GET /scan{i} HTTP/1.1" 200 1 "-" "{GBOT}"' for i in range(10)]
+    buenos = [f'66.249.66.1 - - [20/Oct/2026:10:00:00 +0200] "GET /p{i} HTTP/1.1" 200 1 "-" "{GBOT}"' for i in range(3)]
+    a = L.agregar(falsos + buenos, L.regex_de("combined"), verificar=_verificador(), max_claves=4)
+    assert sum(1 for k in a.por_ruta if k[2] is True) == 3 and a.fuera_del_tope == 6
+    assert L.tapar_ips("[10/Oct/2026:10:00:00 +0000] 2001:db8::1") == "[10/Oct/2026:10:00:00 +0000] x:x"
+
+
 def test_el_tope_de_rutas_cuenta_lo_que_no_cabe():
     lineas = [f'66.249.66.1 - - [20/Oct/2026:10:00:00 +0200] "GET /p{i} HTTP/1.1" 200 1 "-" "{GBOT}"'
               for i in range(10)]
-    a = L.agregar(lineas, L.regex_de("combined"), verificar=_verificador(), max_claves=4)
-    assert len(a.por_ruta) == 4 and a.fuera_del_tope == 6
+    a = L.agregar(lineas, L.regex_de("combined"), verificar=_verificador(), max_claves_googlebot=4)
+    assert len(a.por_ruta) == 4 and a.fuera_del_tope_googlebot == 6
 
 
 def test_las_filas_separan_lo_verificado_de_lo_falso():

@@ -1628,8 +1628,11 @@
      en `log_urls`, con visitas, códigos, primera y última y la parte con el
      Googlebot de móvil.
      - Lo de personas se cuenta y no se guarda.
-     - Hay un tope de 400.000 rutas distintas (unos 250 MB: el worker comparte
-       memoria con los rastreos). Lo que no cabe se cuenta en `resumen.fuera_del_tope`.
+     - Hay un tope de rutas distintas (unos 400 MB en total: el worker
+       comparte memoria con los rastreos). El Googlebot verificado tiene su
+       propio cupo, para que un escáner que se hace pasar por él no deje fuera
+       las visitas de verdad. Lo que no cabe se cuenta en `resumen.fuera_del_tope`,
+       y si se cortó el de Googlebot no se afirman ausencias.
      - Una URL entera de otro host (una petición de proxy) no es de este log
        y se aparta.
      - El fichero se borra al acabar, también con error o si el cliente ya
@@ -1652,7 +1655,9 @@
      - Solo cuenta el Googlebot verificado. Los falsos se dicen aparte.
    - **Cruzado con el censo** (`analysis/avisos_de_logs.py`), con la misma
      regla de cruce y desempate que los backlinks (`shared.backlinks.IndiceCenso`)
-     y **solo un log del mismo host que el censo** (con o sin `www.`):
+     y **solo un log del mismo host que el censo** (con o sin `www.`) **y de
+     su época** (se solapa con él o le queda a 30 días como mucho). Sin uno
+     así, ni columnas ni resumen:
      - `urls.googlebot_visitas` y `googlebot_ultima`: 0 si el log no la vio,
        NULL sin log de ese host.
      - `jobs.logs_resumen` y el bloque «Googlebot en los logs» del Resumen:
@@ -1666,8 +1671,6 @@
        con empates en una escala entera, `>= p75` podía ser el mínimo y entraban
        todas.
    - **Lo que no se puede afirmar no se afirma** (67, 70, 89):
-     - Los dos avisos solo salen si el log es de la época del censo: se solapa
-       con él o le queda a 30 días como mucho.
      - La ausencia pide además 7 días de log, 100 visitas de Googlebot
        verificado como mínimo y que el log vea al menos el 10 % de las
        indexables. Detrás de una CDN, con otro host o con una regex que coge

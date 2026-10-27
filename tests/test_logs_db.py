@@ -136,8 +136,9 @@ def test_un_log_de_otro_host_o_de_otra_epoca_no_cuenta(sesion, job, limpiar):  #
     imp.desde, imp.hasta = FIN - timedelta(days=200), FIN - timedelta(days=186)
     sesion.commit()
     _analizar(sesion, j)
-    r = sesion.get(Job, j.id).logs_resumen
-    assert r["de_su_epoca"] is False and r["afirmable_ausencia"] is False
+    assert sesion.get(Job, j.id).logs_resumen is None, "un log de otra época tampoco"
+    assert sesion.execute(select(Url.googlebot_visitas).where(Url.job_id == j.id,
+                                                               Url.googlebot_visitas.isnot(None))).all() == []
     assert sesion.execute(select(Issue.id).where(Issue.job_id == j.id, Issue.issue_type.in_(
         ("indexable_sin_visitas_googlebot", "googlebot_recibe_error")))).all() == []
 
