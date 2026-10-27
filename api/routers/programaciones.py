@@ -208,6 +208,54 @@ def editar_programacion(
     return _respuestas(db, [prog])[0]
 
 
+@router.post("/{prog_id}/ejecutar", status_code=201)
+def ejecutar_ahora(prog_id: uuid.UUID, db: Session = Depends(get_session)):
+    """Lanza ya el rastreo de la programación, sin esperar a su hora (#36, decisión 209).
+
+    El MISMO job que crearía el planificador (`crear_job_de_disparo`), con la
+    misma regla de no lanzar encima de un rastreo vivo: un 409 dice por qué.
+    Va a la cola normal y no a la de programados: quien lo pide está
+    esperando. No toca la próxima hora; si el rastreo sigue vivo cuando
+    llegue, el planificador se salta ese disparo y lo dice, como siempre.
+    Funciona también con la programación en pausa: pausar es «que no se lance
+    sola», no «que no se pueda lanzar».
+    """
+    from shared.cola import encolar
+    from shared.models import Job
+    from shared.programaciones import (LANZADA_A_MANO, bloquear_perfil,
+                                       crear_job_de_disparo, motivo_rastreo_vivo,
+                                       resolver_disparo)
+
+    from api.dependencies import get_redis
+
+    prog = (db.query(Programacion).filter(Programacion.id == prog_id)
+            .with_for_update().one_or_none())
+    if prog is None:
+        raise HTTPException(status_code=404, detail="Programacion no encontrada")
+    bloquear_perfil(db, prog)
+    vivo = motivo_rastreo_vivo(db, prog)
+    if vivo:
+        raise HTTPException(status_code=409, detail=vivo)
+    datos, motivo = resolver_disparo(db, prog)
+    if datos is None:
+        raise HTTPException(status_code=409, detail=motivo)
+    job = crear_job_de_disparo(db, prog, datos, datetime.now(timezone.utc))
+    prog.ultimo_motivo = LANZADA_A_MANO
+    db.commit()
+    try:
+        encolar(get_redis(), job.id)
+    except Exception:
+        # Como en el worker: un job «pending» fuera de la cola no se rastrea
+        # nunca y bloquearia esta programacion («sigue sin terminar»).
+        db.query(Job).filter(Job.id == job.id).update({Job.status: "failed"},
+                                                      synchronize_session=False)
+        prog.ultimo_motivo = "no se pudo encolar: la cola no responde"
+        db.commit()
+        raise HTTPException(status_code=503,
+                            detail="La cola de rastreos no responde: no se ha lanzado")
+    return {"job_id": str(job.id), "nombre": job.name}
+
+
 @router.delete("/{prog_id}", status_code=204)
 def borrar_programacion(prog_id: uuid.UUID, db: Session = Depends(get_session)):
     """Borra la programación. Los rastreos que ya lanzó NO se tocan.

@@ -12,7 +12,7 @@ import os
 
 import pytest
 
-from shared.cola import COLA_JOBS, encolar, pendientes, siguiente
+from shared.cola import COLA_JOBS, COLA_PROGRAMADOS, en_orden, encolar, pendientes, siguiente
 
 
 class RedisDeMentira:
@@ -25,11 +25,17 @@ class RedisDeMentira:
     def rpush(self, clave, valor):
         self.listas.setdefault(clave, []).append(valor)
 
-    def blpop(self, clave, timeout=0):
+    def blpop(self, claves, timeout=0):
+        # Como Redis: con varias claves, la primera que tenga algo.
+        for clave in ([claves] if isinstance(claves, str) else claves):
+            lista = self.listas.get(clave) or []
+            if lista:
+                return (clave, lista.pop(0))
+        return None
+
+    def lrange(self, clave, inicio, fin):
         lista = self.listas.get(clave) or []
-        if not lista:
-            return None
-        return (clave, lista.pop(0))
+        return list(lista[inicio:] if fin == -1 else lista[inicio:fin + 1])
 
     def llen(self, clave):
         return len(self.listas.get(clave) or [])
@@ -82,6 +88,27 @@ def test_un_solo_nombre_de_cola():
     assert COLA_JOBS == "jobs:pending"
 
 
+def test_lo_lanzado_a_mano_sale_antes_que_lo_programado():
+    """Decision 209: quien lanza a mano esta mirando la pantalla; el semanal
+    de las 3:00 espera a que la cola normal se vacie."""
+    r = RedisDeMentira()
+    encolar(r, "semanal-1", programado=True)
+    encolar(r, "semanal-2", programado=True)
+    encolar(r, "a-mano")
+    assert pendientes(r) == 3
+    assert en_orden(r) == ["a-mano", "semanal-1", "semanal-2"], "el orden en que saldran"
+    assert [siguiente(r, 0) for _ in range(3)] == ["a-mano", "semanal-1", "semanal-2"]
+    assert siguiente(r, 0) is None
+
+
+def test_una_reanudacion_va_a_la_cola_normal():
+    """`programado` es solo el primer encolado: lo que se reencola (reanudar,
+    recuperar tras un reinicio) usa `encolar` a secas."""
+    r = RedisDeMentira()
+    encolar(r, "reanudado")
+    assert r.listas == {COLA_JOBS: ["reanudado"]}
+
+
 @pytest.mark.skipif(not os.environ.get("REDIS_TEST_URL"), reason="sin REDIS_TEST_URL")
 def test_contra_redis_de_verdad():
     """Lo anterior confia en que la clase de mentira imite bien a Redis: esto
@@ -97,6 +124,11 @@ def test_contra_redis_de_verdad():
             encolar(r, job)
         salida = [siguiente(r, 2) for _ in ids]
         assert salida == ids, "FIFO roto contra Redis de verdad"
+        # Y la prioridad entre las dos listas, que es de Redis y no nuestra
+        encolar(r, ids[0], programado=True)
+        encolar(r, ids[1])
+        assert [siguiente(r, 2), siguiente(r, 2)] == [ids[1], ids[0]]
     finally:
         for job in ids:
             r.lrem(COLA_JOBS, 0, job)
+            r.lrem(COLA_PROGRAMADOS, 0, job)

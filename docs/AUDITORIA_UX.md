@@ -152,7 +152,7 @@ Sin fecha; se va haciendo cuando se toca cada zona.
 | 1 · Navegación | #120 | hecha (#126) |
 | 2 · Problemas como centro | #121 | hecha (#127) |
 | 3 · Cliente como eje | #122 | hecha (#128) |
-| 4 · Pulido | #123 | casi: queda pasar los estilos en línea a clases (#129) |
+| 4 · Pulido | #123 | hecha (#129; estilos en línea a clases en la decisión 201) |
 
 Revisión del 25-oct, 2.6 (26-oct): el Explorador pasa a ser la pestaña
 «URLs» de la ficha del censo, activa también en la ficha de una URL (era V29:

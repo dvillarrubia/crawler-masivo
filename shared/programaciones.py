@@ -211,6 +211,25 @@ def motivo_rastreo_vivo(db, programacion) -> str | None:
     return VIVO_DEL_PERFIL if vivo is not None else None
 
 
+def bloquear_perfil(db, programacion) -> None:
+    """Coge la fila del perfil hasta el commit, antes de `motivo_rastreo_vivo`.
+
+    Solo las colgadas (`hereda_perfil`), que no se lanzan encima de NINGUN
+    rastreo vivo de su perfil. El candado de la programacion (decision 209)
+    no basta: dos programaciones del mismo perfil son dos filas, y con dos
+    replicas las dos comprobaban «nada vivo» antes de que la otra guardara su
+    job. Con la fila del perfil cogida, la segunda espera, y su consulta, que
+    lee lo ya guardado, ve el job de la primera. Siempre programacion antes
+    que perfil: el mismo orden en el worker y en «Lanzar ahora», sin cruces.
+    """
+    from shared.models import CrawlProfile
+
+    perfil = getattr(programacion, "profile_id", None)
+    if perfil is None or not getattr(programacion, "hereda_perfil", False):
+        return
+    db.query(CrawlProfile.id).filter(CrawlProfile.id == perfil).with_for_update().first()
+
+
 def hay_rastreo_vivo(db, programacion) -> bool:
     """Si no se encola por un rastreo sin terminar (`motivo_rastreo_vivo`)."""
     return motivo_rastreo_vivo(db, programacion) is not None
@@ -395,6 +414,40 @@ def resolver_disparo(db, programacion) -> tuple[dict[str, Any] | None, str | Non
         "seeds": semillas,
         "config": config_del_momento(cliente, perfil, programacion.config),
     }, None
+
+
+# Lo que dice `ultimo_motivo` tras «Ejecutar ahora» (decision 209). La interfaz
+# lo traduce (fmt.motivo).
+LANZADA_A_MANO = "lanzada a mano"
+
+
+def crear_job_de_disparo(db, programacion, datos: dict[str, Any], ahora: datetime):
+    """Crea el job de un disparo y lo deja ligado a su programacion y a su
+    perfil. Sin commit y sin encolar: eso lo hace quien llama, y en ese orden
+    (decision 209). Lo comparten el planificador y «Ejecutar ahora», para que
+    un job lanzado a mano desde la programacion sea el mismo que el de su hora.
+
+    El cliente y el perfil se copian tal cual de `datos` (#36). Aqui NO se
+    crean clientes a partir del texto: si la programacion es anterior a la
+    migracion, el job sale solo con su `client_id` y la siguiente pasada de
+    `init_db.py` lo cuelga de su cliente.
+    """
+    from shared.models import CrawlProfile, Job
+
+    job = Job(name=datos["name"], client_id=datos["client_id"],
+              cliente_id=datos.get("cliente_id"),
+              profile_id=datos.get("profile_id"),
+              seeds=datos["seeds"], config=datos["config"],
+              status="pending", programacion_id=programacion.id)
+    db.add(job)
+    db.flush()
+    if job.profile_id is not None:
+        db.query(CrawlProfile).filter(
+            CrawlProfile.id == job.profile_id
+        ).update({CrawlProfile.last_job_id: job.id}, synchronize_session=False)
+    programacion.ultima_ejecucion = ahora
+    programacion.ultimo_job_id = job.id
+    return job
 
 
 def semillas_efectivas(programacion, perfiles: dict | None = None) -> list[str]:
