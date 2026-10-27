@@ -238,7 +238,10 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 209 | Un disparo programado se toma con candado (`FOR UPDATE SKIP LOCKED`, por si hay varias réplicas) y se encola después del commit; lo programado espera en `jobs:programados`, detrás de lo lanzado a mano; y «Lanzar ahora» (`POST /api/programaciones/{id}/ejecutar`) | [`worker-y-cola`](worker-y-cola.md#d209) |
 | 210 | Lo que Search Console no cuenta (IA sin separar, búsquedas anonimizadas, impresiones infladas de 2025-26, fin de `num=100`) se dice junto a sus cifras, y la parte de clics sin búsqueda se mide en el sitio (`sin_busqueda`) | [`incidencias`](incidencias.md#d210) |
 | 211 | La revisión humana de Jev, en la interfaz y a ciegas («Revisar a Jev»): una etiqueta por estado en `decision_labels`, que sobrevive al censo y amplía el juego de `evaluar` | [`llm-y-enriquecido`](llm-y-enriquecido.md#d211) |
+<<<<<<< HEAD
 | 212 | Un segundo PageRank con la autoridad que entra de fuera (CSV de Ahrefs, Semrush o Majestic por cliente; salto β·uniforme + (1−β)·externo, masa colgante a las indexables) y avisos de backlinks a errores, noindex y bloqueadas (las huérfanas, en su detalle) | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d212) |
+=======
+>>>>>>> origin/master
 
 ## Anadir una decision
 

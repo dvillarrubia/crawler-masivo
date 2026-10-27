@@ -7814,6 +7814,7 @@ function paginasDeFraseTrafico(texto, t) {
   return (candidatos[0].ejemplos || []).map(e => e.url).filter(Boolean).slice(0, 3);
 }
 
+<<<<<<< HEAD
 // La autoridad que entra de fuera (#31, decision 212), de
 // `jobs.pagerank_resumen.externo`. null sin backlinks subidos. El reparto es
 // de lo que llega DESDE FUERA (lo casado): donde cae de entrada.
@@ -7841,6 +7842,8 @@ function bloqueBacklinks(job) {
   };
 }
 
+=======
+>>>>>>> origin/master
 // Los campos del estado que vio Jev, para la revision (#8): el texto tal
 // cual y lo demas (listas, objetos) en JSON legible.
 function camposDeEstado(estado) {
