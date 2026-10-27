@@ -49,6 +49,11 @@ MUESTRAS = [
     ("delta que empeora", '<div class="card"><span id="m" class="delta peor">▲ 6</span></div>'),
     ("delta que mejora", '<div class="card"><span id="m" class="delta mejor">▼ 4</span></div>'),
     ("4xx del Explorador", '<div class="card"><span id="m" class="exp-status exp-status-4xx">404</span></div>'),
+    # Fijados a #fff, en el tema terminal salian en blanco con el texto verde claro
+    ("chip de ambito del Explorador", '<button id="m" class="chip-ambito">Todas las páginas</button>'),
+    ("chip de tramo", '<button id="m" class="chip-tramo">0-10</button>'),
+    ("boton de la barra del Explorador", '<button id="m" class="exp-toolbar-btn">Agrupar</button>'),
+    ("paso activo de Migracion", '<div class="paso-activo"><span id="m" class="paso-num">1</span></div>'),
 ] + [
     (f"insignia {c}", f'<div class="card"><span id="m" class="badge {c}">estado</span></div>')
     for c in ("badge-pending", "badge-running", "badge-completed", "badge-failed",
@@ -178,3 +183,34 @@ def test_el_estado_cancelado_usa_la_insignia_neutra():
             return salida
 
     assert asyncio.run(run()) == ["badge-running", "badge-completed", "badge-failed", "badge-neutral", "badge-pending"]
+
+
+def test_ningun_fondo_fijo_en_blanco_fuera_de_la_impresion():
+    """Un fondo `#fff` no cambia con el tema: en el terminal deja texto claro sobre blanco.
+    Se usa `var(--bg-card)`, que en el tema claro es blanco. Solo la hoja de impresion lo fija."""
+    css = (RAIZ / "frontend" / "style.css").read_text(encoding="utf-8")
+    sin_print = css.split("@media print", 1)[0] + css.split("@media print", 1)[1].split("\n}", 1)[1]
+    import re
+    fijos = re.findall(r"[^{}]*\{[^}]*background(?:-color)?:\s*(?:#fff\b|#ffffff|white)", sin_print)
+    assert not fijos, [f.strip()[:80] for f in fijos]
+
+
+def test_los_botones_llevan_la_letra_del_tema():
+    """En el terminal todo es monoespaciado; un <button> sin `font-family:inherit` salia en la del sistema."""
+    from playwright.async_api import async_playwright
+
+    async def run():
+        async with async_playwright() as p:
+            try:
+                nav = await p.chromium.launch(args=["--no-sandbox"])
+            except Exception as exc:  # pragma: no cover
+                pytest.skip(f"sin Chromium: {exc}")
+            pagina = await nav.new_page()
+            await pagina.set_content("<html data-theme='terminal'><head><style>" + CSS + "</style></head><body>"
+                                     "<button id='b' class='exp-toolbar-btn'>Agrupar</button></body></html>")
+            r = await pagina.evaluate("[getComputedStyle(document.body).fontFamily, getComputedStyle(document.getElementById('b')).fontFamily]")
+            await nav.close()
+            return r
+
+    cuerpo, boton = asyncio.run(run())
+    assert boton == cuerpo
