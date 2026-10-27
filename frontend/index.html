@@ -1705,6 +1705,51 @@
             </template>
               </div>
             </details>
+            <!-- Backlinks (#31, decision 212): un CSV exportado de Ahrefs,
+                 Semrush o Majestic. Sin API de pago. -->
+            <details class="cfg-seccion" id="cfg-backlinks" data-testid="seccion-cfg-backlinks">
+              <summary>
+                <span class="cfg-seccion-titulo">Backlinks</span>
+                <span class="cfg-seccion-resumen text-sm text-dim" x-text="resumenSeccionConfig('cfg-backlinks')"></span>
+              </summary>
+              <div class="cfg-seccion-cuerpo">
+            <template x-if="cliente">
+              <div x-init="cargarBacklinks()" data-testid="backlinks">
+                <p class="text-dim text-sm mb-1">Los enlaces que llegan desde otros sitios, exportados de Ahrefs, Semrush o Majestic. Con ellos el análisis calcula un
+                  segundo PageRank, el de por dónde entra la autoridad de fuera, y avisa de lo que se pierde: backlinks a páginas con error, noindex,
+                  bloqueadas o huérfanas. Solo cuentan los dofollow y vivos. Se aplica al analizar: el próximo rastreo lo lleva solo, y uno ya hecho, re-analizándolo.</p>
+                <div class="card mb-1 btn-rojo-sm" x-show="backlinks.error" x-text="backlinks.error"></div>
+                <template x-for="i in (backlinks.lista || [])" :key="i.id">
+                  <div class="card mb-1 text-sm" data-testid="backlinks-importacion">
+                    <div class="flex items-center gap-1 flex-wrap">
+                      <span class="badge" :class="i.en_uso ? 'badge-completed' : 'badge-neutral'" x-text="i.en_uso ? 'en uso' : 'anterior'"></span>
+                      <strong x-text="fmt.num(i.filas) + ' backlinks de ' + (FUENTE_BACKLINKS[i.fuente] || i.fuente)"></strong>
+                      <span class="text-dim" x-text="(i.fichero ? i.fichero + ' · ' : '') + 'subido el ' + fmt.date(i.subido) + (i.fecha_dato ? ' · datos del ' + fmt.dia(i.fecha_dato) : '')"></span>
+                      <button class="btn btn-sm ml-auto" @click="borrarBacklinks(i)">Quitar</button>
+                    </div>
+                    <div class="text-dim mt-30" x-show="(i.descartadas.nofollow || 0) + (i.descartadas.perdidas || 0) + (i.descartadas.sin_url || 0)"
+                         x-text="'Fuera: ' + [[i.descartadas.nofollow, 'nofollow, ugc o sponsored'], [i.descartadas.perdidas, 'perdidos'], [i.descartadas.sin_url, 'sin URL']].filter(x => x[0]).map(x => fmt.num(x[0]) + ' ' + x[1]).join(' · ')"></div>
+                    <div class="text-orange mt-30" x-show="i.cortado">El fichero pasaba del tope de filas: se guardaron las primeras.</div>
+                  </div>
+                </template>
+                <div class="flex gap-1 items-end flex-wrap">
+                  <div class="form-group mb-0">
+                    <label>Fichero CSV</label>
+                    <input type="file" accept=".csv,.tsv,.txt,text/csv" @change="backlinks.fichero = $event.target.files[0] || null" data-testid="backlinks-fichero">
+                  </div>
+                  <div class="form-group mb-0">
+                    <label>Fecha de los datos <span class="text-dim">(opcional)</span></label>
+                    <input type="date" x-model="backlinks.fecha">
+                  </div>
+                  <button class="btn btn-primary btn-sm" @click="subirBacklinks()" :disabled="!backlinks.fichero || backlinks.ocupado" data-testid="backlinks-subir"
+                          x-text="backlinks.ocupado ? 'Subiendo…' : 'Subir'"></button>
+                </div>
+                <p class="text-sm mt-40" x-show="backlinks.ultimo" data-testid="backlinks-resultado"
+                   x-text="backlinks.ultimo && ('Leídas ' + fmt.num(backlinks.ultimo.leidas) + ' filas: ' + fmt.num(backlinks.ultimo.filas) + ' backlinks dofollow hacia ' + fmt.num(backlinks.ultimo.destinos) + ' URLs, desde ' + fmt.num(backlinks.ultimo.dominios) + ' dominios.')"></p>
+              </div>
+            </template>
+              </div>
+            </details>
             <details class="cfg-seccion" id="cfg-slack" data-testid="seccion-cfg-slack">
               <summary>
                 <span class="cfg-seccion-titulo">Slack del cliente</span>
@@ -3069,6 +3114,26 @@
             <div class="text-dim fs-sm mt-50" x-show="detailTab !== 'diff'">
               Las páginas de cada una, con ejemplos y plantillas: <a href="#" @click.prevent="switchTab('diff')">ver el detalle en Comparar</a>.
             </div>
+          </div>
+        </template>
+        <!-- Autoridad desde fuera (#31, decision 212): solo con backlinks subidos. -->
+        <template x-if="detailTab === 'overview' && bloqueBacklinks(job)">
+          <div class="card mb-2 text-sm" data-testid="backlinks-bloque" x-data="{ get bb() { return bloqueBacklinks(job) } }">
+            <div class="google-cab">
+              <h2>Autoridad desde fuera</h2>
+              <span class="text-dim" x-text="'Backlinks de ' + bb.fuente + (bb.fecha ? ' · ' + fmt.dia(bb.fecha) : '')"></span>
+            </div>
+            <template x-for="(f, n) in bb.frases" :key="'b' + n"><p class="google-frase" x-text="f"></p></template>
+            <p class="google-frase text-orange" x-show="bb.poco_casado">Menos del 90 % de los backlinks casa con una URL de este rastreo: o apuntan a URLs que el rastreo no encontró (abajo), o a otro dominio. Lo que no casa no cuenta en el PageRank desde fuera.</p>
+            <details class="google-paginas" x-show="bb.no_rastreadas.length" data-testid="backlinks-no-rastreadas">
+              <summary class="text-dim" x-text="'URLs con backlinks que el rastreo no encontró (' + fmt.num(bb.no_rastreadas.length) + ')'"></summary>
+              <p class="text-dim">Suelen ser URLs antiguas o de campañas. Si dan error, redirigirlas a la página más parecida recupera su autoridad.</p>
+              <ul><template x-for="u in bb.no_rastreadas" :key="u.url">
+                <li><span class="google-clics" x-text="fmt.n(u.backlinks, 'backlink', 'backlinks') + ' de ' + fmt.n(u.dominios, 'dominio', 'dominios')"></span>
+                  <span class="informe-url" x-text="u.url"></span></li>
+              </template></ul>
+            </details>
+            <p class="text-dim fs-sm" x-text="'«PageRank desde fuera» de cada URL: ' + fmt.pct(100 * (1 - bb.beta), 0) + ' del salto donde entra la autoridad de fuera y el resto por igual entre las indexables.'"></p>
           </div>
         </template>
         <!-- Bloque «Google» (revision de UX del 25-oct, 3.3; V46): en el
@@ -6575,6 +6640,11 @@
                   <div class="detail-row"><span class="detail-label">Outlinks</span><span class="detail-value" x-text="fmt.num(urlDetail.outlinks_count)"></span></div>
                   <div class="detail-row"><span class="detail-label">Outlinks externos</span><span class="detail-value" x-text="fmt.num(urlDetail.external_outlinks_count)"></span></div>
                   <div class="detail-row"><span class="detail-label" data-tip="Cuánta autoridad le llega por los enlaces internos, en escala 0-100 logarítmica anclada a la página más fuerte del sitio. Es la que hay que leer y ordenar.">PageRank (0-100)</span><span class="detail-value" x-text="urlDetail.pagerank_score != null ? urlDetail.pagerank_score : '—'"></span></div>
+                  <!-- Con los backlinks del cliente (decision 212) -->
+                  <template x-if="urlDetail.pagerank_externo_score != null">
+                    <div class="detail-row"><span class="detail-label" data-tip="El mismo PageRank, con el salto puesto donde entra la autoridad de otros sitios según el CSV de backlinks del cliente. Dice por dónde entra la autoridad real; el de arriba, cómo la reparte el sitio.">PageRank desde fuera (0-100)</span>
+                      <span class="detail-value" x-text="urlDetail.pagerank_externo_score + (urlDetail.backlinks_externos ? ' · ' + fmt.n(urlDetail.backlinks_externos, 'backlink', 'backlinks') : ' · sin backlinks propios')"></span></div>
+                  </template>
                   <div class="detail-row"><span class="detail-label" data-tip="La escala 0-10 de siempre, aquí solo por compatibilidad con los informes ya entregados.">PageRank (0-10, antiguo)</span><span class="detail-value text-dim" x-text="fmt.dec(urlDetail.pagerank, 2)"></span></div>
                   <div class="detail-row"><span class="detail-label">Primera vez</span><span class="detail-value" x-text="fmt.date(urlDetail.first_seen_at)"></span></div>
                   <div class="detail-row"><span class="detail-label">Último rastreo</span><span class="detail-value" x-text="fmt.date(urlDetail.last_crawled_at)"></span></div>

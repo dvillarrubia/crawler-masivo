@@ -12,7 +12,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga, robots.txt y sitemaps en la cola | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140, 172, 173, 174, 186 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124, 153, 154, 155, 187, 198 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137, 156, 160, 164, 167, 170, 171 |
-| [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152, 183, 195 |
+| [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152, 183, 195, 212 |
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157, 161, 168, 190, 210 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165, 188, 191, 192, 197 |
@@ -238,6 +238,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 209 | Un disparo programado se toma con candado (`FOR UPDATE SKIP LOCKED`, por si hay varias réplicas) y se encola después del commit; lo programado espera en `jobs:programados`, detrás de lo lanzado a mano; y «Lanzar ahora» (`POST /api/programaciones/{id}/ejecutar`) | [`worker-y-cola`](worker-y-cola.md#d209) |
 | 210 | Lo que Search Console no cuenta (IA sin separar, búsquedas anonimizadas, impresiones infladas de 2025-26, fin de `num=100`) se dice junto a sus cifras, y la parte de clics sin búsqueda se mide en el sitio (`sin_busqueda`) | [`incidencias`](incidencias.md#d210) |
 | 211 | La revisión humana de Jev, en la interfaz y a ciegas («Revisar a Jev»): una etiqueta por estado en `decision_labels`, que sobrevive al censo y amplía el juego de `evaluar` | [`llm-y-enriquecido`](llm-y-enriquecido.md#d211) |
+| 212 | Un segundo PageRank con la autoridad que entra de fuera (CSV de Ahrefs, Semrush o Majestic por cliente; salto β·uniforme + (1−β)·externo, masa colgante a las indexables) y avisos de backlinks a errores, noindex y bloqueadas (las huérfanas, en su detalle) | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d212) |
 
 ## Anadir una decision
 

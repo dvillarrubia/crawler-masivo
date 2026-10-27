@@ -54,6 +54,7 @@ from analysis import avisos_de_medios
 from analysis import avisos_de_nosnippet
 from analysis import avisos_de_nofollow
 from analysis import avisos_de_wordpress
+from analysis import avisos_de_backlinks
 from shared.rel_de_enlace import sql_nofollow_por_rel
 from shared.indexabilidad import (
     BOT_POR_DEFECTO, clave_url, es_noindex, estado_indexabilidad, limite_de_fragmento, misma_url,
@@ -378,6 +379,13 @@ class SEOAnalyzer:
         # no se reportaba nunca. Un salto solo es una redireccion normal.
         self.max_redirect_chain = t.get("max_redirect_chain_length", 1)
         self.max_outlinks = t.get("max_outlinks", HIGH_OUTLINK_THRESHOLD)
+        # PageRank con autoridad externa (decision 212): la parte del salto
+        # que sigue repartida por igual entre las indexables.
+        self.pagerank_externo_beta = float(t.get("pagerank_externo_beta", 0.5))
+        self._cliente_id = getattr(job, "cliente_id", None)
+        # Lo que el CSV de backlinks del cliente deja en este censo; lo rellena
+        # `compute_pagerank` y lo leen los avisos (avisos_de_backlinks).
+        self._backlinks = None
         # Las que llevan `solo_enlazada_con_nofollow` (decision 183): lo escribe
         # la profundidad de clic y lo lee el aviso por destino.
         self._solo_con_nofollow: set[int] = set()
@@ -469,6 +477,9 @@ class SEOAnalyzer:
         # entrantes, que es con lo que se cruza.
         avisos_de_gsc.avisar(self)
         oportunidades_gsc.avisar_sin_tumbar(self)  # decision 157
+        # Backlinks del cliente (decision 212): despues de Search Console, que
+        # ya cambio las huerfanas con trafico por su propio aviso.
+        avisos_de_backlinks.avisar_sin_tumbar(self)
         # Al final: sus condiciones pueden leer lo que acaba de escribir el
         # analisis (indexable, click_depth, in_sitemap...). No emite incidencias.
         self.segmentar()
@@ -4583,6 +4594,12 @@ class SEOAnalyzer:
 
         import numpy as np
 
+        # Los backlinks del cliente se cruzan ANTES de mirar si hay grafo: sus
+        # avisos (un 404 con backlinks) no dependen de los enlaces internos, y
+        # sin ellos un censo sin aristas se quedaba con los de un analisis
+        # anterior (decision 212).
+        self._preparar_backlinks()
+
         # 1. Nodos internos del job, con su categoria (ver prk.categoria)
         url_rows = self.session.execute(
             select(
@@ -4755,6 +4772,20 @@ class SEOAnalyzer:
             self.job_id,
         )
 
+        # 6b. Con la autoridad que entra de fuera (decision 212), en la misma
+        # pasada: las aristas ya estan cargadas. Best-effort: si falla, el
+        # PageRank interno se guarda igual.
+        try:
+            with self.session.begin_nested():
+                externo = self._pagerank_externo(
+                    n, src, dst, w, ids_ordenados, categorias, indexables,
+                    damping=damping, max_iter=max_iter, tol=tol)
+        except Exception:
+            logger.exception("PageRank externo del job %s: no se calcula", self.job_id)
+            externo = None
+        if externo is not None:
+            resumen["externo"] = externo
+
         # 7. Tres escalas, porque son tres preguntas (C4 de #24)
         #
         # La de siempre, 0-10 lineal, no distingue la pagina 250 de la 25.000:
@@ -4799,6 +4830,111 @@ class SEOAnalyzer:
         )
         self.session.flush()
         logger.info("PageRank computed for %d URLs (job %s)", n, self.job_id)
+
+    def _preparar_backlinks(self) -> None:
+        """Cruza el CSV de backlinks mas reciente del cliente con el censo y lo
+        deja en `self._backlinks`. Antes pone a NULL lo de un analisis
+        anterior: sin importacion, o sin grafo (donde no se calcula el PageRank
+        desde fuera), no puede quedar el de antes. Best-effort, con su
+        savepoint."""
+        from shared.backlinks import cruzar, filas_de, ultima_importacion
+
+        self._backlinks = self._backlinks_import = None
+        try:
+            with self.session.begin_nested():
+                self.session.execute(text(
+                    "UPDATE urls SET pagerank_externo_score = NULL, backlinks_externos = NULL, "
+                    "autoridad_externa = NULL WHERE job_id = :jid AND backlinks_externos IS NOT NULL"
+                ), {"jid": self.job_id})
+                imp = ultima_importacion(self.session, self._cliente_id)
+                if imp is None:
+                    return
+                urls = self.session.execute(
+                    select(Url.id, Url.url, Url.status_code, Url.indexable, Url.redirect_url)
+                    .where(Url.job_id == self.job_id, Url.is_internal.is_(True))).all()
+
+                def rango(status, indexable, redirect):
+                    if status == 200 and indexable:
+                        return 0
+                    if status == 200:
+                        return 1
+                    if redirect or (status is not None and 300 <= status < 400):
+                        return 2
+                    return 3
+
+                self._backlinks = cruzar(filas_de(self.session, imp),
+                                         [(u[0], u[1], rango(u[2], u[3], u[4])) for u in urls])
+                self._backlinks_import = imp
+        except Exception:
+            self._backlinks = self._backlinks_import = None
+            logger.exception("Backlinks del job %s: no se cruzan", self.job_id)
+
+    def _pagerank_externo(self, n, src, dst, w, ids_ordenados, categorias, indexables,
+                          *, damping, max_iter, tol) -> dict | None:
+        """PageRank personalizado con los backlinks del cliente (#31, decision 212).
+
+        Usa la importacion mas reciente de su cliente (`shared.backlinks`). Lo
+        que llega a una 301 pasa a su destino por la arista de redireccion; lo
+        que llega a un error se queda ahi y cuenta como desperdiciado. La masa
+        colgante va a las indexables, como en el interno: si fuera al salto, un
+        404 con backlinks se la devolveria a si mismo. Guarda en `urls` la
+        escala 0-100, los backlinks y lo que aportan; sin importacion, los deja
+        a NULL (un re-analisis tras borrarla no puede ensenar los de antes).
+        """
+        import numpy as np
+
+        cruce, imp = self._backlinks, getattr(self, "_backlinks_import", None)
+        if cruce is None or imp is None:
+            return None
+        externo = np.zeros(n, dtype=np.float64)
+        for uid, d in cruce.por_url.items():
+            externo[int(np.searchsorted(ids_ordenados, uid))] += d["aportacion"]
+        beta = min(1.0, max(0.0, self.pagerank_externo_beta))
+        pr = prk.pagerank(
+            n, src, dst, w,
+            teletransporte=prk.teletransporte_externo(indexables, externo, beta),
+            colgante=indexables, damping=damping, max_iter=max_iter, tol=tol)
+        puntuacion = prk.puntuacion_log(pr)
+
+        self.session.execute(text("DROP TABLE IF EXISTS pr_ext_tmp"))
+        self.session.execute(text(
+            "CREATE TEMP TABLE pr_ext_tmp (id BIGINT PRIMARY KEY, score INTEGER, "
+            "backlinks INTEGER, autoridad DOUBLE PRECISION)"))
+        filas = []
+        for i, uid in enumerate(ids_ordenados):
+            d = cruce.por_url.get(int(uid))
+            filas.append({"id": int(uid), "score": int(puntuacion[i]),
+                          "backlinks": d["backlinks"] if d else 0,
+                          "autoridad": round(d["aportacion"], 6) if d else 0.0})
+        for i in range(0, len(filas), 10_000):
+            self.session.execute(text(
+                "INSERT INTO pr_ext_tmp (id, score, backlinks, autoridad) "
+                "VALUES (:id, :score, :backlinks, :autoridad)"), filas[i:i + 10_000])
+        self.session.execute(text(
+            "UPDATE urls SET pagerank_externo_score = t.score, backlinks_externos = t.backlinks, "
+            "autoridad_externa = t.autoridad FROM pr_ext_tmp t WHERE urls.id = t.id"))
+        self.session.execute(text("DROP TABLE IF EXISTS pr_ext_tmp"))
+
+        # De la autoridad que llega DESDE FUERA (lo casado), donde cae de
+        # entrada: lo que se pierde ya en la primera pagina.
+        por_categoria = {c: 0.0 for c in prk.CATEGORIAS}
+        cats = np.asarray(categorias)
+        if externo.sum() > 0:
+            for c in prk.CATEGORIAS:
+                por_categoria[c] = round(float(externo[cats == c].sum() / externo.sum()), 4)
+        reparto = prk.reparto(pr, categorias)
+        logger.info("PageRank externo (job %s): %d de %d backlinks casados, beta %.2f",
+                    self.job_id, cruce.casadas, cruce.filas, beta)
+        return {
+            "import_id": imp.id, "fuente": imp.fuente,
+            "fecha_dato": imp.fecha_dato.isoformat() if imp.fecha_dato else None,
+            "subido": imp.created_at.isoformat() if imp.created_at else None,
+            "backlinks": cruce.filas, "casados": cruce.casadas, "parte_casada": cruce.parte_casada,
+            "paginas_con_backlinks": len(cruce.por_url), "beta": beta,
+            "entra_en": por_categoria, "reparto": reparto,
+            "desperdiciado": prk.desperdiciado(reparto),
+            "no_rastreadas": cruce.no_rastreadas[:20],
+        }
 
     def _fiabilidad_del_grafo(self) -> dict:
         """Dice si el grafo de enlaces es fiable, segun la comprobacion de render.

@@ -298,6 +298,12 @@ class AnalysisThresholdsConfig(BaseModel):
     # entradas publicadas o menos es una taxonomia anemica si su archivo es
     # indexable. 1 = el archivo repite la unica entrada que tiene.
     wp_taxonomia_anemica_max: int = Field(default=1, ge=0, le=1000)
+    # PageRank con autoridad externa (decision 212): la parte del salto que
+    # sigue repartida por igual entre las indexables. 1 = el PageRank interno
+    # (sin backlinks); 0 = todo el salto donde entra la autoridad de fuera. La
+    # mitad es un juicio: el indice de cada proveedor es incompleto, y sin
+    # parte uniforme la home (que se lleva casi todos los backlinks) lo domina.
+    pagerank_externo_beta: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -1173,6 +1179,10 @@ class UrlResponse(BaseModel):
     # el 85% de las paginas de un censo queda en 0,00xx.
     pagerank_score: int | None = None
     pagerank_raw: float | None = None
+    # Con los backlinks del cliente (decision 212); NULL sin CSV subido.
+    pagerank_externo_score: int | None = None
+    backlinks_externos: int | None = None
+    autoridad_externa: float | None = None
     in_sitemap: bool | None = None
     near_duplicate_count: int | None = None
     closest_similarity: float | None = None

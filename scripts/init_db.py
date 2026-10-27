@@ -37,6 +37,10 @@ def main() -> None:
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS click_depth INTEGER"))
         # Search Console en la ventana del rastreo (decision 142).
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS gsc_clics INTEGER"))
+        # PageRank con la autoridad que entra de fuera (decision 212).
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS pagerank_externo_score INTEGER"))
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS backlinks_externos INTEGER"))
+        conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS autoridad_externa DOUBLE PRECISION"))
         # Inspeccion de URLs de Search Console (decision 144).
         conn.execute(text("ALTER TABLE gsc_estado ADD COLUMN IF NOT EXISTS inspeccion_ultima TIMESTAMPTZ"))
         conn.execute(text("ALTER TABLE gsc_estado ADD COLUMN IF NOT EXISTS inspeccion_hechas INTEGER"))

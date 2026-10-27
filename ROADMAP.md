@@ -930,7 +930,10 @@ es cada plantilla— y va con
   F4 (incremental), `ignore_patterns` y confirmar alertas en dos ejecuciones.
 - [#31](https://github.com/dvillarrubia/crawler-masivo/issues/31) **Backlinks**
   de Ahrefs o DataForSEO: un PageRank con la autoridad que entra desde fuera, y
-  mapas de redirección para recuperar enlaces perdidos.
+  mapas de redirección para recuperar enlaces perdidos. *Primera parte hecha (decisión 212)*: CSV de Ahrefs, Semrush o Majestic por
+  cliente, `pagerank_externo_score` y los avisos de backlinks a errores, noindex,
+  bloqueadas (y los backlinks en el detalle de las huérfanas). Falta: DataForSEO/Ahrefs por API, sembrar las URLs con
+  backlinks que el rastreo no encuentra y validarlo con exportaciones reales.
 - [#34](https://github.com/dvillarrubia/crawler-masivo/issues/34) **Extracción
   personalizada**: hecha la base, la pantalla y la prueba en vivo (arriba). Falta
   probar con render, buscar en el HTML de origen cuando el rastreo renderiza y
