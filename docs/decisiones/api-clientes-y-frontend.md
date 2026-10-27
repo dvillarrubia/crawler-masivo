@@ -977,3 +977,53 @@
    Tests: `tests/test_xss_markdown_frontend.py` (saneo de `renderMarkdown` en
    Chromium: `<img onerror>` no dispara y el `javascript:` no sobrevive en el
    href).
+
+<a id="d207"></a>
+207. **Una celda de CSV o XLSX que empieza por carácter de fórmula se escapa (inyección de fórmula)**
+
+   **Problema.** Los textos que el crawler trae del sitio rastreado (título,
+   meta, anchor de un enlace, contenido) se escribían tal cual en los CSV
+   (`/urls/export` de la vista, `/export` del censo entero,
+   `/urls/enlaces-entrantes`, `/links/export`, `/content/export`) y en el
+   XLSX. Una hoja de cálculo (Excel, Sheets) interpreta como fórmula toda celda
+   que empieza por `=`, `+`, `-`, `@`, tabulador o retorno: un sitio con un
+   título `=HYPERLINK("http://malo","clic")` ejecuta la fórmula en cuanto el
+   analista abre el fichero exportado. La defensa `celda_segura` existía desde
+   la decisión 104 pero solo cubría las columnas de extracción a medida, no las
+   estándar.
+
+   **Decisión.** Toda celda de texto sacada de la página se escapa con un
+   apóstrofo delante cuando empieza por uno de esos caracteres; los números no
+   se tocan. Se centraliza en `_val` (CSV de URLs, enlaces y contenido), se
+   aplica a las columnas de la vista del Explorador y a `urls/enlaces-entrantes`
+   con `celda_segura`, y en el XLSX en `api/excel._celda`.
+
+   Tests: `tests/test_seguridad_pentest.py`.
+
+<a id="d208"></a>
+208. **La API manda cabeceras de seguridad en todas las respuestas**
+
+   **Problema.** La API no mandaba ninguna cabecera de seguridad. Sin
+   `X-Content-Type-Options` había riesgo de rastreo de tipo MIME; sin
+   `X-Frame-Options`/`frame-ancestors` la interfaz autenticada era enmarcable
+   (clickjacking de acciones como lanzar o borrar); y sin `Content-Security-Policy`
+   un XSS no tenía ninguna contención.
+
+   **Decisión.** Un middleware ASGI (`api/cabeceras.py`), el más externo para
+   que cubra también los 401 de la autenticación y el MCP, añade en cada
+   respuesta `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+   `Referrer-Policy: no-referrer` y una CSP. Es ASGI puro, como la
+   autenticación, para no envolver el CSV en streaming ni el backup de 1 GB.
+
+   La CSP es de **contención**, no de prevención total: el frontend es
+   Alpine.js, que evalúa sus expresiones con `new Function` y usa atributos en
+   línea, así que necesita `unsafe-eval` y `unsafe-inline` en los scripts. Lo
+   que la CSP sí hace es limitar el daño de un XSS: `connect-src` acotado
+   impide exfiltrar datos a un servidor cualquiera, y `frame-ancestors`,
+   `object-src 'none'` y `base-uri 'self'` cierran enmarcado, plugins y el
+   secuestro de la URL base. Los orígenes de script y estilo son los CDN que ya
+   usa `index.html` (jsdelivr, cdnjs, unpkg, cdn.plot.ly), con `worker-src blob:`
+   para maplibre. La prevención del XSS la dan el saneo de la salida (decisión
+   206) y el `x-text` de Alpine, no la CSP.
+
+   Tests: `tests/test_seguridad_pentest.py`.

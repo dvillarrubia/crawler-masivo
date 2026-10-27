@@ -1201,7 +1201,10 @@ def export_vista(
                             fila.append(valor_csv_a_medida(xs.get(uid, {}).get(nombre), clase, regla, pos))
                         else:
                             v = COLUMNAS_VISTA[c][1](u)
-                            fila.append("" if v is None else v)
+                            # Una celda de texto de la pagina (titulo, url, anchor)
+                            # que empiece por `=`/`+`/`-`/`@` se escapa para que
+                            # la hoja de calculo no la ejecute (decision 207).
+                            fila.append("" if v is None else celda_segura(v))
                     w.writerow(fila)
                 yield buf.getvalue()
 
@@ -1268,7 +1271,10 @@ def export_enlaces_entrantes(
             w = csv.writer(buf)
             for h, origen, cod_origen, ancla, pos, follow, tipo in enlaces:
                 destino, cod = tramo[h]
-                w.writerow([destino, cod, origen, cod_origen, ancla or "", pos or "",
+                # Ancla, destino y origen vienen de la pagina: se escapan para que
+                # una hoja de calculo no los ejecute como formula (decision 207).
+                w.writerow([celda_segura(destino), cod, celda_segura(origen), cod_origen,
+                            celda_segura(ancla or ""), pos or "",
                             "si" if follow else "no", tipo or ""])
             yield buf.getvalue()
 
@@ -2676,9 +2682,16 @@ CSV_COLUMNS = [
 
 
 def _val(v) -> str:
-    """Format a value for CSV output."""
+    """Format a value for CSV output.
+
+    Una cadena sacada de la pagina rastreada (titulo, meta, anchor, contenido)
+    que empiece por un caracter de formula se escapa, para que Excel o Sheets
+    no la ejecuten al abrir el CSV (decision 207); los numeros no se tocan.
+    """
     if v is None:
         return ""
+    if isinstance(v, str) and v.startswith(_FORMULA):
+        return "'" + v
     return str(v)
 
 
