@@ -239,7 +239,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 210 | Lo que Search Console no cuenta (IA sin separar, búsquedas anonimizadas, impresiones infladas de 2025-26, fin de `num=100`) se dice junto a sus cifras, y la parte de clics sin búsqueda se mide en el sitio (`sin_busqueda`) | [`incidencias`](incidencias.md#d210) |
 | 211 | La revisión humana de Jev, en la interfaz y a ciegas («Revisar a Jev»): una etiqueta por estado en `decision_labels`, que sobrevive al censo y amplía el juego de `evaluar` | [`llm-y-enriquecido`](llm-y-enriquecido.md#d211) |
 | 212 | Un segundo PageRank con la autoridad que entra de fuera (CSV de Ahrefs, Semrush o Majestic por cliente; salto β·uniforme + (1−β)·externo, masa colgante a las indexables) y avisos de backlinks a errores, noindex y bloqueadas (las huérfanas, en su detalle) | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d212) |
-| 213 | Los logs del servidor, por cliente: los lee el worker en streaming, solo cuenta el Googlebot cuya IP es de Google (rangos publicados o DNS) y del log solo queda lo agregado de los bots; cobertura, presupuesto, `indexable_sin_visitas_googlebot` (con 7 días o más) y `googlebot_recibe_error` | [`incidencias`](incidencias.md#d213) |
+| 213 | Los logs del servidor, por cliente: los lee el worker en streaming (con latido y memoria acotada), solo cuenta el Googlebot cuya IP es de Google (`None` si no se puede comprobar), del log solo queda lo agregado de los bots, y los avisos (por plantilla) solo con un log del mismo host, de la época del censo y que vea a Googlebot | [`incidencias`](incidencias.md#d213) |
 
 ## Anadir una decision
 

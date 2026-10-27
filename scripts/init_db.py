@@ -45,6 +45,8 @@ def main() -> None:
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS googlebot_visitas INTEGER"))
         conn.execute(text("ALTER TABLE urls ADD COLUMN IF NOT EXISTS googlebot_ultima TIMESTAMPTZ"))
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS logs_resumen JSON"))
+        conn.execute(text("ALTER TABLE log_imports ADD COLUMN IF NOT EXISTS latido_at TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE log_imports ADD COLUMN IF NOT EXISTS resumen JSON"))
         # Inspeccion de URLs de Search Console (decision 144).
         conn.execute(text("ALTER TABLE gsc_estado ADD COLUMN IF NOT EXISTS inspeccion_ultima TIMESTAMPTZ"))
         conn.execute(text("ALTER TABLE gsc_estado ADD COLUMN IF NOT EXISTS inspeccion_hechas INTEGER"))

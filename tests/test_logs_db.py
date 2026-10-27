@@ -42,7 +42,7 @@ def _con_logs(sesion, j, dias=14):
                           verificado=verificado, visitas=visitas, codigos=codigos or {"200": visitas},
                           movil=visitas, primero=FIN - timedelta(days=3), ultimo=FIN))
 
-    fila("/", 40)
+    fila("/", 400)
     fila("/blog/a1", 5)
     fila("/blog/a3", 4, codigos={"503": 3, "200": 1})   # 200 en el rastreo, errores a Googlebot
     fila("/roto", 2, codigos={"404": 2})
@@ -79,21 +79,23 @@ def test_visitas_resumen_y_avisos(sesion, job, limpiar):  # noqa: F811
     _analizar(sesion, j)
 
     r = sesion.get(Job, j.id).logs_resumen
-    assert (r["visitas"], r["falsas"], r["dias"], r["afirmable_ausencia"]) == (57, 9, 14.0, True)
+    assert (r["visitas"], r["falsas"], r["dias"], r["afirmable_ausencia"]) == (417, 9, 14.0, True)
     assert r["reparto"]["no_en_censo"] == 6 and r["reparto"]["errores"] == 2
     assert r["no_en_censo"][0]["ruta"] == "/no-rastreada"
     assert r["otros_bots"]["gptbot"]["visitas"] == 3
 
     v = dict(sesion.execute(select(Url.id, Url.googlebot_visitas).where(Url.job_id == j.id)).all())
-    assert v[filas["/"].id] == 40, "el falso no cuenta"
+    assert v[filas["/"].id] == 400, "el falso no cuenta"
     assert v[filas["/contacto"].id] == 0, "0 = el log no la vio; NULL seria sin logs"
 
-    avisos = {(t, u) for t, u in sesion.execute(
-        select(Issue.issue_type, Issue.url_id).where(Issue.job_id == j.id, Issue.issue_type.in_(
-            ("indexable_sin_visitas_googlebot", "googlebot_recibe_error"))))}
-    assert ("googlebot_recibe_error", filas["/blog/a3"].id) in avisos
-    assert not any(u == filas["/"].id for _, u in avisos)
-    assert any(t == "indexable_sin_visitas_googlebot" for t, _ in avisos)
+    avisos = list(sesion.execute(
+        select(Issue.issue_type, Issue.url_id, Issue.details, Issue.group_key).where(
+            Issue.job_id == j.id, Issue.issue_type.in_(("indexable_sin_visitas_googlebot", "googlebot_recibe_error")))))
+    err = [a for a in avisos if a[0] == "googlebot_recibe_error"]
+    assert len(err) == 1 and err[0][1] == filas["/blog/a3"].id and err[0][2]["paginas_afectadas"] == 1
+    sin = [a for a in avisos if a[0] == "indexable_sin_visitas_googlebot"]
+    assert sin and all(a[3] for a in sin), "agrupados por plantilla, con su clave"
+    assert not any(filas["/"].id == a[1] for a in sin)
 
 
 def test_con_pocos_dias_no_se_afirma_que_no_la_visite(sesion, job, limpiar):  # noqa: F811
@@ -104,6 +106,40 @@ def test_con_pocos_dias_no_se_afirma_que_no_la_visite(sesion, job, limpiar):  # 
     n = sesion.execute(select(Issue.id).where(Issue.job_id == j.id,
                                               Issue.issue_type == "indexable_sin_visitas_googlebot")).all()
     assert n == []
+
+
+def test_un_log_que_apenas_ve_a_googlebot_no_afirma_ausencias(sesion, job, limpiar):  # noqa: F811
+    """Detras de una CDN todo sale como falso: el problema es el log, no el sitio."""
+    j, _ = job
+    c = _con_logs(sesion, j)
+    limpiar.append(c)
+    imp = sesion.query(LogImport).filter(LogImport.cliente_id == c.id).one()
+    sesion.query(LogUrl).filter(LogUrl.import_id == imp.id).update({LogUrl.verificado: False})
+    sesion.commit()
+    _analizar(sesion, j)
+    r = sesion.get(Job, j.id).logs_resumen
+    assert r["afirmable_ausencia"] is False and "CDN" in r["no_se_afirma"]
+    assert sesion.execute(select(Issue.id).where(Issue.job_id == j.id,
+                                                 Issue.issue_type == "indexable_sin_visitas_googlebot")).all() == []
+
+
+def test_un_log_de_otro_host_o_de_otra_epoca_no_cuenta(sesion, job, limpiar):  # noqa: F811
+    j, _ = job
+    c = _con_logs(sesion, j)
+    limpiar.append(c)
+    imp = sesion.query(LogImport).filter(LogImport.cliente_id == c.id).one()
+    imp.host = "blog.x.com"
+    sesion.commit()
+    _analizar(sesion, j)
+    assert sesion.get(Job, j.id).logs_resumen is None, "un log del blog no habla de la web"
+    imp.host = "www.x.com"
+    imp.desde, imp.hasta = FIN - timedelta(days=200), FIN - timedelta(days=186)
+    sesion.commit()
+    _analizar(sesion, j)
+    r = sesion.get(Job, j.id).logs_resumen
+    assert r["de_su_epoca"] is False and r["afirmable_ausencia"] is False
+    assert sesion.execute(select(Issue.id).where(Issue.job_id == j.id, Issue.issue_type.in_(
+        ("indexable_sin_visitas_googlebot", "googlebot_recibe_error")))).all() == []
 
 
 def test_sin_logs_las_columnas_quedan_a_null(sesion, job, limpiar):  # noqa: F811

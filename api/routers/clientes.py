@@ -859,6 +859,11 @@ def borrar_cliente(
             status_code=409,
             detail=f"Para borrar el cliente escribe su slug ('{cliente.slug}')")
 
+    # Los logs sin leer tienen IPs de personas (decision 213): el CASCADE se
+    # lleva las filas, no los ficheros.
+    from shared.logs_servidor import borrar_ficheros_de_cliente
+
+    borrar_ficheros_de_cliente(db, cliente.id)
     borrados: list = []
     if con_jobs:
         from api.routers.jobs import borrar_job
