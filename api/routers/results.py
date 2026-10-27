@@ -1062,6 +1062,8 @@ COLUMNAS_VISTA: dict[str, tuple[str, Any]] = {
     "outlinks_count": ("Outlinks", lambda u: u.outlinks_count),
     "external_outlinks_count": ("Outlinks ext.", lambda u: u.external_outlinks_count),
     "pagerank_score": ("PageRank (0-100)", lambda u: u.pagerank_score),
+    "pagerank_externo_score": ("PageRank desde fuera (0-100)", lambda u: u.pagerank_externo_score),
+    "backlinks_externos": ("Backlinks", lambda u: u.backlinks_externos),
     "pagerank_raw": ("PageRank (x media)", lambda u: u.pagerank_raw),
     "pagerank": ("PageRank (0-10, antiguo)", lambda u: u.pagerank),
     "near_duplicate_count": ("Casi duplicadas", lambda u: u.near_duplicate_count),

@@ -1288,13 +1288,30 @@
      - `backlinks_a_error`, ordenable por la autoridad que se recupera
        redirigiendo;
      - `backlinks_a_noindex`;
-     - `backlinks_a_bloqueada_robots`;
-     - `huerfana_con_backlinks`, que sustituye a la huérfana normal (un
-       aviso por hallazgo, 36), como hace Search Console.
+     - `backlinks_a_bloqueada_robots`. Se mira **antes** que el error,
+       porque el rastreo guarda lo bloqueado sin código y salía como «da
+       error».
 
      Una 301 con backlinks no se avisa: pasar la autoridad es lo que tiene
-     que hacer. Los cuatro son `NO_COMPARABLES` entre censos, porque
-     dependen del CSV subido y no del sitio.
+     que hacer. Los tres son `NO_COMPARABLES` entre censos, porque dependen
+     del CSV subido y no del sitio.
+   - **Una huérfana con backlinks no es otro aviso.** Lleva los backlinks en
+     el detalle de su `orphan_page`, `sitemap_orphan` o `huerfana_con_trafico`.
+     Un tipo propio que la sustituyera daría por «resueltas» las huérfanas al
+     comparar un censo analizado antes de subir el CSV con uno de después.
+   - **El cruce es exacto primero.** Con la clave suelta, si varias URLs del
+     censo la comparten (`/a` 404 y `/a/` 200 en un WordPress), gana la de
+     mejor estado (200 indexable, 200, redirección, error) y, a igualdad, la
+     de menor id. Sin eso, el backlink caía en cualquiera, a veces en el 404,
+     y cambiaba de un análisis a otro.
+   - **Se cruza aunque el censo no tenga grafo.** Los avisos no dependen de
+     los enlaces internos, y lo de un análisis anterior se pone a NULL antes
+     de nada. El PageRank desde fuera, en cambio, solo se calcula con aristas.
+   - **La lectura, en streaming** desde el temporal de la subida (500 MB como
+     mucho: un export de Ahrefs en UTF-16 con el contexto de cada enlace son
+     1-2 KB por fila), y el endpoint es síncrono para no parar el bucle de
+     eventos. Fuera también las columnas UGC y Sponsored de Ahrefs y Semrush,
+     y el «+» de Majestic. Un fichero mal codificado da 422, no 500.
 
    **Fuera** (lo demás de #31):
    - DataForSEO y Ahrefs por API, con su presupuesto.
@@ -1307,13 +1324,17 @@
 
    Tests:
    - `tests/test_backlinks.py`:
-     - los tres formatos, lo descartado y la aportación;
+     - los tres formatos, lo descartado (UGC, Sponsored, el «+») y la
+       aportación;
+     - los números con separadores, el streaming y un fichero ilegible;
+     - dos URLs con la misma clave;
      - la clave sin minúsculas y el cruce con y sin query;
      - `β = 1` igual al interno, la 301 que llega a su destino, el 404 que
        se pierde y la masa colgante.
    - `tests/test_backlinks_db.py`, el análisis contra Postgres sobre el blog
-     de `test_pagerank_db.py`: el resumen, las columnas, los avisos, la 301
-     sin aviso y sin importación a NULL.
+     de `test_pagerank_db.py`: el resumen, las columnas, los avisos, la
+     bloqueada como bloqueada, la 301 sin aviso, la huérfana con sus
+     backlinks en el detalle, sin aristas y sin importación a NULL.
    - `tests/test_backlinks_api.py`: subir, las tres que se guardan, lo que
      no se lee y borrar.
    - `tests/test_backlinks_frontend.py`: el bloque del Resumen.

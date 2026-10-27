@@ -4594,6 +4594,12 @@ class SEOAnalyzer:
 
         import numpy as np
 
+        # Los backlinks del cliente se cruzan ANTES de mirar si hay grafo: sus
+        # avisos (un 404 con backlinks) no dependen de los enlaces internos, y
+        # sin ellos un censo sin aristas se quedaba con los de un analisis
+        # anterior (decision 212).
+        self._preparar_backlinks()
+
         # 1. Nodos internos del job, con su categoria (ver prk.categoria)
         url_rows = self.session.execute(
             select(
@@ -4775,7 +4781,6 @@ class SEOAnalyzer:
                     n, src, dst, w, ids_ordenados, categorias, indexables,
                     damping=damping, max_iter=max_iter, tol=tol)
         except Exception:
-            self._backlinks = None
             logger.exception("PageRank externo del job %s: no se calcula", self.job_id)
             externo = None
         if externo is not None:
@@ -4826,6 +4831,44 @@ class SEOAnalyzer:
         self.session.flush()
         logger.info("PageRank computed for %d URLs (job %s)", n, self.job_id)
 
+    def _preparar_backlinks(self) -> None:
+        """Cruza el CSV de backlinks mas reciente del cliente con el censo y lo
+        deja en `self._backlinks`. Antes pone a NULL lo de un analisis
+        anterior: sin importacion, o sin grafo (donde no se calcula el PageRank
+        desde fuera), no puede quedar el de antes. Best-effort, con su
+        savepoint."""
+        from shared.backlinks import cruzar, filas_de, ultima_importacion
+
+        self._backlinks = self._backlinks_import = None
+        try:
+            with self.session.begin_nested():
+                self.session.execute(text(
+                    "UPDATE urls SET pagerank_externo_score = NULL, backlinks_externos = NULL, "
+                    "autoridad_externa = NULL WHERE job_id = :jid AND backlinks_externos IS NOT NULL"
+                ), {"jid": self.job_id})
+                imp = ultima_importacion(self.session, self._cliente_id)
+                if imp is None:
+                    return
+                urls = self.session.execute(
+                    select(Url.id, Url.url, Url.status_code, Url.indexable, Url.redirect_url)
+                    .where(Url.job_id == self.job_id, Url.is_internal.is_(True))).all()
+
+                def rango(status, indexable, redirect):
+                    if status == 200 and indexable:
+                        return 0
+                    if status == 200:
+                        return 1
+                    if redirect or (status is not None and 300 <= status < 400):
+                        return 2
+                    return 3
+
+                self._backlinks = cruzar(filas_de(self.session, imp),
+                                         [(u[0], u[1], rango(u[2], u[3], u[4])) for u in urls])
+                self._backlinks_import = imp
+        except Exception:
+            self._backlinks = self._backlinks_import = None
+            logger.exception("Backlinks del job %s: no se cruzan", self.job_id)
+
     def _pagerank_externo(self, n, src, dst, w, ids_ordenados, categorias, indexables,
                           *, damping, max_iter, tol) -> dict | None:
         """PageRank personalizado con los backlinks del cliente (#31, decision 212).
@@ -4840,19 +4883,9 @@ class SEOAnalyzer:
         """
         import numpy as np
 
-        from shared.backlinks import cruzar, filas_de, ultima_importacion
-
-        imp = ultima_importacion(self.session, self._cliente_id)
-        if imp is None:
-            self.session.execute(text(
-                "UPDATE urls SET pagerank_externo_score = NULL, backlinks_externos = NULL, "
-                "autoridad_externa = NULL WHERE job_id = :jid AND backlinks_externos IS NOT NULL"
-            ), {"jid": self.job_id})
+        cruce, imp = self._backlinks, getattr(self, "_backlinks_import", None)
+        if cruce is None or imp is None:
             return None
-        urls = self.session.execute(
-            select(Url.id, Url.url).where(Url.job_id == self.job_id, Url.is_internal.is_(True))).all()
-        cruce = cruzar(filas_de(self.session, imp), urls)
-        self._backlinks = cruce
         externo = np.zeros(n, dtype=np.float64)
         for uid, d in cruce.por_url.items():
             externo[int(np.searchsorted(ids_ordenados, uid))] += d["aportacion"]

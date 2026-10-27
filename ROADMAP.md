@@ -932,7 +932,7 @@ es cada plantilla— y va con
   de Ahrefs o DataForSEO: un PageRank con la autoridad que entra desde fuera, y
   mapas de redirección para recuperar enlaces perdidos. *Primera parte hecha (decisión 212)*: CSV de Ahrefs, Semrush o Majestic por
   cliente, `pagerank_externo_score` y los avisos de backlinks a errores, noindex,
-  bloqueadas y huérfanas. Falta: DataForSEO/Ahrefs por API, sembrar las URLs con
+  bloqueadas (y los backlinks en el detalle de las huérfanas). Falta: DataForSEO/Ahrefs por API, sembrar las URLs con
   backlinks que el rastreo no encuentra y validarlo con exportaciones reales.
 - [#34](https://github.com/dvillarrubia/crawler-masivo/issues/34) **Extracción
   personalizada**: hecha la base, la pantalla y la prueba en vivo (arriba). Falta

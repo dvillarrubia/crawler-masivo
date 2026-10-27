@@ -7397,7 +7397,7 @@ const EXP_TABS = [
   { key: 'a_enlazado', label: 'Enlazado',      icon: 'share-2',      filter: HTML_INTERNO, ambito: ['orphan_page','sitemap_orphan','solo_enlazada_por_redireccion','not_reachable_from_home','high_outlink_count','not_in_sitemap','enlace_no_rastreable','enlace_interno_a_error','enlace_interno_a_redireccion','utm_en_enlace_interno','enlace_sin_ancla','ancla_generica','solo_enlazada_con_nofollow','enlace_interno_nofollow','pagina_nofollow','solo_enlazada_desde_paginacion_excluida','enlace_externo_roto','dominio_externo_muerto'],
     columns: ['url','status_code','inlinks_count','origenes','click_depth','pagerank_score','in_sitemap','indexable'] },
   // Backlinks del CSV del cliente (decision 212).
-  { key: 'a_backlinks', label: 'Backlinks', icon: 'external-link', filter: { is_internal: true }, ambito: ['backlinks_a_error','backlinks_a_noindex','backlinks_a_bloqueada_robots','huerfana_con_backlinks'],
+  { key: 'a_backlinks', label: 'Backlinks', icon: 'external-link', filter: { is_internal: true }, ambito: ['backlinks_a_error','backlinks_a_noindex','backlinks_a_bloqueada_robots'],
     columns: ['url','status_code','backlinks_externos','pagerank_externo_score','inlinks_count','pagerank_score','indexable'] },
   // Paginacion (decision 122): las paginas 2+ y lo que solo cuelga de ellas.
   { key: 'a_paginacion', label: 'Paginación', icon: 'list-ordered', filter: HTML_INTERNO, ambito: ['paginacion_canonical_a_la_primera','paginacion_noindex','solo_enlazada_desde_paginacion_excluida','solo_enlazada_desde_paginacion_profunda','paginacion_sin_enlace','paginacion_siguiente_rota','paginacion_rel_incorrecto'],

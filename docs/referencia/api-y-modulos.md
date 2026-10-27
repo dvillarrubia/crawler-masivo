@@ -45,7 +45,7 @@
 | `near_duplicates.py` | Contenido casi duplicado — MinHash + LSH. Funciones puras sobre texto; las escrituras sin espacios (CJK, tailandés…) se parten en caracteres (decisión 118) |
 | `sd_validation.py` | Validación conservadora de datos estructurados |
 | `avisos_de_wordpress.py` | WordPress (decision 161): cruza `adapter_entities` con el censo; ver la tabla de checks |
-| `avisos_de_backlinks.py` | Decision 212, del cruce que deja `compute_pagerank` (`an._backlinks`) con el CSV del cliente: **backlinks_a_error**, **backlinks_a_noindex**, **backlinks_a_bloqueada_robots** y **huerfana_con_backlinks** (warning, por página; la huérfana sustituye a `orphan_page`/`sitemap_orphan`). Una 301 con backlinks no se avisa. `pagerank_resumen.externo` y `urls.pagerank_externo_score`/`backlinks_externos`/`autoridad_externa` los escribe `compute_pagerank`; `β` es `analysis_thresholds.pagerank_externo_beta` (0,5) |
+| `avisos_de_backlinks.py` | Decision 212, del cruce que deja `compute_pagerank` (`an._backlinks`) con el CSV del cliente: **backlinks_a_error**, **backlinks_a_noindex**, y **backlinks_a_bloqueada_robots** (warning, por página; la bloqueada se mira antes que el error). Una huérfana con backlinks lleva `backlinks`, `dominios`, `autoridad` y `origenes` en el detalle de su `orphan_page`/`sitemap_orphan`/`huerfana_con_trafico`. Una 301 con backlinks no se avisa. `pagerank_resumen.externo` y `urls.pagerank_externo_score`/`backlinks_externos`/`autoridad_externa` los escribe `compute_pagerank`; `β` es `analysis_thresholds.pagerank_externo_beta` (0,5) |
 | `soft404.py` | Soft 404 determinista (decision 105): cruza las sondas de `jobs.soft404` y las senales de `shared/soft404.py` con el censo |
 
 ### Shared (`shared/`)

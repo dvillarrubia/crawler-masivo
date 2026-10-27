@@ -190,11 +190,6 @@ const ISSUE_INFO = {
     google: 'No puede leerla, así que no ve sus enlaces: la autoridad se queda ahí.',
     arreglo: 'Desbloquearla si debe rastrearse, o redirigirla a una que no lo esté.',
   },
-  'huerfana_con_backlinks': {
-    que: 'Página indexable que recibe enlaces de otros sitios y que ninguna página del propio sitio enlaza.',
-    google: 'Le llega autoridad de fuera, pero el sitio no la conecta con nada: ni la reparte ni le da contexto.',
-    arreglo: 'Enlazarla desde su sección y desde las páginas relacionadas. Es de las oportunidades más baratas.',
-  },
   'huerfana_con_trafico': {
     que: 'Página indexable que recibe clics de Google y que ninguna otra página del sitio enlaza.',
     google: 'La conoce por el sitemap o por enlaces externos, pero el sitio no le pasa autoridad ni contexto: posiciona a pesar de la arquitectura, no gracias a ella.',
@@ -990,7 +985,7 @@ const ISSUE_LABEL_EXTRA = {
   backlinks_a_error: 'Backlinks a una página con error',
   backlinks_a_noindex: 'Backlinks a una página noindex',
   backlinks_a_bloqueada_robots: 'Backlinks a una página bloqueada en robots.txt',
-  huerfana_con_backlinks: 'Huérfana con backlinks',
+
   indexable_sin_impresiones: 'Indexable sin impresiones (90 días)',
   trafico_en_variante_con_parametros: 'Tráfico en variantes con parámetros',
   oportunidad_posicion: 'Oportunidad: posición 4-20 con poco enlazado',
@@ -1116,6 +1111,8 @@ const DETALLE_LABEL = {
   intermedias: 'intermedias', consulta: 'búsqueda',
   origenes: 'páginas que la enlazan', con_ancla_generica: 'con ancla genérica', anclas: 'anclas',
   cobertura: 'según Google', canonical_hoy: 'declarada en el censo', canonical_visto_por_google: 'visto por Google', canonical_declarado: 'declarado', canonical_de_google: 'de Google', inspeccionada: 'inspeccionada el', en: 'en', ultimo_rastreo_google: 'última visita de Google',
+  // Backlinks del cliente (decision 212); tambien en el detalle de una huerfana.
+  backlinks: 'backlinks', dominios: 'dominios que enlazan', autoridad: 'autoridad que aporta', origenes: 'enlazada desde',
   clics: 'clics', impresiones: 'impresiones', ventana_dias: 'días', clics_variantes: 'clics en variantes', clics_pagina: 'clics en la página', variantes: 'variantes',
   campos: 'campos',
   // Accesibilidad con axe (decisión 174)

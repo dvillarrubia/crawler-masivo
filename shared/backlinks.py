@@ -31,9 +31,10 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable
 from urllib.parse import unquote, urlsplit
 
-# Lo que se acepta de un fichero: un export de Ahrefs de un sitio mediano son
-# unos pocos MB; 200.000 filas son de sobra para el PageRank de un censo.
-MAX_BYTES = 60 * 1024 * 1024
+# Lo que se acepta de un fichero. Un export de Ahrefs en UTF-16 con el contexto
+# de cada enlace son 1-2 KB por fila: 200.000 filas, unos 400 MB. Se lee en
+# streaming y solo se guardan las filas, no el fichero.
+MAX_BYTES = 500 * 1024 * 1024
 MAX_FILAS = 200_000
 
 # Nombres de columna (sin mayusculas, espacios ni signos) -> campo.
@@ -47,6 +48,9 @@ _COLUMNAS = {
     "externos": ("externallinks", "externallinkscount", "outlinks", "sourceoutlinks",
                  "externaloutlinks", "linkeddomains"),
     "nofollow": ("nofollow", "flagnofollow", "isnofollow"),
+    # Ahrefs y Semrush las exportan aparte del nofollow, como true/false.
+    "ugc": ("ugc", "isugc", "flagugc"),
+    "sponsored": ("sponsored", "issponsored", "flagsponsored"),
     "tipo": ("type", "linktype", "linkattributes", "rel"),
     "perdido": ("lost", "lostlink", "loststatus", "lostdate", "flagdeleted", "deleted"),
 }
@@ -62,31 +66,33 @@ def _norm_columna(nombre: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (nombre or "").strip().lower())
 
 
-def _decodificar(crudo: bytes) -> str:
-    if crudo.startswith((b"\xff\xfe", b"\xfe\xff")):
-        return crudo.decode("utf-16")
-    if crudo.startswith(b"\xef\xbb\xbf"):
-        return crudo[3:].decode("utf-8")
-    # UTF-16 sin BOM: la mitad de los bytes a cero.
-    muestra = crudo[:4000]
+def _codificacion(muestra: bytes) -> str:
+    """Por los primeros bytes: el BOM, o la mitad de los bytes a cero (UTF-16
+    sin BOM). Sin eso, UTF-8; y si no lo es, latin-1."""
+    if muestra.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return "utf-16"
+    if muestra.startswith(b"\xef\xbb\xbf"):
+        return "utf-8-sig"
     if muestra and muestra.count(b"\x00") > len(muestra) // 4:
-        return crudo.decode("utf-16-le" if muestra[1:2] == b"\x00" else "utf-16-be")
+        return "utf-16-le" if muestra[1:2] == b"\x00" else "utf-16-be"
     try:
-        return crudo.decode("utf-8")
-    except UnicodeDecodeError:
-        return crudo.decode("latin-1")
+        muestra.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        # Un caracter cortado al final de la muestra no es latin-1.
+        return "utf-8" if exc.start >= len(muestra) - 3 else "latin-1"
+    return "utf-8"
 
 
-def _separador(texto: str) -> str:
-    cabecera = texto.split("\n", 1)[0]
+def _separador(cabecera: str) -> str:
     return max(("\t", ",", ";"), key=cabecera.count)
 
 
 def _verdad(valor: str | None) -> bool | None:
     v = (valor or "").strip().lower()
-    if v in ("true", "1", "yes", "si", "sí", "nofollow", "y"):
+    # Majestic marca sus banderas con «+» y «-».
+    if v in ("true", "1", "yes", "si", "sí", "nofollow", "y", "+"):
         return True
-    if v in ("false", "0", "no", "", "dofollow", "follow", "n"):
+    if v in ("false", "0", "no", "", "dofollow", "follow", "n", "-"):
         return False if v else None
     return None
 
@@ -95,9 +101,12 @@ def _numero(valor: str | None) -> float | None:
     v = (valor or "").strip().replace(" ", "")
     if not v:
         return None
-    # «1.234» / «1,234» / «12,5»: un solo separador con 3 cifras detras es de
-    # miles; con otra cantidad, decimal.
-    if re.fullmatch(r"\d{1,3}([.,]\d{3})+", v):
+    # «1.234» / «1,234» son miles; «12,5», «0.125» decimales; «1,234.5» y
+    # «1.234,5», las dos cosas (manda el ultimo separador).
+    if "," in v and "." in v:
+        decimal = "," if v.rfind(",") > v.rfind(".") else "."
+        v = v.replace("." if decimal == "," else ",", "").replace(",", ".")
+    elif re.fullmatch(r"[1-9]\d{0,2}([.,]\d{3})+", v):
         v = re.sub(r"[.,]", "", v)
     else:
         v = v.replace(",", ".")
@@ -131,19 +140,32 @@ class Lectura:
     columnas: dict[str, str] = field(default_factory=dict)
 
 
-def leer_csv(crudo: bytes, *, fuente: str | None = None, max_filas: int = MAX_FILAS) -> Lectura:
-    """Las filas dofollow y vivas de un export, con su aportacion.
+def leer_csv(origen, *, fuente: str | None = None, max_filas: int = MAX_FILAS) -> Lectura:
+    """Las filas dofollow y vivas de un export, con su aportacion. `origen` es
+    un fichero binario (se lee en streaming: un export de Ahrefs en UTF-16 con
+    el contexto de cada enlace son 1-2 KB por fila) o unos bytes.
 
-    `CsvNoValido` si no hay columnas de origen y destino.
+    `CsvNoValido` si no hay columnas de origen y destino, o no se puede leer.
     """
-    if len(crudo) > MAX_BYTES:
+    f = io.BytesIO(origen) if isinstance(origen, (bytes, bytearray)) else origen
+    if isinstance(origen, (bytes, bytearray)) and len(origen) > MAX_BYTES:
         raise CsvNoValido(f"El fichero pasa de {MAX_BYTES // (1024 * 1024)} MB")
-    texto = _decodificar(crudo)
-    lector = csv.reader(io.StringIO(texto), delimiter=_separador(texto))
     try:
-        cabecera = next(lector)
-    except StopIteration as exc:
-        raise CsvNoValido("El fichero está vacío") from exc
+        return _leer(f, fuente, max_filas)
+    except (UnicodeError, csv.Error) as exc:
+        raise CsvNoValido(f"No se puede leer el fichero: {exc}") from exc
+
+
+def _leer(f, fuente, max_filas) -> Lectura:
+    muestra = f.read(4096)
+    f.seek(0)
+    texto = io.TextIOWrapper(f, encoding=_codificacion(muestra), errors="strict", newline="")
+    cabecera_txt = texto.readline()
+    if not cabecera_txt.strip():
+        raise CsvNoValido("El fichero está vacío")
+    delimitador = _separador(cabecera_txt)
+    cabecera = next(csv.reader([cabecera_txt], delimiter=delimitador))
+    lector = csv.reader(texto, delimiter=delimitador)
     normal = [_norm_columna(c) for c in cabecera]
     indice: dict[str, int] = {}
     for campo, alias in _COLUMNAS.items():
@@ -170,7 +192,8 @@ def leer_csv(crudo: bytes, *, fuente: str | None = None, max_filas: int = MAX_FI
         if not origen.startswith(("http://", "https://")) or not destino.startswith(("http://", "https://")):
             lec.descartadas_sin_url += 1
             continue
-        nofollow = _verdad(celda(fila, "nofollow"))
+        nofollow = (_verdad(celda(fila, "nofollow")) or _verdad(celda(fila, "ugc"))
+                    or _verdad(celda(fila, "sponsored")))
         tipo = (celda(fila, "tipo") or "").lower()
         if nofollow or "nofollow" in tipo or "ugc" in tipo or "sponsored" in tipo:
             lec.descartadas_nofollow += 1
@@ -229,18 +252,40 @@ class Cruce:
         return round(self.casadas / self.filas, 4) if self.filas else None
 
 
-def cruzar(filas: Iterable[tuple[str, str, str, float]], urls: Iterable[tuple[int, str]],
+def _exacta(url: str) -> str:
+    return url.strip().split("#", 1)[0]
+
+
+def cruzar(filas: Iterable[tuple[str, str, str, float]], urls: Iterable[tuple],
            *, max_no_rastreadas: int = 50, max_origenes: int = 5) -> Cruce:
     """`filas`: (url_to, url_from, dominio_from, aportacion). `urls`: (id, url)
-    de las internas del censo."""
-    por_clave: dict[str, int] = {}
-    por_ruta: dict[str, int] = {}
-    for uid, url in urls:
+    o (id, url, rango) de las internas del censo.
+
+    Primero la URL exacta (sin el fragmento). Si no esta, la clave suelta
+    (esquema, `www.`, barra final), y si varias URLs del censo comparten clave
+    (`/a` 404 y `/a/` 200 en un WordPress) gana la de menor `rango` (200
+    indexable, luego 200, redireccion, error) y, a igualdad, la de menor id:
+    siempre la misma, y nunca un 404 si esta su version buena.
+    """
+    exactas: dict[str, int] = {}
+    por_clave: dict[str, tuple[int, int]] = {}
+    por_ruta: dict[str, tuple[int, int]] = {}
+
+    def _mejor(d, k, rango, uid):
+        actual = d.get(k)
+        if actual is None or (rango, uid) < actual:
+            d[k] = (rango, uid)
+
+    for u in urls:
+        uid, url = u[0], u[1]
+        rango = u[2] if len(u) > 2 else 0
+        exactas.setdefault(_exacta(url), uid)
         k = clave_backlink(url)
         if k is None:
             continue
-        por_clave.setdefault(k, uid)
-        por_ruta.setdefault(sin_query(k), uid) if "?" not in k else None
+        _mejor(por_clave, k, rango, uid)
+        if "?" not in k:
+            _mejor(por_ruta, k, rango, uid)
     por_url: dict[int, dict[str, Any]] = {}
     fuera: dict[str, dict[str, Any]] = {}
     n = casadas = 0
@@ -249,12 +294,11 @@ def cruzar(filas: Iterable[tuple[str, str, str, float]], urls: Iterable[tuple[in
         n += 1
         aporte = float(aporte or 0)
         total += aporte
-        k = clave_backlink(url_to)
-        uid = None
+        uid = exactas.get(_exacta(url_to))
+        k = clave_backlink(url_to) if uid is None else None
         if k is not None:
-            uid = por_clave.get(k)
-            if uid is None and "?" in k:
-                uid = por_ruta.get(sin_query(k))
+            hit = por_clave.get(k) or (por_ruta.get(sin_query(k)) if "?" in k else None)
+            uid = hit[1] if hit else None
         if uid is None:
             f = fuera.setdefault(url_to, {"url": url_to, "backlinks": 0, "aportacion": 0.0, "dominios": set()})
             f["backlinks"] += 1

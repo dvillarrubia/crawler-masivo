@@ -50,15 +50,24 @@ def listar(cliente_id: uuid.UUID, db: Session = Depends(get_session)):
 
 
 @router.post("/{cliente_id}/backlinks", status_code=201)
-async def subir(cliente_id: uuid.UUID, fichero: UploadFile = File(...),
-                fuente: str | None = Form(None), fecha_dato: date | None = Form(None),
-                db: Session = Depends(get_session)):
+def subir(cliente_id: uuid.UUID, fichero: UploadFile = File(...),
+          fuente: str | None = Form(None), fecha_dato: date | None = Form(None),
+          db: Session = Depends(get_session)):
     """Lee un export de Ahrefs, Semrush o Majestic (o uno con «Source URL» y
-    «Target URL») y guarda sus backlinks dofollow y vivos."""
+    «Target URL») y guarda sus backlinks dofollow y vivos.
+
+    Sincrona a proposito: FastAPI la corre en un hilo, y leer 200.000 filas e
+    insertarlas no para el bucle de eventos (la interfaz, el MCP). El fichero
+    se lee en streaming desde el temporal de la subida."""
     _cliente(db, cliente_id)
-    crudo = await fichero.read(B.MAX_BYTES + 1)
+    f = fichero.file
+    f.seek(0, 2)
+    tamano = f.tell()
+    f.seek(0)
+    if tamano > B.MAX_BYTES:
+        raise HTTPException(status_code=413, detail=f"El fichero pasa de {B.MAX_BYTES // (1024 * 1024)} MB")
     try:
-        lectura = B.leer_csv(crudo, fuente=fuente)
+        lectura = B.leer_csv(f, fuente=fuente)
     except B.CsvNoValido as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not lectura.filas:

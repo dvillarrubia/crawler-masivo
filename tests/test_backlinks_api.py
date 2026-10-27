@@ -62,8 +62,8 @@ def test_subir_un_export_de_ahrefs(entorno):
     r = _subir(api, cid, AHREFS.encode("utf-16"), fecha_dato="2026-10-20")
     assert r.status_code == 201, r.text
     j = r.json()
-    assert (j["fuente"], j["filas"], j["leidas"], j["en_uso"]) == ("ahrefs", 2, 4, True)
-    assert j["descartadas"] == {"nofollow": 1, "perdidas": 1, "sin_url": 0}
+    assert (j["fuente"], j["filas"], j["leidas"], j["en_uso"]) == ("ahrefs", 2, 6, True)
+    assert j["descartadas"] == {"nofollow": 3, "perdidas": 1, "sin_url": 0}
     assert j["fecha_dato"] == "2026-10-20" and j["dominios"] == 2
     with S() as s:
         assert s.query(ExternalLink).count() == 2

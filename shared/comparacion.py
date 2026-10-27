@@ -1398,7 +1398,6 @@ NO_COMPARABLES = frozenset({
     "backlinks_a_error",
     "backlinks_a_noindex",
     "backlinks_a_bloqueada_robots",
-    "huerfana_con_backlinks",
 })
 
 
