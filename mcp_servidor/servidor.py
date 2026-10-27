@@ -97,9 +97,9 @@ def crear_servidor(api: Callable[[], H.Api] = _api_local, **opciones: Any) -> MC
         return H.alertas(api(), cliente, cerradas)
 
     @servidor.tool(annotations=LECTURA)
-    def search_console(cliente: str) -> list[dict]:
-        """Estado de Search Console de un cliente."""
-        return H.search_console(api(), cliente)
+    def search_console(cliente: str, serie: bool = False, dias: int = 90) -> list[dict]:
+        """Estado de Search Console de un cliente. Con `serie=true`, la serie diaria de clics e impresiones de `dias` días y las páginas y búsquedas con más clics (28 días frente a los 28 anteriores)."""
+        return H.search_console(api(), cliente, serie, dias)
 
     @servidor.tool(annotations=LECTURA)
     def endpoints(filtro: str | None = None) -> list[dict]:

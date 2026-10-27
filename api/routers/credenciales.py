@@ -235,6 +235,75 @@ def pedir_sincronizacion(client_id: uuid.UUID, db: Session = Depends(get_session
     return {"pedidas": pedidas}
 
 
+@router.get("/api/clients/{client_id}/gsc/serie")
+def serie_gsc(client_id: uuid.UUID, dias: int = Query(90, ge=7, le=480), top: int = Query(10, ge=0, le=50),
+              db: Session = Depends(get_session)):
+    """Solo lectura: la serie diaria de clics e impresiones de cada propiedad
+    del cliente y, si `top` > 0, las paginas y las busquedas con mas clics de
+    los ultimos 28 dias frente a los 28 anteriores. Para paneles de fuera (el
+    plugin Cerebro OS) y el MCP, sin llave de Google en la otra punta.
+
+    Es la suma por pagina de `gsc_paginas`: los clics cuadran con el total de
+    la propiedad, las impresiones salen por encima (Google cuenta una por
+    pagina mostrada) y la posicion es la media de las paginas ponderada por
+    impresiones, no la de la propiedad. Los dias truncados se marcan: ahi la
+    suma se queda corta. Las busquedas no suman el total (las anonimizadas no
+    las da Google)."""
+    from datetime import timedelta
+
+    from shared.models import GscConsulta, GscEstado, GscPagina
+
+    c = _cliente(db, client_id)
+    salida = []
+    for e in db.query(GscEstado).filter(GscEstado.cliente_id == c.id).order_by(GscEstado.propiedad):
+        fila = {"propiedad": e.propiedad, "estado": e.estado, "ultimo_ok": e.ultimo_ok,
+                "primer_dia": e.primer_dia, "ultimo_dia": e.ultimo_dia, "serie": []}
+        if not e.ultimo_dia:
+            salida.append(fila)
+            continue
+        truncados = {str(d) for d in (e.dias_truncados or [])}
+        hasta = e.ultimo_dia
+        desde = hasta - timedelta(days=dias - 1)
+        base = (GscPagina.cliente_id == c.id, GscPagina.propiedad == e.propiedad)
+        filas = (db.query(GscPagina.fecha, func.sum(GscPagina.clics), func.sum(GscPagina.impresiones),
+                          func.sum(GscPagina.posicion * GscPagina.impresiones))
+                 .filter(*base, GscPagina.fecha >= desde, GscPagina.fecha <= hasta)
+                 .group_by(GscPagina.fecha).order_by(GscPagina.fecha).all())
+        for fecha, clics, imp, pos_x_imp in filas:
+            clics, imp = int(clics or 0), int(imp or 0)
+            fila["serie"].append({"fecha": fecha, "clics": clics, "impresiones": imp,
+                                  "ctr": round(clics / imp, 4) if imp else None,
+                                  "posicion": round(pos_x_imp / imp, 2) if imp and pos_x_imp is not None else None,
+                                  "truncado": str(fecha) in truncados})
+        if top:
+            ahora_desde, antes_desde = hasta - timedelta(days=27), hasta - timedelta(days=55)
+            antes_hasta = ahora_desde - timedelta(days=1)
+
+            def _top(clave, etiqueta, filtro, fecha, clics, impresiones, nombre):
+                actual = (db.query(clave, func.max(etiqueta), func.sum(clics), func.sum(impresiones))
+                          .filter(*filtro, fecha >= ahora_desde, fecha <= hasta)
+                          .group_by(clave).order_by(func.sum(clics).desc()).limit(top).all())
+                claves = [k for k, _, _, _ in actual]
+                previo = dict(db.query(clave, func.sum(clics))
+                              .filter(*filtro, fecha >= antes_desde, fecha <= antes_hasta, clave.in_(claves))
+                              .group_by(clave).all()) if claves else {}
+                return [{nombre: et, "clics": int(cl or 0), "impresiones": int(im or 0),
+                         "clics_previos": int(previo.get(k) or 0)} for k, et, cl, im in actual]
+
+            # Las paginas por `url_clave` (la misma URL con los parametros en otro orden es una).
+            paginas = _top(GscPagina.url_clave, GscPagina.url, base, GscPagina.fecha, GscPagina.clics,
+                           GscPagina.impresiones, "url")
+            base_c = (GscConsulta.cliente_id == c.id, GscConsulta.propiedad == e.propiedad)
+            consultas = _top(GscConsulta.consulta, GscConsulta.consulta, base_c, GscConsulta.fecha,
+                             GscConsulta.clics, GscConsulta.impresiones, "consulta")
+            fila["periodo"] = {"desde": ahora_desde, "hasta": hasta, "previo_desde": antes_desde,
+                               "previo_hasta": antes_hasta}
+            fila["paginas"] = paginas
+            fila["consultas"] = consultas
+        salida.append(fila)
+    return salida
+
+
 # ---------------------------------------------------------------------------
 # Slack de un cliente (decision 149)
 # ---------------------------------------------------------------------------

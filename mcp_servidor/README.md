@@ -56,7 +56,7 @@ la dirección de `CRAWLER_API_URL` (por defecto, la de producción).
 | `urls` | URLs con los filtros del Explorador |
 | `comparar` | Qué cambió entre dos censos |
 | `alertas` | Las alertas con estado de un cliente |
-| `search_console` | Estado de Search Console de un cliente |
+| `search_console` | Estado de Search Console de un cliente; con `serie`, la serie diaria y las páginas y búsquedas con más clics (28 días frente a los 28 anteriores) |
 | `estado_rastreo` | Cómo va un rastreo en marcha |
 | `programaciones` | Los rastreos programados |
 | `endpoints` | Los GET de la API, para `consultar` |

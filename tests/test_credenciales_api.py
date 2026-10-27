@@ -112,3 +112,50 @@ def test_el_estado_del_cliente_y_sincronizar_ahora(entorno):
         assert s.query(GscEstado).one().pedida_en is not None
     assert api.post(f"/api/clients/{ids['vacio']}/gsc/sincronizar").status_code == 409
     assert api.get(f"/api/clients/{uuid.uuid4()}/gsc").status_code == 404
+
+
+def test_la_serie_diaria_y_lo_que_mas_trae(entorno):
+    """GET /gsc/serie: un dia por fila con la suma por pagina, el truncado
+    marcado, la posicion ponderada por impresiones y los tops de 28 dias
+    frente a los 28 anteriores; la misma URL con otra `url_clave` no se junta."""
+    from datetime import date, timedelta
+
+    from shared.models import GscConsulta, GscPagina
+
+    api, ids, Sesion, _ = entorno
+    prop = "sc-domain:acme.com"
+    hasta = date(2026, 10, 23)
+    with Sesion() as s:
+        s.add(GscEstado(cliente_id=ids["acme"], propiedad=prop, estado="ok", primer_dia=hasta - timedelta(days=59),
+                        ultimo_dia=hasta, dias_truncados=[(hasta - timedelta(days=1)).isoformat()]))
+        for d in range(60):
+            dia = hasta - timedelta(days=d)
+            s.add_all([
+                GscPagina(cliente_id=ids["acme"], propiedad=prop, fecha=dia, url="https://acme.com/a",
+                          url_clave="a", clics=10 if d < 28 else 2, impresiones=100, posicion=2.0),
+                GscPagina(cliente_id=ids["acme"], propiedad=prop, fecha=dia, url="https://acme.com/b",
+                          url_clave="b", clics=1, impresiones=300, posicion=10.0),
+                GscConsulta(cliente_id=ids["acme"], propiedad=prop, fecha=dia, url_clave="a",
+                            consulta="acme calderas", clics=7, impresiones=50, posicion=1.5),
+            ])
+        s.commit()
+
+    (fila,) = api.get(f"/api/clients/{ids['acme']}/gsc/serie?dias=30").json()
+    assert fila["propiedad"] == prop and len(fila["serie"]) == 30
+    ultimo = fila["serie"][-1]
+    assert ultimo == {"fecha": "2026-10-23", "clics": 11, "impresiones": 400, "ctr": 0.0275,
+                      "posicion": 8.0, "truncado": False}
+    assert fila["serie"][-2]["truncado"] is True
+    assert fila["periodo"] == {"desde": "2026-09-26", "hasta": "2026-10-23",
+                               "previo_desde": "2026-08-29", "previo_hasta": "2026-09-25"}
+    assert fila["paginas"][0] == {"url": "https://acme.com/a", "clics": 280, "impresiones": 2800,
+                                  "clics_previos": 56}
+    assert [p["url"] for p in fila["paginas"]] == ["https://acme.com/a", "https://acme.com/b"]
+    assert fila["consultas"] == [{"consulta": "acme calderas", "clics": 196, "impresiones": 1400,
+                                  "clics_previos": 196}]
+
+    (sin_top,) = api.get(f"/api/clients/{ids['acme']}/gsc/serie?top=0").json()
+    assert "paginas" not in sin_top and len(sin_top["serie"]) == 60
+    assert api.get(f"/api/clients/{ids['vacio']}/gsc/serie").json() == []
+    assert api.get(f"/api/clients/{ids['acme']}/gsc/serie?dias=1").status_code == 422
+    assert api.get(f"/api/clients/{uuid.uuid4()}/gsc/serie").status_code == 404

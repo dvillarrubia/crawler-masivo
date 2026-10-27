@@ -38,6 +38,8 @@ def _api(pedidas):
                  "prioridad": 1760.6, "ejemplos": []}])
         if p == f"/api/clients/{CID}/incidentes":
             return httpx.Response(200, json=[{"titulo": "t", "estado": "abierto", "severidad": "critical"}])
+        if p in (f"/api/clients/{CID}/gsc", f"/api/clients/{CID}/gsc/serie"):
+            return httpx.Response(200, json=[{"propiedad": "https://www.lopesan.com/", "ruta": p}])
         if p == "/api/jobs":
             return httpx.Response(200, json={"items": [{"id": JID, "name": "semanal", "status": "completed"}]})
         return httpx.Response(404, json={"detail": "no"})
@@ -81,3 +83,11 @@ def test_el_token_sale_del_fichero_si_no_hay_variable(tmp_path, monkeypatch):
     f.write_text("abc123\n")
     monkeypatch.setenv("CRAWLER_API_TOKEN_FILE", str(f))
     assert H._token() == "abc123"
+
+
+def test_search_console_con_y_sin_serie():
+    pedidas = []
+    api = _api(pedidas)
+    assert H.search_console(api, "lopesan")[0]["ruta"] == f"/api/clients/{CID}/gsc"
+    assert H.search_console(api, "lopesan", serie=True, dias=30)[0]["ruta"] == f"/api/clients/{CID}/gsc/serie"
+    assert pedidas[-1][2] == {"dias": "30"}
