@@ -1,7 +1,6 @@
 # SEO Crawler de Lin3s
 
-Crawler y auditor SEO para sitios grandes, del estilo de Screaming Frog pero
-pensado para una agencia. Rastrea cada sitio de una cartera de clientes, lo
+Crawler y auditor SEO del estilo de Screaming Frog, pensado para una agencia. Rastrea cada sitio de una cartera de clientes, lo
 compara con su rastreo anterior, lo cruza con los datos de Google y avisa
 cuando algo se rompe.
 
@@ -17,9 +16,10 @@ JavaScript. Interfaz web estática (Alpine.js) servida por la propia API.
 ## Qué hace
 
 **Rastreo**
-- Sitios de cientos de miles de URLs, con render JS por muestra de plantilla
-  y sin render donde no hace falta. Huella TLS y user-agent de un Chrome real.
-  Topes por carpeta o subdominio.
+- Sitios de decenas de miles de URLs: el mayor rastreo en producción tiene
+  90.000 (36 horas). Render JS por muestra de plantilla y sin render donde no
+  hace falta. Huella TLS y user-agent de un Chrome real. Topes por carpeta o
+  subdominio.
 - Detecta los muros (WAF, captcha, límite de peticiones) y lo dice, en vez de
   dar el sitio por limpio. Respeta el robots.txt de cada bot, también el de los
   bots de IA, y dice qué línea bloquea cada URL.
@@ -105,6 +105,22 @@ Navegador ──▶ API (FastAPI, sirve también la interfaz y /mcp)
   censos superados en Parquet, las capturas y los logs subidos mientras se
   leen.
 - Detalle: [`docs/referencia/arquitectura.md`](docs/referencia/arquitectura.md).
+
+## Escala: lo que aguanta y lo que no
+
+- **El análisis está hecho para sitios grandes**:
+  - el PageRank agrega las aristas en SQL (con 139 millones de enlaces, unos
+    240 MB en memoria);
+  - los enlaces de los censos superados salen a Parquet;
+  - las URLs de los sitemaps entran en la cola por cupos;
+  - el Excel se escribe en streaming.
+- **El rastreo, no tanto**:
+  - cada rastreo es un solo proceso de Scrapy, sin repartirse entre máquinas;
+  - el VPS de hoy tiene 2 CPU, un worker y dos rastreos a la vez;
+  - por cortesía con el sitio (concurrencia de 3-4 por dominio, con pausas)
+    va a unas 0,7 URLs por segundo, unas 60.000 al día;
+  - un sitio de un millón de URLs tardaría semanas, y rastrearlo más deprisa
+    o repartido no está probado.
 
 ## Puesta en marcha (local)
 
