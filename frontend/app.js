@@ -682,7 +682,7 @@ const fmt = {
     critical: 'var(--red,#d32f2f)',
     warning: 'var(--orange,#e67e22)',
     info: 'var(--blue,#2979b5)',
-  }[s] || 'var(--muted,#6b7280)'),
+  }[s] || 'var(--text-dim)'),
   severity: s => SEVERITY_LABEL[s] || s,
   position: p => POSITION_LABEL[p] || p || '—',
 };
@@ -5416,7 +5416,7 @@ function app() {
 
     // ------- Helpers -------
     statusColor(s) {
-      return { pending:'badge-pending', running:'badge-running', analyzing:'badge-running', completed:'badge-completed', failed:'badge-failed', cancelled:'badge-cancelled', deleting:'badge-cancelled' }[s] || 'badge-pending';
+      return { pending:'badge-pending', running:'badge-running', analyzing:'badge-running', completed:'badge-completed', failed:'badge-failed', cancelled:'badge-neutral', deleting:'badge-neutral' }[s] || 'badge-pending';
     },
 
     barColor(group) {
@@ -7606,6 +7606,19 @@ const MOTIVO_NO_COMPARABLE = {
 const METRICAS_GRAFICADAS = ['errores', 'urls_4xx', 'urls_5xx', 'indexables',
   'pagerank_desperdiciado', 'click_depth_medio'];
 
+// Lo minimo que abarca el eje vertical de una grafica, como fraccion de su
+// valor mas alto (revision de UX del 25-oct, 3.1). Con 0,2, pasar de 3.197 a
+// 3.222 indexables ocupa un 4 % del alto y no la grafica entera.
+const RANGO_MINIMO_EJE = 0.2;
+
+// El suelo del eje en un numero redondo (2.500 y no 2.577,6): hacia abajo, al
+// multiplo de la potencia de 10 de la amplitud (de 1 en 1 si son enteros).
+function _sueloRedondo(v, amplitud, enteros) {
+  let paso = Math.pow(10, Math.floor(Math.log10(amplitud || 1)));
+  if (enteros) paso = Math.max(1, paso);
+  return Math.floor(v / paso) * paso;
+}
+
 function _escSvg(t) {
   return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -7637,6 +7650,16 @@ function modeloGrafica(puntos, metrica, opciones) {
   let max = valores.length ? Math.max(...valores) : 1;
   if (min === max) { min = min - (min ? Math.abs(min) * .1 : 1); max = max + (max ? Math.abs(max) * .1 : 1); }
   if (min < 0 && valores.every(v => v >= 0)) min = 0;
+  // Rango minimo (revision de UX del 25-oct, 3.1): el eje abarca al menos un
+  // RANGO_MINIMO_EJE del valor mas alto, para que una variacion pequena se vea
+  // pequena (indexables 3.197 → 3.222 se dibujaba de suelo a techo, como un
+  // desplome o un despegue). Se alarga hacia abajo, sin bajar de 0 si todo es
+  // positivo; la leyenda de la ficha lo dice.
+  const amplitud = Math.abs(max) * RANGO_MINIMO_EJE;
+  if (max - min < amplitud) {
+    min = _sueloRedondo(max - amplitud, amplitud, valores.every(v => Number.isInteger(v)));
+    if (min < 0 && valores.every(v => v >= 0)) min = 0;
+  }
   const y = v => abajo - (abajo - arriba) * (v - min) / (max - min);
   const m = { ancho: o.ancho, alto: o.alto, metrica, etiqueta: o.etiqueta || metrica, min, max, base: abajo + 6,
               izq, der, arriba, abajo, puntos: [], fuera: [], tramos: [], cortes: [] };
@@ -7667,14 +7690,15 @@ function modeloGrafica(puntos, metrica, opciones) {
     anterior = punto;
   });
   m.ultimo = m.puntos.length ? m.puntos[m.puntos.length - 1].valor : null;
-  // El ultimo tramo, del color de la flecha (revision de UX del 25-oct, 1.13):
-  // rojo si empeora segun `opciones.mejor` ('baja' o 'sube'); antes salia
-  // siempre del verde de la marca, tambien con 41 URLs en 4xx frente a 35.
-  // Un tramo discontinuo (cambio de version del analisis) no se juzga.
-  const ult = m.tramos[m.tramos.length - 1];
-  if (ult && !ult.discontinuo && o.mejor && ult.y2 !== ult.y1) {
-    const sube = ult.y2 < ult.y1;  // en SVG la y crece hacia abajo
-    ult.sentido = (sube ? 'sube' : 'baja') === o.mejor ? 'mejora' : 'empeora';
+  // Cada tramo, del color de lo que significa (revision de UX del 25-oct, 1.13
+  // y 3.1): rojo si empeora segun `opciones.mejor` ('baja' o 'sube'), verde si
+  // mejora y neutro si no cambia. Antes salia siempre del verde de la marca,
+  // tambien con 41 URLs en 4xx frente a 35. Un tramo discontinuo (cambio de
+  // version del analisis) no se juzga.
+  for (const t of m.tramos) {
+    if (t.discontinuo || !o.mejor || t.y2 === t.y1) continue;
+    const sube = t.y2 < t.y1;  // en SVG la y crece hacia abajo
+    t.sentido = (sube ? 'sube' : 'baja') === o.mejor ? 'mejora' : 'empeora';
   }
   return m;
 }
@@ -7709,15 +7733,31 @@ function sparkline(valores, cortes, opciones) {
   const o = Object.assign({ ancho: 80, alto: 22 }, opciones || {});
   const v = (valores || []).filter(x => x != null);
   if (v.length < 2) return '';
-  const min = Math.min(...v), max = Math.max(...v), rango = (max - min) || 1;
+  // El mismo rango minimo que las graficas de la ficha (3.1): 89 → 85 errores
+  // no puede ir de suelo a techo.
+  const max = Math.max(...v);
+  let min = Math.min(...v);
+  if (max - min < Math.abs(max) * RANGO_MINIMO_EJE) {
+    min = max - Math.abs(max) * RANGO_MINIMO_EJE;
+    if (min < 0 && v.every(x => x >= 0)) min = 0;
+  }
+  const rango = (max - min) || 1;
   const pts = v.map((y, i) => [2 + (o.ancho - 4) * i / (v.length - 1),
                                o.alto - 2 - (o.alto - 4) * (y - min) / rango]);
   const txt = ps => ps.map(p => p.map(n => n.toFixed(1)).join(',')).join(' ');
   const partes = [];
   let desde = 0;
+  // Con `opciones.mejor` ('baja' o 'sube') cada tramo lleva su sentido, como
+  // en la ficha (3.1); sin el, la linea es neutra.
+  const sentido = i => !o.mejor || v[i] === v[i - 1] ? ''
+    : ((v[i] > v[i - 1] ? 'sube' : 'baja') === o.mejor ? ' mejora' : ' empeora');
   for (const c of [...(cortes || []).filter(c => c > 0 && c < pts.length), pts.length]) {
     const tramo = pts.slice(desde, c);
-    if (tramo.length > 1) partes.push(`<polyline points="${txt(tramo)}" class="evo-linea"/>`);
+    if (tramo.length > 1 && !o.mejor) partes.push(`<polyline points="${txt(tramo)}" class="evo-linea"/>`);
+    if (tramo.length > 1 && o.mejor) {
+      for (let i = desde + 1; i < c; i++)
+        partes.push(`<polyline points="${txt([pts[i - 1], pts[i]])}" class="evo-linea${sentido(i)}"/>`);
+    }
     if (c < pts.length)
       partes.push(`<polyline points="${txt([pts[c - 1], pts[c]])}" class="evo-linea discontinua"/>`);
     desde = c;

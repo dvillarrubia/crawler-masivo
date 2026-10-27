@@ -27,6 +27,8 @@ html[data-theme="terminal"]{
   --orange-bg: rgba(255,194,51,.10);
   --blue:      #3fe0ff;
   --blue-bg:   rgba(63,224,255,.08);
+  /* Neutro (3.1): lineas sin juicio y cancelados; gris verdoso, no el verde de «bien». */
+  --neutral:   #7d9483;
   --radius:    0;
   --radius-lg: 0;
   --shadow:    0 0 0 1px rgba(61,255,106,.04), 0 0 12px rgba(61,255,106,.05);
@@ -64,6 +66,11 @@ html[data-theme="terminal"] body::after{
 
 html[data-theme="terminal"] a{color:var(--accent)}
 html[data-theme="terminal"] a:hover{color:var(--accent-h);text-shadow:var(--glow)}
+/* Un enlace con color de significado lo conserva (revision de UX del 25-oct,
+   3.1): «saltaron 3 alertas» salia del mismo verde que «no salto ninguna». */
+html[data-theme="terminal"] a.text-red,html[data-theme="terminal"] a.red{color:var(--red)}
+html[data-theme="terminal"] a.text-orange,html[data-theme="terminal"] a.orange{color:var(--orange)}
+html[data-theme="terminal"] a.text-dim{color:var(--text-dim)}
 html[data-theme="terminal"] ::selection{background:var(--accent);color:var(--accent-ink)}
 html[data-theme="terminal"] ::-webkit-scrollbar-track{background:var(--bg)}
 html[data-theme="terminal"] ::-webkit-scrollbar-thumb{background:var(--border)}
@@ -201,6 +208,7 @@ html[data-theme="terminal"] .badge-running{border-color:rgba(63,224,255,.4)}
 html[data-theme="terminal"] .badge-completed{border-color:rgba(61,255,106,.4)}
 html[data-theme="terminal"] .badge-failed{border-color:rgba(255,79,79,.45)}
 html[data-theme="terminal"] .badge-cancelled{border-color:rgba(255,194,51,.45)}
+html[data-theme="terminal"] .badge-neutral{color:var(--neutral);border-color:var(--border)}
 html[data-theme="terminal"] .badge-info{border-color:rgba(63,224,255,.4)}
 html[data-theme="terminal"] .priority-alta{border-color:rgba(255,79,79,.45)}
 html[data-theme="terminal"] .priority-media{border-color:rgba(255,194,51,.45)}
@@ -238,8 +246,8 @@ html[data-theme="terminal"] .exp-search:focus{
   border-color:var(--accent);
   box-shadow:0 0 0 1px var(--accent),0 0 10px var(--accent-glow);
 }
-html[data-theme="terminal"] ::placeholder{color:#3b7a47}
-html[data-theme="terminal"] .exp-filter-input::placeholder{color:#3b7a47}
+html[data-theme="terminal"] ::placeholder{color:#4f9a5c}
+html[data-theme="terminal"] .exp-filter-input::placeholder{color:#4f9a5c}
 html[data-theme="terminal"] .exp-filter-op{
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path fill='%233dff6a' d='M5 7L1 3h8z'/></svg>");
 }
@@ -279,6 +287,15 @@ html[data-theme="terminal"] .modal-body .config-tabs .tab.active{
 }
 html[data-theme="terminal"] .tab .count{background:rgba(61,255,106,.12);color:var(--text);font-family:var(--font-mono);border-radius:0}
 html[data-theme="terminal"] .tab.active .count{background:var(--accent-ink);color:var(--accent)}
+/* El numero de alertas sigue la escala tambien aqui: sin esto las dos reglas de
+   arriba, mas especificas, lo dejaban en verde (revision de UX del 25-oct, 3.1).
+   Fondo casi negro tambien en la pestana activa, que es verde chillon. */
+html[data-theme="terminal"] .tab .count.count-aviso,
+html[data-theme="terminal"] .tab .count.count-critica,
+html[data-theme="terminal"] .tab .count.count-info{background:var(--accent-ink);box-shadow:inset 0 0 0 1px currentColor}
+html[data-theme="terminal"] .tab .count.count-aviso{color:var(--orange)}
+html[data-theme="terminal"] .tab .count.count-critica{color:var(--red)}
+html[data-theme="terminal"] .tab .count.count-info{color:var(--blue)}
 
 /* ----- Modal ----- */
 html[data-theme="terminal"] .modal-backdrop{background:rgba(0,6,2,.78)}

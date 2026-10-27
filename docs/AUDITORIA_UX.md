@@ -392,6 +392,57 @@ Cosas que no estaban en la auditoría y aparecieron al hacerla:
 - Lo abierto: la fila de un hallazgo agrupado de otros tipos sigue contando «1
   página» (la de anclaje).
 
+### Revisión del 25-oct · 3.1 Una escala de color (V39, V40, V43, V08, V17)
+
+- [x] **Rojo = error, naranja = aviso, azul = info, gris = neutro y verde solo
+  para «bien».** Enlaces y botón principal en un verde oscuro (`--accent`
+  #37731a: 5,79:1 sobre blanco y 5,12:1 sobre el fondo; el #5BAE23 de marca
+  daba 2,79:1 y queda en `--brand` para el logo y el filete). `--text-dim` pasa
+  de #6b7280 (4,28:1 sobre el fondo) a #5b6270 (5,42:1); el naranja de los
+  avisos, de #e67e22 (2,85:1) a #a84d06 (4,98:1); rojo, verde y azul más
+  oscuros. Los contrastes, en el comentario de `:root` y comprobados en
+  Chromium en los dos temas (claro y terminal) por
+  `tests/test_contraste_frontend.py`, componiendo los fondos con transparencia.
+  `--warning`, `--error` y `--muted`, que usaban estilos en línea con un color
+  fijo de reserva, pasan a ser alias de la escala.
+- [x] **Insignias y cifras:** el número de alertas abiertas en la pestaña
+  Alertas sale en naranja (rojo si hay alguna crítica) y no en el verde de la
+  pestaña activa; un rastreo cancelado o borrándose es gris
+  (`badge-neutral`) y no el naranja de los avisos; en curso azul, terminado
+  verde, fallido rojo, en cola gris. En el tema terminal, un enlace con color
+  de significado («saltaron 3 alertas») ya no lo pierde frente al verde de los
+  enlaces. El 4xx del Explorador y las notas usan la escala.
+- [x] **Gráficas de evolución (V40):** la línea es neutra y cada tramo va en
+  verde si mejora, en rojo si empeora (según el sentido de la métrica) y en
+  gris si no cambia; antes solo se juzgaba el último. El eje abarca al menos un
+  20 % del valor más alto, con el suelo en un número redondo (indexables 3.197 →
+  3.222 ya no va de suelo a techo) y la leyenda lo dice. La línea de tendencia
+  de la portada sigue la misma regla.
+- Ya estaban cerrados: «abierto» de un incidente en neutro con la gravedad en
+  su color (V08, 1.12); el último tramo en rojo si empeora (1.13); soft 404 «0
+  páginas» sin verde si hay plantillas que responden 200 (V17, 2.11); «3
+  alertas» en naranja en la portada, la tarjeta del censo y el Historial.
+- Lo abierto: en el tema terminal todo el texto es verde por diseño, así que
+  «bien» y los enlaces comparten color; lo que cambia de color son el rojo, el
+  naranja y el azul.
+- [x] **Tras la revisión independiente:** en el tema terminal el número de
+  alertas de la pestaña seguía en verde (dos reglas de `theme-terminal.css` más
+  específicas ganaban a las nuevas); ahora sale en naranja, rojo o azul sobre
+  fondo casi negro, también en la pestaña activa. Si todas las alertas abiertas
+  son informativas, el número va en azul y no en el naranja de aviso. En el tema
+  claro, sobre una pestaña inactiva el naranja daba 4,2:1 y el azul 4:1: el
+  número lleva ahora fondo de tarjeta opaco y filete de su color. El test de
+  contraste mide todas esas variantes en los dos temas. La leyenda de las
+  gráficas dice «no siempre empieza en 0» (a veces sí). El verde de marca se
+  usa por fin como `var(--brand)` en el logo, el filete y los iconos. En
+  Semántico, los colores fijos de Google (#34a853, #ea4335, #4285f4, #fbbc04,
+  entre 1,7 y 3,9:1) pasan a la escala: Core verde, Focus azul, Expansion
+  naranja, Peripheral rojo; «Reforzar» (una acción, no un «bien») en azul y
+  «Reenfocar» en naranja.
+- Sigue igual a propósito: el verde de los enlaces (#37731a) y el de «bien»
+  (#1e7045) quedan muy cerca (1,05:1 entre sí). La especificación pide enlaces
+  en un verde oscuro; el enlace se distingue por ser enlace, no por el tono.
+
 ### Cómo se probó
 
 Cada fase, con una API local montada sobre el worktree (`docker run … -v
