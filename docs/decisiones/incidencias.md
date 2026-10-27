@@ -1533,3 +1533,61 @@
    Tests: `tests/test_soft404_plantilla.py` (el caso Lopesan, lo que no se
    afirma, la raíz, una fila por host y que casa entre censos con otra URL de
    anclaje), ejecutando el análisis contra SQLite.
+
+<a id="d210"></a>
+210. **Lo que Search Console no cuenta se dice junto a sus cifras, y la parte de clics sin búsqueda se mide en el sitio**
+
+   **Problema.** #163 pedía decir en la interfaz lo que la API de Google no da.
+   El bloque «Google» del Resumen solo avisaba del tope de filas y de la
+   ventana incompleta. Se leían clics, impresiones y oportunidades por
+   búsqueda como si fueran todo, y no lo son:
+   - La API no separa AI Overviews ni AI Mode. AI Mode cuenta dentro de Web.
+   - Las búsquedas raras o sensibles van anonimizadas: la suma por búsqueda
+     nunca da el total.
+   - Hay dos fechas en las que Google cambió lo que cuenta: las impresiones
+     infladas del 13-05-2025 al 27-04-2026, sin corregir en el histórico, y
+     el fin de `num=100` en septiembre de 2025.
+
+   **Decisión.**
+   - **Medido, no supuesto.** El análisis guarda en
+     `gsc_resumen.oportunidades.sin_busqueda` la parte de los clics que llega
+     sin su búsqueda:
+     - Es la diferencia entre `gsc_paginas` (por página, con todas sus
+       búsquedas) y `gsc_consultas` (por página y búsqueda, sin las
+       anonimizadas).
+     - Se cuenta solo donde las dos series cubren lo mismo: por propiedad
+       activa, los días que su serie de búsquedas tiene descargados (de
+       `primer_dia` a `ultimo_dia`, dentro de la ventana) y sin los días en
+       que la serie de páginas se cortó en el tope de filas. La revisión del
+       PR encontró dos maneras de inflarla sin estas reglas, y las dos son
+       reales:
+       - La serie de búsquedas va por detrás de la de páginas (el relleno
+         inicial tarda horas): con tres días de retraso salía el 85 % en vez
+         del 40 %.
+       - Una propiedad sin serie de búsquedas sumaba sus páginas: salía el
+         94 %.
+     - Si algún día de búsquedas se cortó en el tope de 50.000 filas, la
+       diferencia mezcla las dos causas y el texto lo dice
+       (`con_dias_cortados`). Por debajo del 1 % se dice que las cifras
+       cuadran. Si la medida falla, `None`, y las oportunidades siguen
+       (decisión 40).
+     - Sin serie de búsquedas no se afirma ninguna parte (`None`), y la
+       interfaz da la cifra general del 40-50 % como «en muchos sitios», no
+       como la del cliente.
+   - **Dicho junto a las cifras**, en un desplegable del bloque «Google»
+     («Lo que Search Console no cuenta», `limitesGoogle`):
+     - **Siempre:** la IA sin separar y las anonimizadas.
+     - **Las dos fechas, solo si la ventana de los datos las cruza.** Un censo
+       de octubre de 2026 no las cruza: decírselo sería ruido.
+   - **Fuera:** el filtro de marca y no marca de la interfaz de Google, que
+     tampoco está en la API. La marca ya la cubre `job.config.marcas`
+     (decisión 157).
+
+   Tests:
+   - `tests/test_gsc_oportunidades.py`: la parte medida solo en los días de
+     las dos series, con la serie de búsquedas atrasada, con una propiedad sin
+     serie de búsquedas, con un día de páginas cortado y otro de búsquedas
+     cortado, sin serie de búsquedas y cuando la medida revienta.
+   - `tests/test_google_limpieza_frontend.py` (`limitesGoogle` en Chromium):
+     la cifra medida frente a la general, y cada fecha solo cuando la ventana
+     la cruza.

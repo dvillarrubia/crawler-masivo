@@ -189,6 +189,7 @@ def avisar(an) -> dict[str, Any] | None:
     resumen["sitemaps"] = _sitemaps(ctx)
     resumen["por_plantilla"], resumen["por_profundidad"] = _rendimiento(ctx)
     resumen["consultas_desde"] = ctx.consultas_desde
+    resumen["sin_busqueda"] = _sin_busqueda(ctx)
     an._flush_issues()
     job.gsc_resumen = {**job.gsc_resumen, "oportunidades": resumen}
     logger.info("Oportunidades de Search Console del job %s: %s", an.job_id,
@@ -266,6 +267,71 @@ class _Contexto:
         for clave, consulta, clics, imp, pos_x in filas:
             salida[clave][consulta] = [int(clics or 0), int(imp or 0), float(pos_x or 0)]
         return salida
+
+
+def _sin_busqueda(ctx: _Contexto) -> dict[str, Any] | None:
+    """Que parte de los clics llega sin su busqueda, medido en el sitio (#163).
+
+    Google da los clics de una pagina con TODAS sus busquedas, pero al pedirlos
+    por pagina y busqueda se calla las raras o sensibles (anonimizadas). La
+    diferencia entre las dos series es lo que ninguna cifra por busqueda puede
+    contar, y solo se puede afirmar donde las dos cubren lo mismo: por
+    propiedad, los dias que su serie de busquedas tiene descargados (va de
+    `primer_dia` a `ultimo_dia` sin huecos, y puede ir por detras de la de
+    paginas: el relleno inicial tarda horas), dentro de la ventana y sin los
+    dias en que la de paginas se corto en el tope de filas. Una propiedad sin
+    serie de busquedas no entra en ninguna de las dos sumas. Si un dia de
+    busquedas se corto, la diferencia mezcla las dos causas y se dice
+    (`con_dias_cortados`). Best-effort entero (decision 40): si algo falla,
+    `None`, y las oportunidades siguen.
+    """
+    from shared.models import GscConsulta as C
+    from shared.models import GscPagina as P
+
+    try:
+        dias: dict[str, set[str]] = {}
+        cortados = False
+        for e in ctx.estados:
+            if e.propiedad not in ctx.propiedades:
+                continue
+            st = (e.detalle or {}).get("consultas") or {}
+            primero, ultimo = st.get("primer_dia"), st.get("ultimo_dia")
+            if not primero or not ultimo:
+                continue
+            desde = max(ctx.desde, datetime.fromisoformat(primero).date())
+            hasta = min(ctx.hasta, datetime.fromisoformat(ultimo).date())
+            fuera = {str(d) for d in (e.dias_truncados or [])}
+            validos = {(desde + timedelta(days=n)).isoformat()
+                       for n in range((hasta - desde).days + 1)} - fuera
+            if not validos:
+                continue
+            dias[e.propiedad] = dias.get(e.propiedad, set()) | validos
+            cortados = cortados or any(str(d) in validos for d in (st.get("truncados") or []))
+        if not dias:
+            return None
+        todos = sorted(set().union(*dias.values()))
+
+        def _por_dia(modelo) -> int:
+            filas = ctx.an.session.execute(
+                select(modelo.propiedad, modelo.fecha, func.coalesce(func.sum(modelo.clics), 0))
+                .where(modelo.cliente_id == ctx.job.cliente_id, modelo.propiedad.in_(list(dias)),
+                       modelo.fecha >= todos[0], modelo.fecha <= todos[-1])
+                .group_by(modelo.propiedad, modelo.fecha)).all()
+            return sum(int(n or 0) for prop, fecha, n in filas
+                       if str(fecha)[:10] in dias.get(prop, ()))
+
+        with ctx.an.session.begin_nested():
+            paginas, busquedas = _por_dia(P), _por_dia(C)
+        if paginas <= 0:
+            return None
+        return {"desde": todos[0], "hasta": todos[-1], "dias": len(todos),
+                "propiedades": len(dias), "clics_paginas": paginas,
+                "clics_busquedas": min(busquedas, paginas),
+                "parte": round(max(0, paginas - busquedas) / paginas, 4),
+                "con_dias_cortados": cortados}
+    except Exception:  # noqa: BLE001
+        logger.exception("Clics sin busqueda del job %s: no se miden", ctx.an.job_id)
+        return None
 
 
 def _oportunidades(ctx: _Contexto, consultas: dict) -> int:

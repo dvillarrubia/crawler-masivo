@@ -235,3 +235,33 @@ def test_ficha_por_url_aunque_la_contengan_miles():
     assert no_esta["abierta"] is None and no_esta["pedidas"] == 3
     assert no_esta["avisos"] == ["Esa URL no está en este censo"]
     assert _buscar_ficha(True, 0, None)["avisos"] == ["Esa URL no está en este censo"]
+
+
+def test_lo_que_search_console_no_cuenta():
+    """#163: la IA y las anonimizadas siempre; con la parte medida si la hay."""
+    b = _bloque({"gsc_resumen": GSC})
+    assert len(b["limites"]) == 2
+    assert "AI Overviews" in b["limites"][0] and "AI Mode" in b["limites"][0]
+    assert "entre el 40 y el 50 %" in b["limites"][1], "sin medida, la cifra general"
+
+    medido = {**GSC, "oportunidades": {"sin_busqueda": {
+        "desde": "2026-09-01", "hasta": "2026-10-23", "clics_paginas": 1000, "clics_busquedas": 580,
+        "parte": 0.42, "con_dias_cortados": True}}}
+    b = _bloque({"gsc_resumen": medido})
+    assert b["limites"][1].startswith("El 42 % de los clics del 1 sept 2026 al 23 oct 2026 llega sin su búsqueda")
+    assert "mezcla dos cosas" in b["limites"][1] and "50.000 filas" in b["limites"][1]
+    casi = {**GSC, "oportunidades": {"sin_busqueda": {**medido["oportunidades"]["sin_busqueda"],
+                                                      "parte": 0.004, "con_dias_cortados": False}}}
+    assert _bloque({"gsc_resumen": casi})["limites"][1].startswith("Casi todos los clics")
+
+
+def test_las_fechas_en_que_google_cambio_lo_que_cuenta_solo_si_la_ventana_las_cruza():
+    assert len(_bloque({"gsc_resumen": GSC})["limites"]) == 2, "octubre de 2026: ninguna"
+    viejo = {**GSC, "desde": "2025-08-01", "hasta": "2025-10-29", "datos_desde": "2025-08-01",
+             "datos_hasta": "2025-10-27"}
+    limites = _bloque({"gsc_resumen": viejo})["limites"]
+    assert any("infladas" in x for x in limites) and any("num=100" in x for x in limites)
+    final = {**GSC, "desde": "2026-04-01", "hasta": "2026-06-29", "datos_desde": "2026-04-01",
+             "datos_hasta": "2026-06-27"}
+    limites = _bloque({"gsc_resumen": final})["limites"]
+    assert any("infladas" in x for x in limites) and not any("num=100" in x for x in limites)

@@ -635,6 +635,9 @@
                           <i data-lucide="more-horizontal" class="ico-16"></i>
                         </button>
                         <div class="menu" x-show="menuAbierto === 'prog-' + p.id" role="menu">
+                          <button role="menuitem" @click="menuAbierto = ''; lanzarProgramacionAhora(p)" data-testid="prog-lanzar">
+                            <i data-lucide="play" class="ico-14"></i>
+                            <span>Lanzar ahora<span class="menu-sub">El mismo rastreo que a su hora, sin esperar. La próxima no cambia</span></span></button>
                           <button role="menuitem" class="danger" @click="menuAbierto = ''; borrarProgramacion(p)" data-testid="prog-eliminar">
                             <i data-lucide="trash-2" class="ico-14"></i>
                             <span>Eliminar la programación<span class="menu-sub">Deja de lanzarse sola. Los rastreos que ya lanzó no se borran</span></span></button>
@@ -3110,6 +3113,11 @@
               </details>
             </template>
             <div x-show="detailTab === 'overview' && bg.inspeccion" class="google-frase" x-text="bg.inspeccion"></div>
+            <!-- Lo que Search Console no cuenta (#163), junto a sus cifras. -->
+            <details x-show="detailTab === 'overview' && bg.limites.length" class="google-paginas" data-testid="google-limites">
+              <summary class="text-dim">Lo que Search Console no cuenta</summary>
+              <ul><template x-for="(x, n) in bg.limites" :key="'l' + n"><li class="text-dim" x-text="x"></li></template></ul>
+            </details>
           <template x-if="detailTab === 'overview' && job.gsc_resumen">
           <div class="google-detalle">
             <div>

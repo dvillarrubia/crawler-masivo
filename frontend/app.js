@@ -421,6 +421,9 @@ const fmt = {
     if (m === 'su perfil ya no existe') return 'no se lanzó: su perfil ya no existe';
     if (m === 'el perfil esta desactivado') return 'no se lanzó: el perfil está desactivado';
     if (m === 'el perfil no tiene semillas') return 'no se lanzó: el perfil no tiene semillas';
+    // decision 209
+    if (m === 'lanzada a mano') return 'lanzada a mano con «Lanzar ahora»';
+    if (m.startsWith('no se pudo encolar')) return 'no se lanzó: la cola de rastreos no respondía';
     return m;
   },
   // Una expresion cron en castellano. Solo los patrones que se usan de
@@ -3975,6 +3978,23 @@ function app() {
         else await this.cargarProgramaciones();
       } catch (e) {
         this.error = 'No se pudo cambiar: ' + e.message;
+      }
+    },
+
+    // «Lanzar ahora» (decision 209): el mismo rastreo que lanzaria a su hora,
+    // sin esperar. Si hay uno vivo, el servidor dice por que no (409).
+    async lanzarProgramacionAhora(p) {
+      if (!await this.preguntar({ titulo: `Lanzar ahora «${p.nombre}»`,
+        mensaje: 'Lanza ya el rastreo que haría a su hora. La próxima ejecución no cambia.', aceptar: 'Lanzar' })) return;
+      try {
+        const r = await api('/programaciones/' + p.id + '/ejecutar', { method: 'POST' });
+        this.showToast('Lanzado: ' + r.nombre);
+        if (this.view === 'client') await this.cargarProgramacionesCliente();
+        else await this.cargarProgramaciones();
+      } catch (e) {
+        // El 409 dice por que con el texto de `ultimo_motivo`, que esta en
+        // pasado («seguía»): aqui el rastreo sigue vivo AHORA.
+        this.error = 'No se pudo lanzar: ' + fmt.motivo(e.message).replace(/^no se lanzó: /, '').replace('seguía sin terminar', 'sigue sin terminar').replace('ya tenía otro', 'ya tiene otro');
       }
     },
 
@@ -7749,7 +7769,39 @@ function camposDeEstado(estado) {
 
 // Lo que lee la plantilla mientras el x-if que la envuelve aun no ha
 // reaccionado a un job que pasa a null.
-const BLOQUE_GOOGLE_VACIO = Object.freeze({ cifras: [], conclusiones: [], inspeccion: null, textos: [], paginas: [], cortadas: false, trafico: null });
+const BLOQUE_GOOGLE_VACIO = Object.freeze({ cifras: [], conclusiones: [], inspeccion: null, textos: [], paginas: [], cortadas: false, trafico: null, limites: [] });
+
+// Lo que Search Console no cuenta, dicho junto a sus cifras (#163,
+// `docs/INVESTIGACION_SEARCH_CONSOLE.md`). Dos avisos siempre (la API no
+// separa la IA y calla las busquedas raras, con la parte MEDIDA en el sitio
+// cuando hay serie de busquedas) y dos solo si la ventana cruza las fechas
+// en que Google cambio lo que cuenta: impresiones infladas del 13-05-2025 al
+// 27-04-2026 y el fin de `num=100` en septiembre de 2025.
+function textoSinBusqueda(sb) {
+  if (!sb || !sb.clics_paginas) return 'Google anonimiza las búsquedas raras o sensibles (en muchos sitios, entre el 40 y el 50 % de los clics): las cifras por búsqueda nunca suman el total.';
+  const dias = 'del ' + fmt.dia(sb.desde) + ' al ' + fmt.dia(sb.hasta);
+  if (sb.parte < 0.01) return 'Casi todos los clics ' + dias + ' llegan con su búsqueda: aquí las cifras por búsqueda cuadran con el total.';
+  return 'El ' + fmt.pct(100 * sb.parte, 0) + ' de los clics ' + dias + ' llega sin su búsqueda'
+    + (sb.con_dias_cortados
+      ? '. La cifra mezcla dos cosas: las búsquedas que Google anonimiza (las raras o sensibles) y los días en que la descarga de búsquedas se cortó en su tope de 50.000 filas.'
+      : ': Google anonimiza las búsquedas raras o sensibles.')
+    + ' Por eso las cifras por búsqueda (canibalización, CTR por búsqueda) no suman el total.';
+}
+const GSC_INFLADAS = ['2025-05-13', '2026-04-27'];
+const GSC_NUM100 = ['2025-09-01', '2025-09-30'];
+function limitesGoogle(g) {
+  if (!g) return [];
+  const desde = g.datos_desde || g.desde, hasta = g.datos_hasta || g.hasta;
+  const cruza = ([a, b]) => !!(desde && hasta && desde <= b && hasta >= a);
+  const sb = g.oportunidades && g.oportunidades.sin_busqueda;
+  const salida = [
+    'La API de Search Console no separa los clics que vienen de AI Overviews ni de AI Mode (AI Mode cuenta dentro de Web): estas cifras no dicen qué parte llega desde las respuestas de IA.',
+    textoSinBusqueda(sb),
+  ];
+  if (cruza(GSC_INFLADAS)) salida.push('Las impresiones del 13 de mayo de 2025 al 27 de abril de 2026 están infladas por un error de Google que no corrigió el histórico: no compares impresiones ni CTR a través de esas fechas.');
+  if (cruza(GSC_NUM100)) salida.push('En septiembre de 2025 Google dejó de servir 100 resultados por página (num=100): cayeron las impresiones de escritorio y subió la posición media sin que el sitio cambiara.');
+  return salida;
+}
 
 // Todo el bloque. null si el job no trae ni Search Console ni trafico entre
 // censos (sin GSC conectado no se pinta nada).
@@ -7775,7 +7827,7 @@ function bloqueGoogle(job) {
     : null;
   // La primera frase del servidor son los totales, que ya dice la conclusion.
   const textos = t && t.comparable ? (t.textos || []).slice(1) : [];
-  return { cifras, conclusiones: conclusionTrafico(t), inspeccion, textos, ...paginasTrafico(t), trafico: t || null };
+  return { cifras, conclusiones: conclusionTrafico(t), inspeccion, textos, ...paginasTrafico(t), trafico: t || null, limites: limitesGoogle(g) };
 }
 
 // `jobs.sitemaps` (decision 126), solo en la ficha del job.
