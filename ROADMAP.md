@@ -1172,6 +1172,42 @@ hace con ella. Auditoría y criterio en `docs/AUDITORIA_UX.md`.
   frase, slug plegado, IA sin claves internas y con salida a Problemas, ayuda
   para semillas y canario, tildes y números en castellano (`fmt.dec`,
   `fmt.pct`, `fmt.pctDe`, `fmt.n`).
+- **Escala de letra y estilos en línea a clases** (revisión de UX del 25-oct,
+  3.8, decisión 201; en local, sin desplegar): cuatro tamaños de texto (12, 14,
+  16 y 20 px, más la cifra de las tarjetas y el icono como excepción) en
+  variables `--fs-*`, ninguno por debajo de 12 px en ninguna vista, tema ni
+  ancho (eran 39 tamaños y bajaban a 9 px; `code` salía a 11,4 px). Los 922
+  estilos en línea fijos de `index.html` bajan a 108: lo repetido pasa a clases
+  con el mismo contenido, comprobado elemento a elemento contra producción.
+  Un solo ayudante de porcentaje (`fmt.pct`). Tras la revisión, `.mono`
+  vuelve a ganar en los campos de texto (cron, GSC, Slack), las etiquetas de
+  «Qué arreglar primero» caben en dos líneas y los `h5`/`h6` del markdown
+  suben a 12 px. Solo frontend.
+- **Revisión final de la fase 3** (decisión 205; en local, sin desplegar):
+  «No incluida en el sitemap» sale de «N incidencias nuevas y M resueltas»
+  del Estado, del informe, de Slack y de Problemas, dicho, si cualquiera de
+  los dos censos leyó sus sitemaps a medias (antes solo Problemas y solo el
+  censo actual). Además: la portada ya no pasa a páginas en la fila del
+  último cliente abierto bajo «errores (incidencias)», la flecha del
+  Historial compara en la misma unidad, «Revisado con IA» de la ficha vuelve
+  a ir en líneas y el enlace de Google del Estado abre la ficha aunque el
+  censo ya estuviera cargado.
+- **Cierre de la fase 3 tras la auditoría del 27-oct** (decisiones 202, 203
+  y 204; en local, sin desplegar): las cifras de errores son páginas en la
+  portada, el Historial y su gráfica (la tarjeta decía 72 y la tabla 85);
+  Problemas, una fila por tipo con «39 aviso · 157 info» y las páginas del
+  tipo solo si se saben; el contador de Problemas son tipos de error o aviso;
+  «Indexables» de URLs cuenta lo mismo que la tarjeta; «Qué arreglar primero»
+  va primero, en cinco filas y sin barra que mida otra cosa. «No incluida en
+  el sitemap» sale como no concluyente en Problemas, la ficha y el panel, y
+  fuera de la diferencia con el censo anterior, mientras no se lean todos los
+  sitemaps. Tipo obligatorio al lanzar (prueba sin perfil) y «topado en N
+  URLs» en la portada. Alertas agrupadas por regla con «Ver las N páginas» y
+  las info en «Cambios a favor». Panel de URLs con «200 de 4.720» enlaces, los
+  problemas agrupados y en castellano; frases de Google con sus páginas;
+  Semántico que dice que no usa el Search Console del cliente y no deja
+  analizar sin clave; textos y números (V42); una API anterior ya no enseña
+  «Method Not Allowed» ni «undefined».
 
 ### 3c. Search Console cruzado con el rastreo y con Jev (17 de octubre)
 

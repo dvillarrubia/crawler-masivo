@@ -1980,6 +1980,10 @@ class _ResumenIssue(BaseModel):
     # primero.
     importancia: float | None = None
     prioridad: float | None = None
+    # Paginas distintas con este tipo en CUALQUIER gravedad (decision 202):
+    # la interfaz pinta una fila por tipo («39 aviso · 157 info») y sumar las
+    # paginas de cada gravedad contaria dos veces la que tenga las dos.
+    paginas_tipo: int | None = None
 
 
 @router.get("/issues/resumen", response_model=list[_ResumenIssue])
@@ -2054,6 +2058,13 @@ def resumen_issues(
         ))
     if segs or por_segmento:
         _anadir_segmentos(db, job_id, resultado, segs, por_segmento, segmentos_max)
+    # Una consulta agrupada por tipo (decision 202), con el mismo filtro.
+    por_tipo = dict(
+        db.query(Issue.issue_type, func.count(func.distinct(Issue.url_id)))
+        .filter(Issue.job_id == job_id, *filtro_seg)
+        .group_by(Issue.issue_type).all())
+    for r in resultado:
+        r.paginas_tipo = int(por_tipo.get(r.issue_type, 0))
     _anadir_prioridad(db, job_id, resultado, filtro_seg)
     if orden == "prioridad":
         resultado.sort(key=lambda r: (-(r.prioridad or 0), _ORDEN_GRAVEDAD.get(r.severity, 3),
@@ -3803,7 +3814,7 @@ def _calc_structured_data(job_id: uuid.UUID, db: Session) -> CategoryInsight:
         ))
 
     return CategoryInsight(
-        key="structured_data", name="Datos Estructurados", icon="📊",
+        key="structured_data", name="Datos estructurados", icon="📊",
         score=_clamp_score(score),
         metrics={
             "total_html": total_html, "pages_with_sd": pages_with_sd,
@@ -3830,7 +3841,7 @@ def _calc_i18n(job_id: uuid.UUID, db: Session) -> CategoryInsight:
         ).first() is not None
         if not hay_avisos:
             return CategoryInsight(
-                key="i18n", name="Internacionalizacion", icon="🌐", score=100,
+                key="i18n", name="Internacionalización", icon="🌐", score=100,
                 metrics={"total_hreflang": 0, "languages": [], "pct_return_ok": 0, "pct_lang_valid": 0},
                 recommendations=[],
             )
@@ -3954,7 +3965,7 @@ def _calc_i18n(job_id: uuid.UUID, db: Session) -> CategoryInsight:
         ))
 
     return CategoryInsight(
-        key="i18n", name="Internacionalizacion", icon="🌐",
+        key="i18n", name="Internacionalización", icon="🌐",
         score=_clamp_score(score),
         metrics={
             "total_hreflang": total_hreflang, "languages": languages,

@@ -137,7 +137,7 @@ Sin fecha; se va haciendo cuando se toca cada zona.
 
 - [x] UX-21 Pestañas y botones como `button` con `role="tab"`; ayudas también con foco/clic. (#129)
 - [x] UX-21 Diálogos propios en lugar de `confirm`/`alert`/`prompt`. (#129)
-- [ ] UX-21 Estilos en línea a clases (al tocar cada bloque, no en un PR gigante).
+- [x] UX-21 Estilos en línea a clases: de 922 `style=""` fijos a 108 (revisión del 25-oct, 3.8; decisión 201).
 - [x] UX-20 Tildes y términos en castellano en toda la interfaz. (#129)
 - [x] UX-18 Semántico: explicar qué da antes de pedir clave; parámetros en «Avanzado». (#129)
 - [x] UX-22 Mínimo usable en móvil: barra superior sin desbordar. (#129)
@@ -562,6 +562,134 @@ Cosas que no estaban en la auditoría y aparecieron al hacerla:
   perfil; V42: «Sí» en la ficha de URL y del censo, tildes en Semántico y en
   Reanudar; los desplegables «Sobre» y «Si» de las reglas propias ya no se
   cortan a 1440; el error de las reglas sin claves internas.
+
+### Revisión del 25-oct · 3.8 Escala de letra y estilos en línea (V43, UX-21)
+
+- [x] **Cuatro tamaños de letra, ninguno por debajo de 12 px** (decisión 201):
+  `--fs-sm` 12, `--fs-base` 14, `--fs-md` 16 y `--fs-lg` 20 px en `:root`, y
+  como excepción declarada `--fs-cifra` 24 px (la cifra grande de una tarjeta)
+  y `--fs-icono` 32 px. Había 39 tamaños distintos (de `.6rem` a `2.5rem`; con
+  `html` a 14px, `.8rem` eran 11,2 px y las insignias 9 px). Todo `font-size`
+  de `style.css`, `theme-terminal.css`, `index.html` y `entrar.html` usa una
+  variable.
+- [x] Lo que seguía por debajo sin un `font-size` pequeño: `code` y `pre` a
+  11,4 px (Chromium encoge la familia `monospace` sola), los ejes de la
+  evolución a 7-10 px pintados (el SVG se encogía en columnas de 260 px; ahora
+  320 como poco) y la etiqueta del anillo de Puntuación (11 unidades en un SVG
+  de 110 px).
+- [x] **Estilos en línea a clases**: de 922 atributos `style="..."` fijos a
+  108 (los `:style` con datos y los de una sola vez se quedan). Utilidades
+  nombradas por su valor (`mt-35`, `px-75`, `ico-14`, `fs-sm`, `c-red`) y
+  componentes cuando se repetía la combinación entera (`btn-rojo`,
+  `campo-simple`, `caja-codigo`, `fila-extremos`).
+- [x] El aspecto no cambia salvo por la escala: comparado el estilo calculado
+  de cada elemento antes y después en las 21 rutas sobre producción (solo
+  cambia lo que sale del tamaño de letra; y `justify-end` en Configuración,
+  que se usaba sin existir, ahora alinea a la derecha). Capturas a 1440 y 390
+  px en los dos temas; ninguna ruta desborda a 390. La barra lateral del
+  Explorador pasa de 170 a 190 px: «Tráfico de Google» partía en dos líneas.
+- [x] Un solo ayudante de porcentaje (`fmt.pct`; fuera `pctEs`).
+- [x] Tras la revisión: `.mono` no llevaba `!important` y perdía contra
+  `input[type="text"]`, así que la cron, la propiedad de GSC, el canal de
+  Slack y la credencial salían en letra normal; ahora lo lleva, y el test
+  comprueba en Chromium que cada utilidad gana donde se usa, también en los
+  modales ocultos. Las etiquetas de «Qué arreglar primero» pasan a 150 px y
+  hasta dos líneas («Error datos estructurados» salía cortado), y los `h5` y
+  `h6` del markdown, a 12 px (heredaban 10 y 8 px del navegador).
+- Lo abierto: los 108 estilos en línea que quedan son de una sola vez; la
+  clase `.text-sm` de antes (sin `!important`) convive con `.fs-sm` (con él,
+  porque sustituye a un estilo en línea). Las `.caja-codigo` usaban
+  `var(--surface)`, que no existe: eran transparentes y lo siguen siendo.
+
+### Revisión del 27-oct · Lo que la auditoría independiente dejó abierto (decisiones 202, 203 y 204)
+
+Cada punto se comprobó antes contra producción con el frontend de esta rama
+(solo lectura). Lo que exigía cambiar el análisis no se tocó: va en «Lo
+abierto».
+
+- [x] **V10 · Errores = páginas en todas partes** (decisión 202): portada,
+  tabla y gráfica del Historial y tendencia cuentan páginas con error, la cifra
+  de la tarjeta y del Estado (72, no 85). Con la API de hoy la ficha del
+  cliente las saca de la evolución, y la portada dice «errores (incidencias)»
+  hasta que se despliegue. Tras la revisión final: la portada lee solo el
+  campo de su fila (antes, la del último cliente abierto pasaba a 72 páginas
+  bajo «errores (incidencias)») y la flecha del Historial compara en la misma
+  unidad que la fila («85 incid. ▲13» restaba páginas a incidencias).
+- [x] **V16 · Contador de Problemas**: tipos de error o aviso (34), no las
+  11.681 incidencias con las info.
+- [x] **V14 / 1.7 · Una fila por tipo** con «39 aviso · 157 info», en
+  Problemas, el desplegable de URLs y «Qué arreglar primero». Las páginas del
+  tipo, solo con `paginas_tipo` de la API nueva: sumar las de cada gravedad no
+  se afirma.
+- [x] **3.4 · «Indexables 3.407» frente a «3.216»**: las entradas pasan a
+  «Páginas indexables» y «Páginas no indexables», sobre las páginas HTML
+  internas con 2xx de la tarjeta (3.216 y 515), y la tarjeta abre la suya.
+- [x] **«Qué arreglar primero»**: primero en el Resumen, luego lo que ha
+  cambiado y Google (el orden de la propuesta), cinco filas como el Estado y
+  en lista: la barra medía la prioridad con las páginas al lado.
+- [x] **V13 · Sitemaps dudosos**: «no concluyente» en la fila de Problemas, su
+  frase al desplegarla, la ficha («No está en los sitemaps leídos…») y el
+  panel; fuera de «+N nuevas · −N resueltas» y de su etiqueta, dicho debajo.
+  Tras la revisión final (decisión 205), también fuera de «N incidencias
+  nuevas y M resueltas» del Estado, del informe y de Slack, y mirando los dos
+  censos: si el parcial fue el de referencia, sus «resueltas» tampoco valen.
+- [x] **V26 · Panel de URLs**: «Enlaces que recibe 200 de 4.720» (o «200+»),
+  «Ver quién la enlaza» con el tope, problemas agrupados por tipo con el
+  detalle legible, «1 clic desde la home».
+- [x] **V08 / 1.12 · Alertas** (decisión 204): agrupadas por regla («Vista en
+  los censos del 19 oct y del 21 oct»), «Ver las N páginas», las info en
+  «Cambios a favor»; las acciones valen para todo el grupo.
+- [x] **V12 / UX-07 / 1.6 · Tipo al lanzar** (decisión 203): siempre uno
+  marcado en el modal, prueba sin perfil y censo con él; «topado en N URLs» en
+  la portada (con la API nueva).
+- [x] **V31 / 1.15 · Semántico**: dice que el Search Console del cliente aún no
+  lo usa este análisis y enlaza a su configuración (fuera «Sin GSC» y «Subir
+  cuenta», que llamaba a una ruta cerrada); «Analizar» desactivado sin clave,
+  con el motivo al lado.
+- [x] **V42 / UX-20/14**: «Internacionalización» y «Datos estructurados» (API y
+  por clave en la interfaz, sin emojis), «Máximo de URLs», «auditoría»,
+  «tenían», «Qué ha cambiado», miles en la tabla de Comparar, decimales con
+  coma en Semántico, «Semana hasta el 26 oct 2026», «El título frente al
+  contenido» en el modal de IA. Puntuación: «70 páginas tienen algún error: el
+  1,3 % de las 5.578 URLs internas (contando imágenes, PDF y redirecciones)».
+- [x] **3.3 · Viñetas de Google con sus páginas**: cada frase enlaza a las
+  fichas de su grupo cuando se sabe cuál es (un solo grupo con ese cambio y
+  ese número de páginas); si dos encajan, sin enlaces.
+- [x] **Otros de la auditoría**: TLS «en naranja a 30 días o menos; aviso en
+  Problemas a 7 días»; reglas de alertas que dicen que las dos «por cifras»
+  son de serie; programaciones de otro cliente filtradas también en la
+  interfaz (la API de hoy ignora `?cliente_id=`); «undefined a la vez por
+  dominio», «Unexpected token '<'» y «Method Not Allowed» pasan a «Este servidor
+  todavía no tiene esta función» y el resumen de la configuración solo dice lo
+  que sabe; la tarjeta «Indexables» de un censo sin analizar dice «—» y «sin
+  analizar todavía».
+- [x] **V43 / UX-21 / 3.8**: hechos en esta rama (decisión 201): quedan 107
+  `style=""` fijos de una sola vez (más 42 `:style` con datos), no 964.
+  Tras la revisión final: `.bloque` (sin `!important`, como todas las de
+  `display`) perdía frente a `.veredicto-lista li{display:flex}` y «Revisado
+  con IA» de la ficha salía en tres columnas; `.veredicto-lista li.bloque`.
+- [x] **3.3 · Enlace de Google del Estado con el censo ya cargado**: abre la
+  ficha directamente (el enrutador no recargaba el censo y se quedaba en el
+  Resumen, con la petición colgada para más tarde).
+- [x] `test_programaciones_perfil.py::test_el_worker_resuelve_la_config_igual_que_la_api`
+  fallaba en la imagen local de la API porque es del 13-oct y no trae parsel
+  (en `api/requirements.txt` desde el 16-oct): ahora se salta diciendo que hay
+  que reconstruirla.
+- Lo abierto:
+  - Semántico con el Search Console del cliente: el análisis lee
+    `gsc_job_data` (cuentas de antes) y no los datos por cliente
+    (decisión 141). Preseleccionar la cuenta exige cambiar el análisis.
+  - Puntuación: el tope cuenta páginas con error sobre todas las URLs
+    internas (decisión 92). Cambiar el denominador cambia la nota: se dice
+    como es.
+  - Datos de producción (no código): marcar como prueba el rastreo de
+    `lopesan-remedicion`, dar dominios a Lopesan y lanzar o quitar su perfil
+    «lista».
+  - Comparar sigue llamándose «Comparar» (la propuesta decía «Cambios»; no
+    es un hallazgo).
+  - «Externas» sin cifra y «topado» con la API de hoy: llegan al desplegar.
+  - `tests/test_movil_frontend.py` sigue bajando Alpine del CDN: no hay copia
+    en el repo.
 
 ### Cómo se probó
 

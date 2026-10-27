@@ -411,6 +411,9 @@ def series(filas: Iterable[tuple[dict[str, Any], dict[str, Any] | None]],
             "puntos": puntos,
             "comparables": sum(1 for p in puntos if p["comparable"]),
             "tendencia_errores": tendencia(puntos, "errores"),
+            # Paginas con error (decision 202): la que pinta la portada, la
+            # misma cuenta que la tarjeta del censo.
+            "tendencia_paginas_error": tendencia(puntos, "urls_con_error"),
         })
     salida.sort(key=lambda s: _mas_reciente(s["puntos"]), reverse=True)
     return salida
@@ -544,9 +547,13 @@ def tendencias_de_clientes(db, cliente_ids) -> dict[Any, dict[str, Any]]:
             continue
         serie = max(candidatas, key=lambda s: _mas_reciente(s["puntos"], solo_comparables=True))
         ultimo = [p for p in serie["puntos"] if p["comparable"]][-1]
+        # Paginas con error y no incidencias (decision 202): la portada pone
+        # la tendencia al lado de la columna de paginas con error.
+        t = serie["tendencia_paginas_error"]
         salida[cid] = {"serie": serie["nombre"], "clave": serie["clave"],
                        "ultimo_job": ultimo["job_id"], "ultima_fecha": ultimo["fecha"],
-                       "tendencia": serie["tendencia_errores"],
-                       "valores": [p["errores"] for p in serie["puntos"] if p["comparable"]][-8:],
-                       "cortes": (serie["tendencia_errores"] or {}).get("cortes", [])}
+                       "metrica": "urls_con_error",
+                       "tendencia": t,
+                       "valores": [p.get("urls_con_error") for p in serie["puntos"] if p["comparable"]][-8:],
+                       "cortes": (t or {}).get("cortes", [])}
     return salida

@@ -96,8 +96,8 @@ html[data-theme="terminal"] .exp-sidebar-header{
 html[data-theme="terminal"] h1,
 html[data-theme="terminal"] h2,
 html[data-theme="terminal"] h3{font-weight:400;text-transform:uppercase}
-html[data-theme="terminal"] .card-header h2{font-size:1.25rem}
-html[data-theme="terminal"] .modal-header h3{font-size:1.3rem}
+html[data-theme="terminal"] .card-header h2{font-size:var(--fs-md)}
+html[data-theme="terminal"] .modal-header h3{font-size:var(--fs-lg)}
 
 /* ----- Barra superior ----- */
 html[data-theme="terminal"] .topbar{
@@ -107,7 +107,7 @@ html[data-theme="terminal"] .topbar{
   box-shadow:0 1px 0 rgba(61,255,106,.15),0 4px 18px rgba(0,0,0,.6);
 }
 html[data-theme="terminal"] .topbar h1,
-html[data-theme="terminal"] .topbar-brand{font-size:1.6rem}
+html[data-theme="terminal"] .topbar-brand{font-size:var(--fs-cifra)}
 html[data-theme="terminal"] .topbar h1 span,
 html[data-theme="terminal"] .topbar-brand span,
 html[data-theme="terminal"] .topbar-icon{
@@ -125,7 +125,7 @@ html[data-theme="terminal"] .topbar-brand span::after{
 
 /* ----- Botones: cajas con borde, rellenas al pasar ----- */
 html[data-theme="terminal"] .btn{
-  font-size:1.05rem;
+  font-size:var(--fs-base);
   line-height:1.1;
   text-transform:uppercase;
   border:1px solid var(--border-hi);
@@ -155,7 +155,7 @@ html[data-theme="terminal"] .btn-primary:hover{
 }
 html[data-theme="terminal"] .btn-danger{background:transparent;border-color:var(--red);color:var(--red)}
 html[data-theme="terminal"] .btn-danger:hover{background:var(--red);color:#000;box-shadow:0 0 8px rgba(255,79,79,.4)}
-html[data-theme="terminal"] .btn-sm{font-size:.98rem;padding:.28rem .6rem}
+html[data-theme="terminal"] .btn-sm{font-size:var(--fs-base);padding:.28rem .6rem}
 html[data-theme="terminal"] .btn-icon{border-radius:0}
 
 /* ----- Tarjetas y paneles ----- */
@@ -174,10 +174,10 @@ html[data-theme="terminal"] .insight-card:hover,
 html[data-theme="terminal"] .metric-item:hover,
 html[data-theme="terminal"] .seo-value-box:hover{border-color:var(--accent)}
 html[data-theme="terminal"] .card-header{padding-bottom:.4rem;border-bottom:1px solid var(--border)}
-html[data-theme="terminal"] .stat-value{font-size:2rem;font-weight:400;text-shadow:0 0 8px currentColor}
+html[data-theme="terminal"] .stat-value{font-size:var(--fs-cifra);font-weight:400;text-shadow:0 0 8px currentColor}
 html[data-theme="terminal"] .stat-label,
 html[data-theme="terminal"] .metric-label{color:var(--text-dim)}
-html[data-theme="terminal"] .metric-value{font-size:1.35rem;font-weight:400}
+html[data-theme="terminal"] .metric-value{font-size:var(--fs-lg);font-weight:400}
 html[data-theme="terminal"] .metric-item{background:var(--bg-input);border-color:var(--border)}
 
 /* ----- Tablas ----- */
@@ -266,7 +266,7 @@ html[data-theme="terminal"] .modal-body .config-tabs{
 }
 html[data-theme="terminal"] .tab,
 html[data-theme="terminal"] .exp-detail-tab{
-  font-size:1.05rem;
+  font-size:var(--fs-base);
   text-transform:uppercase;
   color:var(--text);
   border:1px solid var(--border);
@@ -349,7 +349,7 @@ html[data-theme="terminal"] .exp-detail-row,
 html[data-theme="terminal"] .exp-detail-body .exp-link-item{border-bottom-color:rgba(28,90,44,.5)}
 html[data-theme="terminal"] .exp-detail-row:hover,
 html[data-theme="terminal"] .exp-detail-body .exp-link-item:hover{background:var(--bg-hover)}
-html[data-theme="terminal"] .seo-section-title{font-size:1.2rem;font-weight:400;text-transform:uppercase}
+html[data-theme="terminal"] .seo-section-title{font-size:var(--fs-md);font-weight:400;text-transform:uppercase}
 html[data-theme="terminal"] .heading-tag{color:var(--accent)}
 html[data-theme="terminal"] .content-preview,
 html[data-theme="terminal"] .seo-value-box,
@@ -365,8 +365,8 @@ html[data-theme="terminal"] .exp-sidebar,
 html[data-theme="terminal"] .exp-toolbar,
 html[data-theme="terminal"] .exp-statusbar,
 html[data-theme="terminal"] .exp-detail-header{background:var(--bg-head);border-color:var(--border-hi)}
-html[data-theme="terminal"] .exp-sidebar-header{font-size:1.1rem;font-weight:400;color:var(--accent)}
-html[data-theme="terminal"] .exp-tab{font-size:1.02rem;text-transform:uppercase}
+html[data-theme="terminal"] .exp-sidebar-header{font-size:var(--fs-md);font-weight:400;color:var(--accent)}
+html[data-theme="terminal"] .exp-tab{font-size:var(--fs-base);text-transform:uppercase}
 html[data-theme="terminal"] .exp-tab:hover{background:var(--bg-hover);color:var(--accent)}
 html[data-theme="terminal"] .exp-tab.active{
   background:var(--accent);
@@ -418,7 +418,7 @@ html[data-theme="terminal"] .exp-detail-url{font-family:var(--font-mono);color:v
 html[data-theme="terminal"] :focus-visible{outline:1px solid var(--accent);outline-offset:2px;border-radius:0}
 
 /* ----- M6: navegacion, menus y miga de pan ----- */
-html[data-theme="terminal"] .topnav a{text-transform:uppercase;font-size:1.05rem}
+html[data-theme="terminal"] .topnav a{text-transform:uppercase;font-size:var(--fs-base)}
 html[data-theme="terminal"] .topnav a.active{background:transparent;color:var(--accent);text-shadow:var(--glow)}
 html[data-theme="terminal"] .menu{background:var(--bg-card);border-color:var(--border-hi)}
 html[data-theme="terminal"] .breadcrumbs{background:transparent}

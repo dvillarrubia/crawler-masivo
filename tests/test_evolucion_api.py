@@ -213,3 +213,48 @@ def test_un_censo_importado_es_un_punto_comparable_de_su_serie(entorno, monkeypa
               for p in serie["puntos"]}
     assert puntos[nuevos["s2"]]["motivo"] is None and puntos[nuevos["s2"]]["comparable"]
     assert puntos[nuevos["s3"]]["motivo"] == "truncado"
+
+
+def test_la_portada_y_la_serie_cuentan_paginas_con_error(entorno):
+    """Decision 202: la portada decia «Errores 85» (incidencias) y la tarjeta
+    del mismo censo «72 páginas con error». Con dos errores en la misma
+    pagina, `errores` sigue contando incidencias y `paginas_con_error`
+    paginas; la tendencia del panel es de paginas (`metrica` lo dice)."""
+    api, Sesion, acme, sitio, ids = entorno
+    with Sesion() as s:
+        u = s.query(Url).filter(Url.job_id == ids["s4"]).order_by(Url.id).first()
+        s.add(Issue(job_id=ids["s4"], url_id=u.id, issue_type="canonical_cross_domain", severity="error"))
+        s.commit()
+        registrar(s, ids["s4"])
+        s.commit()
+    p = next(c for c in api.get("/api/clients/panel").json()["clientes"] if c["id"] == str(acme))
+    assert p["ultimo"]["id"] == str(ids["s4"])
+    assert p["ultimo"]["errores"] == 5 and p["ultimo"]["paginas_con_error"] == 4
+    ev = p["evolucion"]
+    assert ev["metrica"] == "urls_con_error" and ev["valores"] == [1, 2, 2, 4]
+    assert ev["tendencia"]["metrica"] == "urls_con_error"
+    serie = {f["id"]: f for f in api.get(f"/api/clients/{acme}/serie").json()}
+    assert serie[str(ids["s4"])]["paginas_con_error"] == 4
+    assert serie[str(ids["s1"])]["paginas_con_error"] == 1
+
+
+def test_un_censo_topado_lo_dice_con_su_tope(entorno):
+    """Decision 203: «topado en N URLs» en la portada. Solo si se paro en el
+    tope y el tope esta en la config; sin tope no se inventa la cifra."""
+    from shared.comparacion import MOTIVOS_TRUNCADO
+
+    api, Sesion, acme, sitio, ids = entorno
+    motivo = sorted(MOTIVOS_TRUNCADO)[0]
+    with Sesion() as s:
+        j = s.get(Job, ids["s4"])
+        j.finish_reason = motivo
+        j.config = {"max_depth": 3, "max_urls": 4000}
+        s.commit()
+    serie = {f["id"]: f for f in api.get(f"/api/clients/{acme}/serie").json()}
+    assert serie[str(ids["s4"])]["topado"] == 4000
+    assert serie[str(ids["s3"])]["topado"] is None
+    with Sesion() as s:
+        s.get(Job, ids["s4"]).config = {"max_depth": 3}
+        s.commit()
+    serie = {f["id"]: f for f in api.get(f"/api/clients/{acme}/serie").json()}
+    assert serie[str(ids["s4"])]["topado"] is None

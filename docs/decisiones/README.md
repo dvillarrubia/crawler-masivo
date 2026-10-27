@@ -16,7 +16,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157, 161, 168, 190 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165, 188, 191, 192, 197 |
-| [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151, 189, 194, 196, 199, 200 |
+| [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151, 189, 194, 196, 199, 200, 201, 202, 203, 204, 205 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
 | [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 177, 178, 179, 180, 181, 182, 184, 185 |
 | [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34), su edición y prueba en vivo, y segmentos de negocio | 104, 125, 166 |
@@ -227,6 +227,11 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 198 | Los grupos de la Limpieza van por texto repetido (líneas en al menos la mitad de una muestra), no por páginas, con el editor bajo su fila | [`contenido`](contenido.md#d198) |
 | 199 | Cada entrada de la barra del Explorador cuenta lo mismo que abre, con «0» cuando es cero (`total` de `/urls` con su filtro; en un ámbito, páginas con algún problema, no incidencias); «Páginas HTML» (internas 2xx, la cifra de la tarjeta) y «Todo el HTML» son dos entradas | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d199) |
 | 200 | Lo editado en la ficha del cliente (y en Ajustes) se guarda con una barra fija «Cambios sin guardar · Guardar» y salir con cambios pregunta; eliminar va dentro de «⋯»; el aceptar de las preguntas ya no sale desactivado | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d200) |
+| 201 | Una escala de letra de cuatro tamaños en `:root` (12, 14, 16 y 20 px; cifra e icono como excepción), ninguno por debajo de 12 px, y los estilos en línea repetidos pasan a clases con el mismo contenido (con `!important`, salvo `display`) | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d201) |
+| 202 | Las cifras de errores cuentan páginas en la portada, la serie, la gráfica y la tendencia (`paginas_con_error`, `urls_con_error`); Problemas y el desplegable de URLs, una fila por tipo con el desglose de gravedad y las páginas del tipo solo si se saben (`paginas_tipo`); el contador de Problemas son tipos de error o aviso; «Qué arreglar primero», primero y en cinco filas | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d202) |
+| 203 | El tipo del rastreo se elige al lanzarlo (`JobCreate.tipo`; prueba de serie sin perfil, censo con él) y la portada dice «topado en N URLs» (`CensoDeSerie.topado`) | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d203) |
+| 204 | La pestaña Alertas agrupa en pantalla las alertas de la misma regla («vista en los censos del 19 y del 21 oct») con «Ver las N páginas», y las info van a «Cambios a favor» | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d204) |
+| 205 | «No incluida en el sitemap» sale de los totales de incidencias nuevas y resueltas (Estado, informe, Slack y Problemas), dicho, si cualquiera de los dos censos leyó sus sitemaps a medias (`shared/sitemaps_lectura.py`, la misma regla que el frontend) | [`api-clientes-y-frontend`](api-clientes-y-frontend.md#d205) |
 
 ## Anadir una decision
 

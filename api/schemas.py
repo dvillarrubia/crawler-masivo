@@ -815,8 +815,15 @@ class CensoDeSerie(BaseModel):
     urls: int = 0
     paginas_html: int = 0
     indexables: int = 0
-    errores: int = 0
+    errores: int = 0                    # incidencias de gravedad error (no paginas)
     avisos: int = 0
+    # Paginas distintas con algun error: la cifra de la tarjeta del censo y del
+    # Estado del cliente. La portada y la serie decian «Errores 85» (las
+    # incidencias) junto a «72 paginas con error» (decision 202).
+    paginas_con_error: int = 0
+    # El tope de URLs si el rastreo se paro al llegar a el: la portada dice
+    # «topado en N URLs» (revision de UX del 25-oct, 1.6; decision 203).
+    topado: int | None = None
     alertas: int | None = None          # de la comparacion automatica; None = no se comparo
     alertas_criticas: int | None = None
     comparado_con: uuid.UUID | None = None
@@ -882,6 +889,11 @@ class JobCreate(BaseModel):
     client_id: str | None = Field(default=None, max_length=128)
     cliente_id: uuid.UUID | None = None
     profile_id: uuid.UUID | None = None
+    # El tipo que elige quien lanza (revision de UX del 25-oct, 1.6; decision
+    # 203): sin marcar, un rastreo de prueba contaba como censo en la portada
+    # salvo que el nombre lo dijera. None = como antes (lo deduce del nombre):
+    # los scripts y las programaciones no lo mandan.
+    tipo: Literal["censo", "canario", "prueba"] | None = None
     config: JobConfig = Field(default_factory=JobConfig)
 
     @field_validator("seeds", mode="before")

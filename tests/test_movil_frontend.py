@@ -250,10 +250,10 @@ def test_a_390_la_pagina_no_desborda_y_las_listas_son_tarjetas():
         assert r["ancho"] <= 390, f"{ruta} mide {r['ancho']} px de ancho"
     for ruta in RUTAS[:3]:
         assert salida[ruta]["extra"]["cabeceras"] == [], ruta
-    assert {"Errores", "Alertas", "Último censo"} <= set(salida["#/clientes"]["extra"]["etiquetas"])
+    assert {"Páginas con error", "Alertas", "Último censo"} <= set(salida["#/clientes"]["extra"]["etiquetas"])
     assert {"Estado", "Rastreadas", "Duración"} <= set(salida["#/rastreos"]["extra"]["etiquetas"])
     assert "Semillas" not in salida["#/rastreos"]["extra"]["etiquetas"]
-    assert {"Errores", "Alertas"} <= set(salida[f"#/clientes/{CLI}/historial"]["extra"]["etiquetas"])
+    assert {"Páginas con error", "Alertas"} <= set(salida[f"#/clientes/{CLI}/historial"]["extra"]["etiquetas"])
     urls = salida[f"#/rastreos/{JOB}/urls"]["extra"]
     assert not urls["lateral"] and urls["desplegable"]
     # Las entradas de la barra, con su cifra; un cero es «0», no un hueco.
@@ -343,7 +343,7 @@ def test_un_ambito_abre_lo_que_cuenta_y_sin_analizar_no_lleva_cifra():
     # Las de /stats si cuentan: el rastreo existe aunque no se analizara.
     assert any(re.fullmatch(r"Páginas HTML 3\.731", b) for b in sin["antes"]), sin["antes"]
     # La indexabilidad la calcula el analisis: sin el, sin cifra.
-    assert "Indexables" in sin["antes"] and "No indexables" in sin["antes"], sin["antes"]
+    assert "Páginas indexables" in sin["antes"] and "Páginas no indexables" in sin["antes"], sin["antes"]
     # Y la entrada abre todas las paginas, sin decir «ningún problema».
     assert sin["abre"] == "5.578 resultados", sin  # sin filtro de problema
     assert not any("Ningún problema" in c for c in sin["chips"]), sin["chips"]
