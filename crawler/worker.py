@@ -23,9 +23,11 @@ import json
 import logging
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, Future
@@ -120,6 +122,34 @@ class EstancadoError(Exception):
 # hasta que terminaba o se mataba. Se abre en modo append para que las
 # reanudaciones automaticas del mismo job queden en el mismo fichero.
 LOG_DIR = os.getenv("SCRAPY_LOG_DIR", "/tmp/scrapy-logs")
+# Cola de peticiones de cada rastreo en disco (JOBDIR de Scrapy, #276): un
+# directorio nuevo por ejecucion, borrado al acabar. Lo que quede de un worker
+# que murio a medias se borra al arrancar.
+FRONTERA_DIR = os.getenv("SCRAPY_FRONTERA_DIR", "/tmp/scrapy-frontera")
+
+
+def _directorio_de_frontera(job_id: str) -> str | None:
+    """Un JOBDIR nuevo para esta ejecucion. None si no se puede crear: entonces
+    la cola va en memoria, como antes de #276, y el rastreo sigue."""
+    try:
+        os.makedirs(FRONTERA_DIR, exist_ok=True)
+        return tempfile.mkdtemp(prefix=f"{job_id}-", dir=FRONTERA_DIR)
+    except OSError as exc:
+        logger.warning("Job %s: sin directorio para la cola en disco (%s); va en memoria",
+                       job_id, exc)
+        return None
+
+
+def _limpiar_fronteras_huerfanas() -> None:
+    """Al arrancar el worker no corre ningun rastreo suyo: lo que haya en
+    FRONTERA_DIR es de una ejecucion que no llego a borrarlo."""
+    try:
+        for nombre in os.listdir(FRONTERA_DIR):
+            shutil.rmtree(os.path.join(FRONTERA_DIR, nombre), ignore_errors=True)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        logger.warning("No se pudo limpiar %s", FRONTERA_DIR, exc_info=True)
 
 
 def _ruta_log(job_id: str) -> str:
@@ -529,14 +559,21 @@ def _run_job(job_id: str) -> None:
         #
         # max_runtime_hours se conserva como red de seguridad dura, no como
         # mecanismo principal.
-        result = _ejecutar_con_vigilancia(
-            cmd,
-            cwd=_CRAWLER_DIR,
-            env=env,
-            job_id=job_id,
-            stall_minutes=stall_minutes,
-            max_seconds=3600 * max_runtime_hours,
-        )
+        frontera = _directorio_de_frontera(job_id)
+        if frontera:
+            cmd += ["-s", f"JOBDIR={frontera}"]
+        try:
+            result = _ejecutar_con_vigilancia(
+                cmd,
+                cwd=_CRAWLER_DIR,
+                env=env,
+                job_id=job_id,
+                stall_minutes=stall_minutes,
+                max_seconds=3600 * max_runtime_hours,
+            )
+        finally:
+            if frontera:
+                shutil.rmtree(frontera, ignore_errors=True)
 
         # Con LOG_FILE el stderr viene vacio: el log esta en el fichero. Se
         # usa como si fuera el stderr para que el resumen de avisos siga igual.
@@ -774,7 +811,7 @@ def _run_job(job_id: str) -> None:
                 )
             except Exception:
                 pass
-            if motivo in ("max_urls_reached", "max_runtime_reached", "stalled"):
+            if motivo in ("max_urls_reached", "max_runtime_reached", "stalled", "frontera_sin_disco"):
                 logger.warning(
                     "Job %s TRUNCADO por el tope de URLs: el rastreo esta "
                     "incompleto y el PageRank se ha calculado sobre un grafo "
@@ -1147,9 +1184,14 @@ def _motivo_de_fin(job_id: str, *, razon_cero: str, sin_guardar: bool, stalled: 
         if (rc.get(f"job:{job_id}:finish_reason") == "max_urls_reached"
                 and not sin_guardar and not bloqueo):
             motivo = "max_urls_reached"
+        # La cola en disco perdio peticiones (decision 216): la frontera no se
+        # agoto de verdad, aunque Scrapy cerrase con `finished`.
+        if motivo == "finished" and rc.get(f"job:{job_id}:frontera_perdida"):
+            motivo = "frontera_sin_disco"
         if consumir:
             rc.delete(f"job:{job_id}:finish_reason")
             rc.delete(f"job:{job_id}:bloqueo")
+            rc.delete(f"job:{job_id}:frontera_perdida")
     except Exception:
         pass
     return motivo
@@ -2014,6 +2056,7 @@ def main() -> None:
         logger.critical("Cannot connect to Redis at %s", REDIS_URL)
         sys.exit(1)
 
+    _limpiar_fronteras_huerfanas()
     _recover_stale_jobs(rconn)
     _recuperar_enriquecidos(rconn)
     # Una vez y antes del bucle: desde el primer segundo hay quien atienda las

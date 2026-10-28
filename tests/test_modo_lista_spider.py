@@ -59,7 +59,10 @@ def spider(monkeypatch):
     from seo_crawler.extractors import compute_url_hash, normalize_url
     from seo_crawler.spiders.seo_spider import SeoSpider, _hash_key
 
+    from scrapy.utils.test import get_crawler
+
     sp = SeoSpider(job_id="t")
+    sp.crawler = get_crawler(settings_dict={"DEPTH_PRIORITY": 1})
     sp.seed_urls = ["https://x.com/hecha", "https://x.com/pendiente"]
     sp._already_crawled_hashes = {
         _hash_key(compute_url_hash(normalize_url("https://x.com/hecha")))}
@@ -72,7 +75,7 @@ def spider(monkeypatch):
     sp._crawl_subdomains = False
     sp._sondas_de_semillas = lambda: iter(())
     sp._should_follow = lambda url: True
-    sp._iter_frontier = lambda: iter(["https://x.com/enlazada-desde-una-semilla"])
+    sp._iter_frontier = lambda: iter([("https://x.com/enlazada-desde-una-semilla", 1)])
     return sp
 
 
@@ -91,3 +94,13 @@ def test_al_reanudar_una_lista_no_se_rastrea_la_frontera(spider):
 def test_con_profundidad_si_se_rastrea_la_frontera(spider):
     spider.max_depth = 1
     assert "https://x.com/enlazada-desde-una-semilla" in _pedidas(spider)
+
+
+def test_al_reanudar_la_frontera_lleva_la_prioridad_de_su_profundidad(spider):
+    """Lo que sale de `start` no pasa por el DepthMiddleware: sin restar la
+    profundidad, un destino a 3 salia antes que lo descubierto a 2 (#276)."""
+    spider.max_depth = 5
+    spider._iter_frontier = lambda: iter([("https://x.com/d1", 1), ("https://x.com/d3", 3)])
+    prioridades = {r.url: r.priority for r in spider.start_requests()}
+    assert prioridades["https://x.com/d1"] == -1 and prioridades["https://x.com/d3"] == -3
+    assert prioridades["https://x.com/pendiente"] == 0

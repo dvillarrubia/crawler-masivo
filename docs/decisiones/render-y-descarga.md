@@ -1345,3 +1345,121 @@
    sitemap enlazada a tres saltos o al final de una 301, con el cupo normal y
    con el cupo a 1 (sin el arreglo fallan); y contra Postgres `in_sitemap` es verdadero para las del
    sitemap, también las que esperaron, y falso para la portada.
+
+<a id="d216"></a>
+216. **La frontera del rastreo no crece en memoria con cada URL: la cola de
+   Scrapy en disco (un `JOBDIR` por ejecución), el dupefilter con 8 bytes por
+   petición, las cachés del pipeline con tope y, al reanudar, lo ya rastreado
+   en claves compactas y la frontera con su profundidad** (#276, parte de #282).
+
+   **Problema.** `settings.py` declaraba `SCHEDULER_DISK_QUEUE`, pero sin
+   `JOBDIR` Scrapy no crea la cola en disco: cada petición pendiente vivía en
+   memoria (~4 KB contando el planificador y el dupefilter), y solo las URLs de
+   sitemap pasado el cupo de la 186 esperaban fuera. Además crecían sin tope,
+   con cada URL del rastreo, la caché url_hash → id del pipeline, los cinco
+   conjuntos de `url_id` cuyos hijos ya se habían limpiado y, al reanudar, el
+   set de lo ya rastreado (~70 bytes por clave). Un sitio que descubre millones
+   de URLs por enlaces (facetas, parámetros) se come los 4 GB del contenedor
+   del worker. Y al reanudar, toda la frontera entraba con profundidad 1: con
+   `max_depth`, se volvía a bajar `max_depth` niveles desde cada destino, y se
+   pedían los destinos de las páginas del último nivel y los nofollow, que el
+   rastreo sin interrumpir no habría pedido.
+
+   **Decisión.**
+   - El worker le da a cada ejecución un `JOBDIR` nuevo bajo
+     `SCRAPY_FRONTERA_DIR` (`/tmp/scrapy-frontera`, en la capa escribible del
+     contenedor) y lo borra al acabar, pase lo que pase. Al arrancar borra lo
+     que quedara de un worker que murió a medias (en ese momento no corre
+     ningún rastreo suyo). Si no puede crearlo, la cola va en memoria como
+     antes y el rastreo sigue. Nadie reanuda desde ese directorio: la
+     reanudación siembra desde la BD, así que la extensión `SpiderState` va
+     apagada. La limpieza de huérfanos solo corre al arrancar, nunca en la
+     recuperación periódica, que funciona con rastreos en marcha. La primera
+     versión la llamaba también ahí, y la revisión lo encontró: cada 5 minutos
+     borraba la cola de los rastreos vivos (`FileNotFoundError` en el motor y
+     peticiones perdidas).
+   - `SchedulerFrontera` (`cola_disco.py`): el planificador de Scrapy, que
+     deja el disco antes de llenarlo. El de Scrapy solo captura `ValueError` al
+     escribir: con el disco lleno, el `OSError` perdía la petición, y la
+     revisión lo midió (un tmpfs de 300 KB: `finished` a las 1.211 páginas de
+     3.000, con la frontera recortada y un censo que parecía completo). Ahora,
+     cada 1.000 escrituras se mira el espacio libre: por debajo de
+     `FRONTERA_DISCO_MIN_MB` (1.024), el resto de esa ejecución va a memoria,
+     como antes, y `scheduler/sin_disco` dice por qué. Lo de memoria sale
+     antes que lo de disco, así que el orden en anchura se altera, pero no se
+     pierde nada: con el JOBDIR en un tmpfs de 2 MB, 8.000 de 8.000 páginas.
+     Si el disco se llena de golpe entre dos miradas, sí se puede perder algo,
+     y la segunda revisión lo midió en tres formas:
+     - la escritura que falla;
+     - una anterior que el sistema escribió a medias sin avisar (queuelib la
+       cuenta entera y al leerla no se deserializa);
+     - la petición sacada cuando cerrar la cola vacía falla al guardar su
+       estado.
+     Entonces se pasa a memoria, `scheduler/perdidas` lo cuenta, el spider lo
+     marca en Redis (`job:<id>:frontera_perdida`) y el worker cierra el censo
+     como `frontera_sin_disco`, que está en `MOTIVOS_TRUNCADO`: no se afirman
+     ausencias. En un tmpfs de 1 MB sin umbral se rastrearon 7.968 de 8.000, y
+     quedó contado.
+   - Con `JOBDIR`, toda petición que se pueda serializar va a disco, y la que
+     no, se queda en memoria y sale antes que las de disco (Scrapy vacía
+     primero la de memoria). Las del rastreo se pueden serializar todas
+     (callbacks y errbacks son métodos del spider, y `PageMethod` lleva una
+     función de módulo y texto); lo vigila un test con y sin meta de render
+     (`scheduler/unserializable` a 0).
+   - `DupefilterCompacto` (`cola_disco.py`): los 64 primeros bits de la huella
+     de Scrapy en `ClavesCompactas` (~15 bytes por clave en vez de ~90). Con
+     `JOBDIR`, el `RFPDupeFilter` de Scrapy escribiría además cada huella en
+     `requests.seen`, que nadie relee. Una colisión haría que la segunda
+     petición no se pidiera: con un millón de URLs, ~3e-8.
+   - `RecientesAcotados`, un conjunto que olvida lo más antiguo, con tope de
+     50.000, para la caché url_hash → id (un fallo cuesta una consulta) y para
+     los `url_id` ya limpiados (los lotes de los hijos de una página llegan
+     seguidos).
+   - Al reanudar, lo ya rastreado va en `ClavesCompactas.desde(...)` (un array
+     ordenado de una vez). La frontera sale de `links` agrupada por destino con
+     `MIN(crawl_depth)` del origen, leído por la clave de `urls` (el job se
+     filtra en `links`, regla 37). Solo cuentan los enlaces que se habrían
+     seguido: origen por debajo de `max_depth`, y `follow` salvo con
+     `follow_nofollow`. Un origen sin profundidad guardada da la de antes, 1.
+     Lo que sale de `start` no pasa por el `DepthMiddleware` propio, así que la
+     prioridad de la profundidad se resta allí, como en las tandas del sitemap.
+     Antes salía todo con prioridad 0, y un destino a profundidad 3 se pedía
+     antes que lo descubierto a 2. Queda un caso raro: un destino al que se
+     llega a 3 por un origen ya rastreado, y a 2 por otro destino de la
+     frontera aún sin rastrear, entra con 3, y con `max_depth` se pierden sus
+     hijos.
+
+   **Medido** el 28-oct con `scripts/bench/frontera_memoria.py`, en la imagen
+   del crawler con los ajustes de producción (sin BD ni Redis). Es un sitio en
+   el que cada página enlaza a 200 nuevas, con `max_urls` 5.000: al parar
+   quedan 1.000.004 peticiones encoladas.
+   - **Antes:** 2.558 MB de pico, subiendo en línea recta (~0,5 MB por página
+     rastreada: 668 MB a las 1.000 páginas y 2.552 a las 5.000).
+   - **Ahora:** 220 MB de pico y plano (191 MB a las 500 páginas, 208 a las
+     3.250). Todo pasa por disco y nada por memoria, y el directorio ocupa
+     295 MB.
+   - **El coste es tiempo:** 686 s frente a 539, unos 0,15 ms por petición
+     nueva que se encola (se serializa y se escribe). En este banco cada enlace
+     es una URL nueva, el peor caso. En un sitio real casi todos los enlaces de
+     una página ya están vistos y los descarta el dupefilter antes de encolar,
+     así que pesa poco frente a los 20-200 ms de `parse` (215).
+   - Las peticiones con render ocupan ~6 KB cada una en disco, porque llevan
+     el JS de la página en sus `PageMethod`; sin render, ~250 bytes. Un millón
+     de peticiones de render pendientes serían ~6 GB de disco.
+
+   **Lo que cambia en el recorrido.** Sin reanudar, nada: el mismo conjunto de
+   URLs, las mismas profundidades y el mismo orden, porque la cola en disco
+   también es FIFO por prioridad. Lo comprueba el test, que rastrea el sitio
+   del arnés con y sin `JOBDIR`. Al reanudar se rastrea menos: lo que no se
+   habría pedido sin la interrupción ya no se pide.
+   `test_spider_robots_txt.py` contaba con eso para volver a leer el
+   robots.txt en la segunda ejecución, y ahora la hace con un nivel más.
+
+   **Lo que no se hace.** El dupefilter en Redis o con un filtro de Bloom: con
+   8 bytes por URL, un millón son ~15 MB. Tampoco se mueven las URLs de sitemap
+   de la 186 a la cola de Scrapy: su fichero es más barato (una línea por URL)
+   y la lógica de profundidad 1 sigue haciendo falta. Ni se quita el JS de la
+   meta de render, que es lo que más ocupa en disco.
+
+   Tests: `tests/test_frontera_memoria.py` y, contra Postgres,
+   `tests/test_frontera_reanudar_db.py` (ver `docs/referencia/testing.md`).

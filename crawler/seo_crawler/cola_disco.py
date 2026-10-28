@@ -1,5 +1,6 @@
 """Cola FIFO de URLs en un fichero temporal, y el conjunto compacto de sus
-claves (decision 186).
+claves (decision 186). Y lo que acota la memoria del resto de la frontera
+(#276): el dupefilter con esas claves y un conjunto con tope.
 
 Las URLs de los sitemaps que no caben en la cola de Scrapy esperan aqui, una
 por linea, y se sueltan por tandas. En memoria, una peticion encolada cuesta
@@ -10,9 +11,21 @@ desplazamiento de lectura. El fichero se borra solo al cerrarse.
 from __future__ import annotations
 
 import heapq
+import logging
+import os
+import shutil
 import tempfile
 from array import array
 from bisect import bisect_left
+from itertools import groupby
+
+from scrapy.core.scheduler import Scheduler
+from scrapy.dupefilters import RFPDupeFilter
+
+logger = logging.getLogger(__name__)
+
+# Por debajo de este espacio libre, la cola deja de escribir en disco (#276).
+FRONTERA_DISCO_MIN_MB = int(os.getenv("FRONTERA_DISCO_MIN_MB", "1024"))
 
 
 class ColaEnDisco:
@@ -74,6 +87,20 @@ class ClavesCompactas:
         self._nuevas: set[int] = set()
         self._fundir_desde = fundir_desde
 
+    @classmethod
+    def desde(cls, claves, fundir_desde: int = 50000) -> "ClavesCompactas":
+        """De un iterable de claves de una vez: lo ya rastreado al reanudar
+        (#276). Sin el set intermedio (~70 bytes por clave): ordenar crea una
+        lista un momento, ~60 bytes por clave medidos, y se suelta al acabar."""
+        orden = array("Q", claves)
+        orden = array("Q", sorted(orden))
+        conjunto = cls(fundir_desde)
+        conjunto._orden = array("Q", (k for k, _ in groupby(orden)))
+        return conjunto
+
+    def __bool__(self) -> bool:
+        return bool(self._orden) or bool(self._nuevas)
+
     def __len__(self) -> int:
         return len(self._orden) + len(self._nuevas)
 
@@ -97,3 +124,151 @@ class ClavesCompactas:
         # (~36 bytes cada uno), el pico es el array viejo mas el nuevo.
         self._orden = array("Q", heapq.merge(self._orden, sorted(self._nuevas)))
         self._nuevas.clear()
+
+
+class DupefilterCompacto(RFPDupeFilter):
+    """El dupefilter de Scrapy con 8 bytes por peticion vista (#276).
+
+    `RFPDupeFilter` guarda la huella entera (20 bytes de sha1 en un `bytes`,
+    ~90 con el set) de cada peticion que pasa, y con `JOBDIR` la escribe ademas
+    en `requests.seen`, que nadie relee: cada rastreo empieza con un directorio
+    nuevo (la reanudacion siembra desde la BD). Aqui van los 64 primeros bits
+    en `ClavesCompactas`, ~15 bytes por clave. Dos peticiones distintas con la
+    misma clave harian que la segunda no se pidiera: con un millon de URLs,
+    ~3e-8 (la paradoja del cumpleanos con 2^64)."""
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        return cls(None, crawler.settings.getbool("DUPEFILTER_DEBUG"),
+                   fingerprinter=crawler.request_fingerprinter)
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._vistas = ClavesCompactas()
+
+    def __len__(self) -> int:
+        return len(self._vistas)
+
+    def request_seen(self, request) -> bool:
+        clave = int.from_bytes(self._fingerprint(request)[:8], "big")
+        return not self._vistas.anadir(clave)
+
+
+class SchedulerFrontera(Scheduler):
+    """El planificador de Scrapy, que deja de usar el disco antes de llenarlo
+    y, si aun asi se llena, lo dice (#276, decision 216).
+
+    El de Scrapy solo captura `ValueError` (lo no serializable) al escribir en
+    la cola de disco: con el disco lleno, el `OSError` subia, la peticion se
+    perdia y el rastreo acababa `finished` con la frontera recortada, un censo
+    incompleto que parecia completo.
+
+    - Cada `_MIRAR_CADA` escrituras se mira el espacio libre del JOBDIR; por
+      debajo de `FRONTERA_DISCO_MIN_MB`, lo que llega despues va a memoria,
+      como antes de la 216, y no se pierde nada. Lo de memoria sale antes que
+      lo de disco (Scrapy vacia primero la de memoria): se altera el orden en
+      anchura.
+    - Si el disco se llena de golpe entre dos miradas (otro proceso, o menos
+      de `_MIRAR_CADA` escrituras), si se puede perder algo: la escritura que
+      falla, una anterior que el sistema escribio a medias sin avisar (queuelib
+      la cuenta entera y al leerla no se deserializa) o la que se saca cuando
+      cerrar la cola vacia falla al guardar su estado. Entonces se pasa a
+      memoria y `perdidas` lo cuenta: el spider lo marca en Redis y el worker
+      cierra el censo como `frontera_sin_disco`, truncado."""
+
+    _MIRAR_CADA = 1000
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._sin_disco = False
+        self._escrituras = 0
+        # Errores del disco que han podido costar peticiones.
+        self.perdidas = 0
+
+    def _dejar_el_disco(self, motivo: str) -> None:
+        self._sin_disco = True
+        logger.warning("La cola deja de usar el disco (%s): lo que se encole a partir de "
+                       "ahora va en memoria", motivo)
+        if self.stats is not None:
+            self.stats.set_value("scheduler/sin_disco", motivo)
+
+    def _dqpush(self, request) -> bool:
+        if self._sin_disco or self.dqs is None:
+            return False
+        if self._escrituras % self._MIRAR_CADA == 0 and self.dqdir:
+            try:
+                libre = shutil.disk_usage(self.dqdir).free
+            except OSError:
+                libre = None
+            if libre is not None and libre < FRONTERA_DISCO_MIN_MB * 1024 * 1024:
+                self._dejar_el_disco(f"quedan {libre // (1024 * 1024)} MB libres")
+                return False
+        self._escrituras += 1
+        try:
+            return super()._dqpush(request)
+        except OSError as exc:
+            self._perder(exc)
+            self._dejar_el_disco(f"{type(exc).__name__}: {exc}")
+            return False
+
+    def _perder(self, exc: BaseException) -> None:
+        self.perdidas += 1
+        if self.stats is not None:
+            self.stats.inc_value("scheduler/perdidas")
+        if self.perdidas == 1:
+            logger.error("La cola en disco ha fallado (%s): el censo puede quedar incompleto", exc)
+
+    def _dqpop(self):
+        try:
+            return super()._dqpop()
+        except Exception as exc:  # noqa: BLE001 -- OSError al cerrar la cola vacia, o una entrada a medias
+            self._perder(exc)
+            self._dejar_el_disco(f"{type(exc).__name__}: {exc}")
+            return None
+
+    def close(self, reason: str):
+        # El estado de la cola solo sirve para reanudar desde el JOBDIR, que
+        # nadie hace: con el disco lleno, guardarlo no puede tumbar el cierre.
+        try:
+            return super().close(reason)
+        except OSError as exc:
+            logger.warning("No se pudo guardar el estado de la cola al cerrar: %s", exc)
+            return self.df.close(reason)
+
+
+class RecientesAcotados:
+    """Conjunto con tope que olvida lo mas antiguo (#276).
+
+    Para lo que solo hace falta recordar un rato: los `url_id` cuyos hijos ya
+    se limpiaron en esta ejecucion (los lotes de una misma pagina llegan
+    seguidos) o la cache url_hash -> url_id del pipeline (un fallo cuesta una
+    consulta, no un dato malo). Sin tope crecian con cada URL del rastreo."""
+
+    def __init__(self, tope: int) -> None:
+        self._tope = tope
+        self._d: dict = {}
+
+    def __len__(self) -> int:
+        return len(self._d)
+
+    def __contains__(self, clave) -> bool:
+        return clave in self._d
+
+    def get(self, clave, defecto=None):
+        return self._d.get(clave, defecto)
+
+    def __setitem__(self, clave, valor) -> None:
+        self._d.pop(clave, None)
+        self._d[clave] = valor
+        while len(self._d) > self._tope:
+            del self._d[next(iter(self._d))]
+
+    def add(self, clave) -> None:
+        self[clave] = None
+
+    def update(self, claves) -> None:
+        for clave in claves:
+            self[clave] = None
+
+    def clear(self) -> None:
+        self._d.clear()

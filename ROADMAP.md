@@ -203,6 +203,19 @@ de julio: 19.109 páginas indexables sin canonical en un sitio con seis
 variantes de español, y 1.144 páginas de autor cuyo título es literalmente
 `| Penguin Libros ES`, con el nombre sin rellenar.
 
+### Rastrear sitios más grandes y más deprisa (28 de octubre)
+
+Primeros pasos de la épica de escala ([#282](https://github.com/dvillarrubia/crawler-masivo/issues/282)):
+
+- **Cada página cuesta entre 2 y 6 veces menos CPU**, con exactamente lo mismo
+  extraído ([#284](https://github.com/dvillarrubia/crawler-masivo/issues/284),
+  decisión 215). En producción la CPU era el freno.
+- **La lista de URLs pendientes ya no vive en memoria**
+  ([#276](https://github.com/dvillarrubia/crawler-masivo/issues/276), decisión
+  216). Un sitio que descubre un millón de URLs se queda en 220 MB en vez de
+  pasar de 2,5 GB y seguir subiendo hasta tumbar el rastreo. Además, retomar un
+  rastreo interrumpido ya no se pasa de la profundidad configurada.
+
 ### Accesibilidad con axe, por muestra de plantilla (24 de octubre)
 
 Opcional en cada rastreo («Accesibilidad (axe): páginas» en el modal, apagado

@@ -14,6 +14,7 @@ from typing import Any
 
 from scrapy import Spider
 
+from seo_crawler.cola_disco import RecientesAcotados
 from seo_crawler.extractors import compute_url_hash
 from seo_crawler.items import (
     CapturaAlternativaItem,
@@ -35,6 +36,11 @@ from seo_crawler.items import (
 
 logger = logging.getLogger(__name__)
 
+# Topes de lo que el pipeline recuerda entre lotes (#276): de sobra para que
+# los hijos de una pagina, que llegan seguidos, encuentren lo suyo.
+_TOPE_CACHE_URL_ID = 50_000
+_TOPE_HIJOS_LIMPIADOS = 50_000
+
 
 class PostgresPipeline:
     """
@@ -53,14 +59,18 @@ class PostgresPipeline:
         self.commit_every = commit_every
         self.session = None
         self._buffer: list[tuple[type, dict]] = []
-        self._url_id_cache: dict[str, int] = {}  # url_hash -> Url.id
+        # url_hash -> Url.id. Con tope (#276): los hijos llegan justo detras de
+        # su pagina, y un fallo es una consulta, no un dato malo.
+        self._url_id_cache = RecientesAcotados(_TOPE_CACHE_URL_ID)
         self._pages_committed: int = 0
         self._last_job_update: float = 0.0
         # url_ids whose stale child rows were already cleared this run, per
         # child type. Prevents a later flush batch from deleting rows an
         # earlier batch inserted for the same page (pages with >batch_size
         # links/resources span multiple flushes).
-        self._deleted_child_url_ids: dict[type, set[int]] = {}
+        # Con tope (#276): los lotes de una pagina llegan seguidos, y sin el
+        # crecia con cada URL del rastreo (cinco conjuntos de enteros).
+        self._deleted_child_url_ids: dict[type, RecientesAcotados] = {}
         self._uncommitted: int = 0  # escrituras flusheadas sin commit
         # Extraccion a medida (decision 104): url_id -> filas de la pagina. Se
         # reemplaza la pagina ENTERA en cada escritura (DELETE + INSERT en la
@@ -817,8 +827,9 @@ class PostgresPipeline:
                     # Only clear stale rows the first time we see a url_id this
                     # run; later batches for the same page must append, not wipe
                     # what earlier batches inserted.
-                    already = self._deleted_child_url_ids.setdefault(item_cls, set())
-                    to_delete = uid_set - already
+                    already = self._deleted_child_url_ids.setdefault(
+                        item_cls, RecientesAcotados(_TOPE_HIJOS_LIMPIADOS))
+                    to_delete = {u for u in uid_set if u not in already}
                     if to_delete:
                         self.session.query(model).filter(
                             getattr(model, fk_col).in_(to_delete)

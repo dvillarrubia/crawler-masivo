@@ -511,3 +511,11 @@ TestClient y SQLite; necesita fastapi: correr en la imagen de la API) y
 bloque «Google», frases que solo dicen lo que se sabe, paginas una vez,
 sitemaps vacios y su matiz, host dominante, base de cada alerta, y la celda,
 el orden y el editor de la Limpieza).
+La frontera en disco (#276, decision 216): `test_frontera_memoria.py` (el
+`DupefilterCompacto` decide lo mismo que el de Scrapy, el conjunto con tope, y
+el `SeoSpider` real con `JOBDIR`, con y sin meta de render, rastrea lo mismo que
+con la cola en memoria y con TODA la cola en disco: `scheduler/unserializable`
+a 0) y `test_frontera_reanudar_db.py` (Postgres de verdad: la frontera al
+reanudar con la menor profundidad de sus origenes, sin lo que no se habria
+seguido y sin perder destinos al paginar). La memoria con un millon de URLs
+pendientes se mide con `scripts/bench/frontera_memoria.py` (`--modo antes|ahora`).
