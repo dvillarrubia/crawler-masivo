@@ -1463,3 +1463,38 @@
 
    Tests: `tests/test_frontera_memoria.py` y, contra Postgres,
    `tests/test_frontera_reanudar_db.py` (ver `docs/referencia/testing.md`).
+
+<a id="d218"></a>
+218. **Un enlace ya pedido desde otra página no vuelve a crear su `Request`**
+   (#284, punto 7).
+
+   **Problema.** El bucle de `parse` creaba una `Request` por cada enlace que
+   se podía seguir, aunque ya se hubiera pedido desde otra página. El menú y el
+   pie se repiten en todas, así que eran unas 160 peticiones por página que
+   pasaban por los middlewares del spider y el motor para que el dupefilter
+   las tirara al calcular su huella. En el banco de abajo, 230.550 de 243.988.
+
+   **Decisión.** `_enlaces_pedidos` (`ClavesCompactas`, ~15 bytes por URL)
+   guarda la clave de cada enlace que ya salió como petición de ese bucle. Uno
+   que ya está no crea la suya. Se mira después de los filtros y del tope por
+   carpeta (que ya no gastaba cupo dos veces por la misma URL), justo antes de
+   crear la petición.
+
+   Es lo mismo que haría el dupefilter. La clave sale de la URL normalizada, y
+   dos enlaces con la misma URL normalizada dan la misma `Request` y la misma
+   huella. Ningún middleware del spider descarta una petición por algo que no
+   sea su URL (el `DepthMiddleware` propio no aplica límite), así que la
+   primera no puede haberse quedado fuera por algo que no afectara también a
+   la segunda. Lo que no pasa por este bucle (semillas, sitemap,
+   redirecciones, reanudación) sigue yendo solo al dupefilter.
+
+   **Medido** con un sitio local en el que cada página es la sintética del
+   banco (218 enlaces de menú y contenido) más 10 enlaces nuevos, con los
+   ajustes de producción y sin pipeline: 1.530 páginas, **de 55,9 a 50,3 ms de
+   CPU por página (−10 %)**. Se encolan las mismas 13.438 peticiones y salen
+   los mismos 404.604 items. `dupefilter/filtered` pasa de 230.550 a 0.
+
+   Tests: `tests/test_enlaces_pedidos.py`. Comprueba que lo ya pedido (también
+   escrito de otra forma que normaliza igual) no se repite, y que con tres
+   páginas sale exactamente lo que el `RFPDupeFilter` de Scrapy dejaría pasar
+   de las peticiones de antes, con parámetros reordenados, anclas y `..`.
