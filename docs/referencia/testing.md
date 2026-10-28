@@ -24,7 +24,9 @@ docker run --rm --network crawler-masivo_default -v "$PWD":/repo -w /repo \
 Sin la red de compose y los nombres de servicio no valen: apuntar
 `REDIS_TEST_URL` a `127.0.0.1` desde otro contenedor hace fallar el test de la
 cola, y parece un fallo del codigo. Lo que cubren: pure extractors
-(`test_extractors.py`), main-content extraction / boilerplate stripping
+(`test_extractors.py`), que los atajos de CPU de `parse` dan la misma salida
+que el camino de antes, item por item (`test_parse_atajos.py`, decision 215;
+`PARSE_ATAJOS_PAGINAS=<carpeta>` le anade paginas que no pueden ir en el repo), main-content extraction / boilerplate stripping
 (`test_content_extraction.py`), structured-data validation
 (`test_sd_validation.py`, con los resultados retirados de la decision 97),
 presets de User-Agent contra el middleware de robots real (`test_ua_presets.py`,

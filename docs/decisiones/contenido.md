@@ -554,3 +554,78 @@
    el orden del endpoint con TestClient) y
    `tests/test_google_limpieza_frontend.py` (la celda, el orden y el editor en
    Chromium).
+
+<a id="d215"></a>
+215. **`parse` no repite trabajo: la limpieza y trafilatura una vez por página,
+   la posición de los enlaces sin un XPath por ancestro, extruct solo con lo que
+   hay y las URLs normalizadas en caché** (#284, banco de pruebas del 28-oct).
+
+   **Problema.** En producción el rastreo va limitado por nuestra CPU, no por
+   el sitio ni por Postgres: en los canarios de Lopesan el worker estaba al
+   100 % de un núcleo con Postgres al 2-5 %, y subir la concurrencia de 3 a 12
+   solo llevó de 0,46 a 0,71 URL/s. En el banco, el 70 % de la CPU por página
+   era `parse`, y casi todo trabajo repetido: `_strip_boilerplate_html` corría
+   5-6 veces por página con la misma entrada (contenido, markdown, contenedor
+   principal, texto tras el h1), trafilatura 4 (dos repetidas), cada enlace
+   clasificaba todos sus ancestros con un XPath `name()` por nodo (el menú y el
+   pie, una vez por cada uno de sus cientos de enlaces), extruct parseaba la
+   página entera para microdata y RDFa aunque no tuviera ninguno, y se
+   normalizaban ~700 URLs por página, casi todas ya vistas.
+
+   **Lo que se hace.**
+   - `_strip_de_pagina` y `_trafilatura_de_pagina`: `lru_cache` de 4 entradas
+     sobre el HTML, `strip_promo` y los selectores propios. Lo que se guarda es
+     un `str` (nadie lo puede modificar) y cada llamador sigue parseando su
+     propia copia del árbol: `extract_texto_tras_h1` escribe en la suya.
+   - `_detect_link_position(a, cache)`: recorre `iterancestors()` de lxml y
+     guarda la clasificación de cada ancestro en un dict que crean
+     `extract_links` y `extract_enlaces_no_rastreables` para su página.
+   - `extract_structured_data`: microdata solo si el HTML contiene `itemscope`;
+     RDFa solo si contiene `typeof=`, `vocab=`, `rdf:type` o el tipo de RDF
+     escrito entero (`22-rdf-syntax-ns#type`), sin distinguir mayúsculas y con
+     espacios antes del `=`. Sin eso, el RDFa solo da items sin `@type`, que ya
+     se descartaban. Se escapa un caso que no se ha visto nunca: el tipo con un
+     prefijo propio (`prefix="r: …#"` y `property="r:type"`). Buscar
+     `\w+:type` lo cogería, pero también el `og:type` de casi todas las
+     páginas, y se perdería el atajo.
+   - **Una llamada a extruct por sintaxis.** Es lo único que cambia en la
+     salida, y a mejor. Con las dos sintaxis en una llamada, cualquier
+     excepción de pyRdfa se llevaba también la microdata. Basta un URL
+     malformado en la página (`href="http://[x/"`, un `src` o un `about=`) para
+     que salte, aunque no haya RDFa. Ahora esa microdata se lee. Al comparar
+     con un censo viejo, puede aparecer como nueva microdata que ya estaba en
+     la página. Lo encontró la revisión, y lo vigila `test_un_url_roto_no_tira_la_microdata`.
+   - `normalize_url` y `compute_url_hash`: `lru_cache` de 32.768 entradas
+     (son puras; unas decenas de MB como mucho).
+
+   **Medido** (CPU de `parse` por página, mismo contenedor): BOE 107 → 19 ms,
+   uoc.edu 210 → 43, xataka 433 → 84, lavanguardia 749 → 199, blogs.uoc
+   117 → 51, la Wikipedia de Barcelona (1,5 MB) 3,3 → 1,3 s, sintéticas del
+   banco 84 → 25. En un rastreo del banco con el prototipo, de 7,5 a 11,3 URL/s.
+   En producción falta el canario de después (Lopesan y La Salle, #284).
+
+   **Lo que sale es lo mismo.** `tests/test_parse_atajos.py` ejecuta
+   `SeoSpider.parse` con el camino de antes (restaurado en el propio test, sin
+   cachés, con el XPath por ancestro y extruct siempre) y con el de ahora, y
+   compara cada item en orden: página, contenido, markdown, texto tras el h1,
+   enlaces con su posición, encabezados, recursos, datos estructurados y las
+   peticiones encoladas. No guarda una salida esperada porque trafilatura y
+   extruct no van fijados y la foto caducaría con cada versión. El RDFa se
+   compara por tipos y sin orden: rdflib lo devuelve en otro orden y con ids
+   anónimos al azar en cada lectura, también con el código de antes.
+
+   Páginas del test (`tests/fixtures/paginas/`): dos sintéticas del banco, la
+   portada del BOE, Wikipedia (CC BY-SA) y una hecha a mano con los bordes
+   (`ITEMSCOPE`, `TYPEOF = `, `<main>` dentro de `<nav>`, `aside` dentro del
+   artículo, clases camelCase, U+E000 en el h1, puerto 443 y `/../`). Las de
+   terceros con derechos (lavanguardia, xataka, uoc, blogs.uoc) no van en un
+   repo público: `PARSE_ATAJOS_PAGINAS=<carpeta>` las añade en local, y con
+   ellas también salió todo igual. La revisión lo repitió en procesos
+   separados, master contra la rama, con 19 páginas públicas: Wikipedia,
+   schema.org con microdata y RDFa, el primer de RDFa del W3C, MDN, Astra
+   (1,8 MB de microdata), gov.uk, GitHub y las de arriba. Las 19 salen
+   idénticas item a item. La CPU total pasa de 32,6 s a 16,5 s.
+
+   **Lo que no se ha hecho** (#284): escribir los enlaces con `COPY`, un item
+   por página en vez de uno por enlace, no crear las `Request` que el
+   dupefilter va a tirar y sacar las escrituras del reactor.

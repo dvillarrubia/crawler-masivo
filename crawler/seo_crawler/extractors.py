@@ -9,6 +9,7 @@ extraction logic testable without bringing in a full Scrapy response.
 from __future__ import annotations
 
 import fnmatch
+import functools
 import hashlib
 import json
 import logging
@@ -87,6 +88,13 @@ def _parse_int(value: str | None) -> int | None:
 # URL utilities
 # ---------------------------------------------------------------------------
 
+# Las dos son puras y cada pagina repite el menu y el pie de todas las demas:
+# sin cache se normalizaban ~700 URLs por pagina, casi todas ya vistas (#284).
+# El tope las deja en unas decenas de MB.
+_CACHE_URLS = 32_768
+
+
+@functools.lru_cache(maxsize=_CACHE_URLS)
 def compute_url_hash(url: str) -> str:
     """Return the hex SHA-256 of the canonicalized URL."""
     normalized = normalize_url(url)
@@ -139,6 +147,7 @@ def _remove_dot_segments(path: str) -> str:
     return resultado if resultado.startswith("/") else "/" + resultado
 
 
+@functools.lru_cache(maxsize=_CACHE_URLS)
 def normalize_url(url: str) -> str:
     """Canonicalize a URL using w3lib for consistent dedup.
 
@@ -769,6 +778,7 @@ def extract_links(
     the way Google (and Screaming Frog) apply page-level directives.
     """
     results: list[dict[str, Any]] = []
+    posiciones: dict = {}
 
     for a in selector.xpath(
         f"descendant-or-self::a[@href]{_XPATH_FUERA_DEL_DOM}"
@@ -811,7 +821,7 @@ def extract_links(
         rel = _clean(a.attrib.get("rel", ""))
 
         # Heuristic link position
-        link_position = _detect_link_position(a)
+        link_position = _detect_link_position(a, posiciones)
 
         # Target attribute (_blank, _self, _parent, _top, or custom)
         target = _clean(a.attrib.get("target", ""))
@@ -950,6 +960,7 @@ def extract_enlaces_no_rastreables(
     from shared import enlaces_no_rastreables as enr
 
     filas: list[dict[str, Any]] = []
+    posiciones: dict = {}
 
     def _ancla(nodo) -> str | None:
         texto = _clean(" ".join(_lineas_visibles(nodo.root, forzar_raiz=True)))
@@ -971,7 +982,7 @@ def extract_enlaces_no_rastreables(
             # `links`: el mismo hash que `urls.url_hash`.
             "destino_hash": compute_url_hash(destino) if destino else None,
             "anchor_text": _ancla(nodo),
-            "link_position": _detect_link_position(nodo),
+            "link_position": _detect_link_position(nodo, posiciones),
         })
 
     # 1. `<a>` sin un href rastreable.
@@ -1114,9 +1125,18 @@ def _hint_tokens(hint: str) -> set[str]:
     return set(_TOKEN_SPLIT.split(_CAMEL_SPLIT.sub(" ", hint).lower())) - {""}
 
 
+def _nombre_de(el) -> str:
+    """Lo que devuelve el XPath ``name()`` de un elemento lxml, en minusculas."""
+    tag = el.tag if isinstance(el.tag, str) else ""
+    if tag.startswith("{"):
+        local = tag.split("}", 1)[1]
+        tag = f"{el.prefix}:{local}" if el.prefix else local
+    return tag.lower()
+
+
 def _classify_node(node) -> tuple[str | None, bool]:
     """
-    Classify one ancestor element.
+    Classify one ancestor element (lxml, or a parsel Selector).
 
     Returns ``(kind, structural)`` where ``kind`` is a link position
     (``nav``/``header``/``footer``/``sidebar``/``content``), ``"content+"``
@@ -1124,7 +1144,8 @@ def _classify_node(node) -> tuple[str | None, bool]:
     nothing. ``structural`` is True when the verdict comes from the tag
     name or an ARIA landmark role rather than from class/id hints.
     """
-    tag = (node.xpath("name()").get() or "").lower()
+    node = getattr(node, "root", node)
+    tag = _nombre_de(node)
     if tag in ("nav", "header", "footer"):
         return tag, True
     if tag == "aside":
@@ -1132,13 +1153,13 @@ def _classify_node(node) -> tuple[str | None, bool]:
     if tag in ("main", "article"):
         return "content+", True
 
-    role = (node.attrib.get("role", "") or "").strip().lower()
+    role = (node.get("role", "") or "").strip().lower()
     if role in _POSITION_ROLES:
         kind = _POSITION_ROLES[role]
         return ("content+" if kind == "content" else kind), True
 
-    raw_cls = node.attrib.get("class", "") or ""
-    raw_id = (node.attrib.get("id", "") or "").strip()
+    raw_cls = node.get("class", "") or ""
+    raw_id = (node.get("id", "") or "").strip()
     cls, node_id = raw_cls.lower(), raw_id.lower()
     tokens = _hint_tokens(raw_cls + " " + raw_id)
     for kind, words in _POSITION_TOKENS.items():
@@ -1156,7 +1177,7 @@ def _classify_node(node) -> tuple[str | None, bool]:
     return None, False
 
 
-def _detect_link_position(a_selector) -> str:
+def _detect_link_position(a_selector, cache: dict | None = None) -> str:
     """
     Heuristic: classify a link by its nearest meaningful ancestor.
 
@@ -1181,12 +1202,24 @@ def _detect_link_position(a_selector) -> str:
       misplaced ``<main>`` inside ``<nav>`` are still navigation.
 
     Falls back to ``content``.
+
+    *cache* (un dict por pagina, que pasa quien recorre todos sus enlaces)
+    guarda la clasificacion de cada ancestro: el menu y el pie son ancestros de
+    cientos de enlaces y antes se clasificaban, con un XPath por nodo, una vez
+    por enlace (#284). Los ancestros se recorren en lxml, del mas cercano al
+    mas lejano.
     """
-    ancestors = [
-        n for n in a_selector.xpath("ancestor::*")
-        if (n.xpath("name()").get() or "").lower() not in ("html", "body")
-    ]
-    kinds = [_classify_node(n) for n in reversed(ancestors)]  # nearest-first
+    kinds = []  # nearest-first
+    for n in getattr(a_selector, "root", a_selector).iterancestors():
+        if cache is not None and n in cache:
+            kinds.append(cache[n])
+            continue
+        if _nombre_de(n) in ("html", "body"):
+            continue
+        kind = _classify_node(n)
+        if cache is not None:
+            cache[n] = kind
+        kinds.append(kind)
 
     for i, (kind, _structural) in enumerate(kinds):
         if kind is None:
@@ -1424,6 +1457,10 @@ def _bloques_json_ld(html_body: str) -> list[tuple[Any, str | None]]:
     return bloques
 
 
+_HAY_MICRODATA = re.compile(r"itemscope", re.I)
+_HAY_RDFA = re.compile(r"\b(?:typeof|vocab)\s*=|rdf:type|22-rdf-syntax-ns#type", re.I)
+
+
 def extract_structured_data(html_body: str, url: str = "") -> list[dict[str, Any]]:
     """
     Extract JSON-LD, Microdata, and RDFa using *extruct*.
@@ -1454,20 +1491,25 @@ def extract_structured_data(html_body: str, url: str = "") -> list[dict[str, Any
             if item:
                 data["json-ld"].append((item, motivo))
 
-    try:
-        import extruct
+    # extruct parsea la pagina entera por cada sintaxis aunque no haya nada que
+    # leer, y era una de las partes mas caras de `parse` (#284). Microdata sin
+    # `itemscope` no da ningun item; RDFa sin `typeof`/`vocab` (ni el tipo de
+    # RDF escrito entero) solo da items sin @type, que se descartan aqui abajo.
+    #
+    # Una llamada por sintaxis: con las dos juntas, una excepcion de pyRdfa
+    # (basta un `href="http://[x/"` en la pagina) tiraba tambien la microdata.
+    sintaxis = [s for s, patron in (("microdata", _HAY_MICRODATA), ("rdfa", _HAY_RDFA))
+                if patron.search(html_body)]
+    for una in sintaxis:
+        try:
+            import extruct
 
-        otros = extruct.extract(
-            html_body,
-            base_url=url,
-            syntaxes=["microdata", "rdfa"],
-            uniform=True,
-        )
-    except Exception:
-        otros = {}
-    for fmt, items in otros.items():
-        if isinstance(items, list):
-            data[fmt] = [(item, None) for item in items]
+            otros = extruct.extract(html_body, base_url=url, syntaxes=[una], uniform=True)
+        except Exception:
+            continue
+        for fmt, items in otros.items():
+            if isinstance(items, list):
+                data[fmt] = [(item, None) for item in items]
 
     for fmt, items in data.items():
         formato = fmt.replace("-", "")  # jsonld, microdata, rdfa
@@ -3077,6 +3119,18 @@ def _strip_boilerplate_html(
         return html  # on any failure, return original HTML unchanged
 
 
+# Una pagina pasaba 5-6 veces por `_strip_boilerplate_html` con la misma entrada
+# (contenido, markdown, contenedor principal, texto tras el h1...) y era lo que
+# mas CPU gastaba del rastreo (#284). Se guarda el resultado de las ultimas
+# paginas: es un `str`, asi que nadie lo puede modificar, y cada llamador sigue
+# parseando su propia copia del arbol (`extract_texto_tras_h1` escribe en ella).
+@functools.lru_cache(maxsize=4)
+def _strip_de_pagina(html: str, strip_promo: bool, extra: tuple[str, ...]) -> str:
+    return _strip_boilerplate_html(
+        html, strip_promo=strip_promo, extra_selectors=list(extra) or None
+    )
+
+
 # Etiquetas que llevan DATOS, no prosa: una celda o un item repetido es un
 # valor mas, no una repeticion que sobre. Deduplicarlas desalineaba las filas
 # de una tabla comparativa (de 8 celdas `Si` quedaba 1) y atribuia el precio de
@@ -3363,9 +3417,7 @@ def _main_container(
     try:
         from lxml import html as lxml_html
 
-        stripped = _strip_boilerplate_html(
-            html, strip_promo=strip_promo, extra_selectors=extra_selectors
-        )
+        stripped = _strip_de_pagina(html, strip_promo, tuple(extra_selectors or ()))
         doc = lxml_html.fromstring(stripped)
         for css in ("main", "article", "[role='main']"):
             found = doc.cssselect(css)
@@ -3394,13 +3446,25 @@ def _trafilatura_extract(
     site-specific selectors.
 
     Returns (plain_text, markdown) — either may be None.
+
+    El texto y el markdown los piden por separado ``extract_main_content`` y
+    ``extract_main_content_markdown`` sobre la misma pagina: el resultado se
+    guarda para que trafilatura no corra cuatro veces (#284).
     """
+    try:
+        return _trafilatura_de_pagina(html, strip_promo, tuple(extra_selectors or ()))
+    except Exception:
+        return (None, None)
+
+
+@functools.lru_cache(maxsize=4)
+def _trafilatura_de_pagina(
+    html: str, strip_promo: bool, extra: tuple[str, ...]
+) -> tuple[str | None, str | None]:
     try:
         import trafilatura
 
-        clean = _strip_boilerplate_html(
-            html, strip_promo=strip_promo, extra_selectors=extra_selectors
-        )
+        clean = _strip_de_pagina(html, strip_promo, extra)
 
         text = trafilatura.extract(
             clean,
