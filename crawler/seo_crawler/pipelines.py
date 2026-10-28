@@ -41,6 +41,54 @@ logger = logging.getLogger(__name__)
 _TOPE_CACHE_URL_ID = 50_000
 _TOPE_HIJOS_LIMPIADOS = 50_000
 
+# Columnas de `links` que escribe el rastreo, en el orden de `_fila_link` (#284).
+_COLUMNAS_LINK = ("job_id", "from_url_id", "to_url", "to_url_hash", "anchor_text", "rel",
+                  "is_internal", "link_position", "follow", "target", "alt_text",
+                  "link_type", "repeticiones")
+
+
+def _valor_copy(v) -> str:
+    """Un valor en el formato de texto de COPY. Postgres no admite U+0000 en
+    un texto: se quita (con el ORM, la pagina entera del lote fallaba)."""
+    if v is None:
+        return "\\N"
+    if v is True:
+        return "t"
+    if v is False:
+        return "f"
+    if not isinstance(v, str):
+        return str(v)
+    if "\x00" in v:
+        v = v.replace("\x00", "")
+    return (v.replace("\\", "\\\\").replace("\t", "\\t")
+            .replace("\n", "\\n").replace("\r", "\\r"))
+
+
+def _por_defecto(v, defecto):
+    return defecto if v is None else v
+
+
+def _recortar(v, n: int):
+    return v[:n] if isinstance(v, str) else v
+
+
+def _copiar(session, tabla: str, columnas: tuple[str, ...], filas: list[tuple]) -> bool:
+    """`COPY tabla FROM STDIN` en la transaccion de la sesion. False si la
+    conexion no es de psycopg2 sobre Postgres: entonces el que llama inserta
+    con el ORM."""
+    import io
+
+    conexion = session.connection()
+    if conexion.dialect.name != "postgresql":
+        return False
+    with conexion.connection.cursor() as cursor:
+        if not hasattr(cursor, "copy_expert"):
+            return False
+        texto = "\n".join("\t".join(_valor_copy(v) for v in fila) for fila in filas)
+        cursor.copy_expert(f"COPY {tabla} ({', '.join(columnas)}) FROM STDIN",
+                           io.StringIO(texto + "\n"))
+    return True
+
 
 class PostgresPipeline:
     """
@@ -773,7 +821,6 @@ class PostgresPipeline:
         from shared.models import Heading, Hreflang, Link, Resource, StructuredData
 
         item_type_map = {
-            LinkItem: self._make_link,
             HeadingItem: self._make_heading,
             HreflangItem: self._make_hreflang,
             StructuredDataItem: self._make_structured_data,
@@ -785,23 +832,30 @@ class PostgresPipeline:
         url_ids_by_type: dict[type, set[int]] = {}
 
         objects: list = []
+        # Los enlaces, como filas para COPY y no como objetos del ORM (#284):
+        # son 3 de cada 4 hijos, y crear y volcar cada objeto costaba mas que
+        # escribirlo.
+        enlaces: list[tuple] = []
         for item_cls, data in self._buffer:
+            if item_cls is LinkItem:
+                fila = self._fila_link(data)
+                if fila is not None:
+                    enlaces.append(fila)
+                    url_ids_by_type.setdefault(LinkItem, set()).add(fila[1])
+                continue
             factory = item_type_map.get(item_cls)
             if factory:
                 obj = factory(data)
                 if obj is not None:
                     objects.append(obj)
                     # Track url_id for pre-insert cleanup
-                    if item_cls == LinkItem:
-                        uid = getattr(obj, "from_url_id", None)
-                    else:
-                        uid = getattr(obj, "url_id", None)
+                    uid = getattr(obj, "url_id", None)
                     if uid is not None:
                         url_ids_by_type.setdefault(item_cls, set()).add(uid)
 
         self._buffer.clear()
 
-        if not objects:
+        if not objects and not enlaces:
             return
 
         try:
@@ -836,42 +890,48 @@ class PostgresPipeline:
                         ).delete(synchronize_session=False)
                         pending_deletes.append((already, to_delete))
 
-            self.session.bulk_save_objects(objects)
+            if enlaces and not _copiar(self.session, Link.__tablename__, _COLUMNAS_LINK, enlaces):
+                self.session.bulk_insert_mappings(
+                    Link, [dict(zip(_COLUMNAS_LINK, fila)) for fila in enlaces])
+            if objects:
+                self.session.bulk_save_objects(objects)
             self.session.commit()
             self._uncommitted = 0
             for already, to_delete in pending_deletes:
                 already.update(to_delete)
-            logger.debug("Flushed %d child items to database", len(objects))
+            logger.debug("Flushed %d child items to database", len(objects) + len(enlaces))
         except Exception:
             self._rollback()
-            logger.exception("Batch flush failed for %d items", len(objects))
+            logger.exception("Batch flush failed for %d items", len(objects) + len(enlaces))
 
     # ------------------------------------------------------------------
     # Factory helpers (dict -> ORM object)
     # ------------------------------------------------------------------
-    def _make_link(self, data: dict):
-        from shared.models import Link
-
-        from_url_hash = data.get("from_url_hash")
+    def _fila_link(self, data: dict) -> tuple | None:
+        """La fila de `links` de un enlace, en el orden de `_COLUMNAS_LINK`."""
         job_id = data.get("job_id")
-        from_url_id = self._resolve_url_id(from_url_hash, job_id)
+        from_url_id = self._resolve_url_id(data.get("from_url_hash"), job_id)
         if from_url_id is None:
             return None
-        return Link(
-            job_id=job_id,
-            from_url_id=from_url_id,
-            to_url=data.get("to_url"),
-            to_url_hash=data.get("to_url_hash"),
-            anchor_text=data.get("anchor_text"),
-            rel=data.get("rel"),
-            is_internal=data.get("is_internal", True),
-            link_position=data.get("link_position"),
+        # Un None explicito recibe el default del modelo, como con el ORM
+        # (`bulk_save_objects` omitia la columna). Los VARCHAR se recortan:
+        # un `target` de 21 caracteres (el nombre de un iframe) tumbaba el
+        # lote entero, los enlaces de unas 200 paginas.
+        return (
+            str(job_id),
+            from_url_id,
+            data.get("to_url"),
+            data.get("to_url_hash"),
+            data.get("anchor_text"),
+            _recortar(data.get("rel"), 128),
+            _por_defecto(data.get("is_internal"), True),
+            _recortar(data.get("link_position"), 20),
             # New Screaming Frog fields
-            follow=data.get("follow", True),
-            target=data.get("target"),
-            alt_text=data.get("alt_text"),
-            link_type=data.get("link_type", "hyperlink"),
-            repeticiones=data.get("repeticiones") or 1,
+            _por_defecto(data.get("follow"), True),
+            _recortar(data.get("target"), 20),
+            data.get("alt_text"),
+            _recortar(_por_defecto(data.get("link_type"), "hyperlink"), 20),
+            data.get("repeticiones") or 1,
         )
 
     def _make_heading(self, data: dict):

@@ -1338,3 +1338,65 @@
    - `tests/test_backlinks_api.py`: subir, las tres que se guardan, lo que
      no se lee y borrar.
    - `tests/test_backlinks_frontend.py`: el bloque del Resumen.
+
+<a id="d217"></a>
+217. **Los enlaces se escriben con `COPY`, no con objetos del ORM** (#284,
+   punto 5, parte de #278).
+
+   **Problema.** Después de la 215, el pipeline era la siguiente parte cara de
+   cada página. Los enlaces son tres de cada cuatro hijos (218 de 295 items en
+   la página sintética del banco, 2.195 de 4.630 en Wikipedia), y por cada uno
+   se creaba un objeto `Link` del ORM y se volcaba con `bulk_save_objects`.
+
+   **Decisión.** `_fila_link` deja cada enlace como una tupla en el orden de
+   `_COLUMNAS_LINK`, con los mismos valores y los mismos valores por defecto
+   que el antiguo `_make_link`. `_copiar` las escribe con
+   `COPY links (...) FROM STDIN` en formato de texto, por la conexión de la
+   sesión: va en la misma transacción que el `DELETE` de los hijos de la
+   página y que el resto del lote, así que un fallo tumba el lote entero, como
+   antes. Si la conexión no es psycopg2 sobre Postgres (los tests con SQLite),
+   `_copiar` devuelve False y se inserta con `bulk_insert_mappings`. Los
+   demás hijos (encabezados, recursos, datos estructurados, hreflang) siguen
+   con el ORM: entre todos son una cuarta parte.
+
+   Un `None` explícito en `follow`, `is_internal` o `link_type` recibe el
+   default del modelo, como con el ORM, que omitía la columna. Lo encontró la
+   revisión; hoy el spider no lo manda nunca.
+
+   Lo que se guarda cambia en dos casos, y los dos a mejor:
+   - **El U+0000:** Postgres no lo admite en un texto, y `_valor_copy` lo
+     quita. Con el ORM, un NUL en un ancla hacía fallar el lote entero, que
+     perdía los enlaces de hasta 200 items.
+   - **Los VARCHAR:** `rel`, `target`, `link_position` y `link_type` se
+     recortan a su columna. Un `target` de 21 caracteres (el nombre de un
+     iframe) también tumbaba el lote entero, y además deshacía las páginas sin
+     confirmar. También lo encontró la revisión: pasaba ya antes.
+
+   **Medido** con `scripts/bench/pipeline_por_pagina.py`, que pasa los items
+   reales de las páginas de `tests/fixtures/paginas/` por el pipeline real
+   contra el Postgres de tests, 100 veces cada una como páginas distintas. CPU
+   y reloj por página en el pipeline:
+
+   | Página | Antes (CPU / reloj) | Ahora (CPU / reloj) |
+   |---|---|---|
+   | BOE | 6,3 / 9,1 ms | 3,7 / 5,9 ms |
+   | Sintética | 10,3 / 16,2 ms | 5,5 / 10,2 ms |
+   | Wikipedia (2.195 enlaces) | 130 / 252 ms | 74 / 168 ms |
+
+   Las filas de cada tabla son las mismas, y la firma de los enlaces (el md5
+   de `row(...)::text` de cada fila con todas sus columnas, ordenados, para
+   que un nulo no se confunda con un desplazamiento) es idéntica con un código
+   y con el otro.
+
+   **Lo que se probó y no se hace.** Precompilar los `CSSSelector` de la
+   limpieza (punto 8 de #284): medido, 3,9 frente a 3,7 ms en el BOE y 134
+   frente a 131 ms en Wikipedia, dentro del ruido. No compensa el código.
+
+   Tests: `tests/test_pipeline_copy_db.py`, contra Postgres:
+   - tabuladores, saltos, `\N` literal, barras invertidas, emojis, NUL y nulos
+     llegan tal cual (el NUL, quitado);
+   - el camino sin `COPY` escribe las mismas filas;
+   - los lotes de una misma página se suman, y re-rastrearla sustituye sus
+     enlaces;
+   - un valor que la tabla no admite tumba el lote entero y no deja enlaces
+     sueltos.

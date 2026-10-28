@@ -519,3 +519,8 @@ a 0) y `test_frontera_reanudar_db.py` (Postgres de verdad: la frontera al
 reanudar con la menor profundidad de sus origenes, sin lo que no se habria
 seguido y sin perder destinos al paginar). La memoria con un millon de URLs
 pendientes se mide con `scripts/bench/frontera_memoria.py` (`--modo antes|ahora`).
+Los enlaces con `COPY` (#284, decision 217): `test_pipeline_copy_db.py` contra
+Postgres (escapes del formato de texto, NUL, nulos, el camino sin `COPY` con
+las mismas filas, lotes de una misma pagina y re-rastreo, y un fallo que tumba
+el lote entero). El coste del pipeline por pagina se mide con
+`scripts/bench/pipeline_por_pagina.py` (Postgres de pruebas, nunca `crawler_db`).
