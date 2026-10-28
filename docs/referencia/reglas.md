@@ -61,6 +61,10 @@
   Parquet) con su caso en `tests/test_enlaces_filtros.py`. 195.
 - Lo de leer `links` (filtrar por job, `SUM(repeticiones)`, censos archivados)
   esta en `CLAUDE.md` porque lo rompe cualquier consulta.
+- **Los enlaces se escriben con `COPY`** (`pipelines._copiar`): una columna
+  nueva de `links` que escriba el rastreo va en `_COLUMNAS_LINK` y en
+  `_fila_link`, en el mismo orden; los defaults de Python del modelo no se
+  aplican. 217.
 
 ## Analisis, incidencias y estado del job
 

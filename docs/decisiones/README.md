@@ -12,7 +12,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga, robots.txt y sitemaps en la cola | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140, 172, 173, 174, 186, 216 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124, 153, 154, 155, 187, 198, 215 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137, 156, 160, 164, 167, 170, 171 |
-| [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152, 183, 195, 212 |
+| [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152, 183, 195, 212, 217 |
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157, 161, 168, 190, 210, 213, 214 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165, 188, 191, 192, 197 |
@@ -243,6 +243,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 214 | Las trampas de rastreo (sesión en la URL, `&amp;` copiado a los enlaces, calendarios que se van al futuro, búsqueda interna, facetas combinatorias, segmentos repetidos) se detectan sobre lo rastreado: una por plantilla y una clasificación por URL, con cuántas URLs genera y qué parte del rastreo se lleva | [`incidencias`](incidencias.md#d214) |
 | 215 | `parse` no repite trabajo: la limpieza y trafilatura una vez por página, la posición de los enlaces sin un XPath por ancestro, extruct solo con microdata o RDFa a la vista y las URLs normalizadas en caché; lo que sale, igual que antes | [`contenido`](contenido.md#d215) |
 | 216 | La frontera del rastreo no crece en memoria: la cola de Scrapy en disco (un `JOBDIR` por ejecución, que pone y borra el worker), el dupefilter con 8 bytes por petición, las cachés del pipeline con tope y, al reanudar, lo ya rastreado en claves compactas y la frontera con la profundidad que habría tenido; con 1 millón de peticiones pendientes, 220 MB planos en vez de 2,5 GB subiendo | [`render-y-descarga`](render-y-descarga.md#d216) |
+| 217 | Los enlaces se escriben con `COPY` en la transacción del lote, no con objetos del ORM (`_fila_link`, `_COLUMNAS_LINK`; con otra BD, `bulk_insert_mappings`); el pipeline gasta la mitad de CPU por página con las mismas filas, y un U+0000 en un ancla se quita en vez de tumbar el lote | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d217) |
 
 ## Anadir una decision
 
