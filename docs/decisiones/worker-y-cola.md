@@ -334,3 +334,109 @@
 
    `tests/test_cola.py` añade la prioridad entre las dos colas, también contra
    Redis de verdad.
+
+<a id="d220"></a>
+220. **Rastreo incremental en los programados de un perfil: se pide lo que toca y el resto se copia del censo anterior antes del análisis, y cada job sigue siendo una foto completa**
+
+   **Problema.** Cada disparo semanal rastreaba el sitio entero. En un sitio
+   con cortesía, el tiempo lo pone el número de peticiones, no la CPU: Lopesan
+   va a 1,7 URL/s después de #282. Casi todo es igual que la semana anterior,
+   así que es pagar cada semana el censo entero para ver lo poco que cambia.
+   #36 F4 pedía pedir solo lo que toca, sin que el analizador, el PageRank, la
+   comparación ni las alertas tuvieran que saber que no se pidió todo.
+
+   **Decisión.**
+   - **Se activa en el perfil** (`config.incremental.activo`, con
+     `completo_cada` = 4, `muestra_control` = 0,1, `umbral_control` = 0,2 e
+     `intervalo_max` = 4 ciclos). Solo lo leen los disparos de una
+     programación (`crear_job_de_disparo`, también «Lanzar ahora»). Un rastreo
+     puntual lo ignora y rastrea todo. Apagado, nada cambia: `jobs.incremental`
+     queda NULL.
+   - **Un ciclo es un job del perfil, no un día**: no hace falta leer el cron
+     para saber qué toca, y «Lanzar ahora» cuenta igual.
+   - **Selección al crear el job** (`shared/incremental.preparar_job`). El
+     ciclo sale **completo** si no hay censo anterior del perfil con estado, o
+     si el anterior acabó truncado: lo que se copia tiene que ser una foto
+     completa. También si la huella de la configuración o de las semillas ha
+     cambiado (sin el bloque `incremental`), si el anterior lo pidió
+     (`forzar_completo`), o si le toca el completo de cada N ciclos, que es el
+     único que confirma que una URL ha desaparecido. Si no, es incremental:
+     `job_frontera` recibe lo que toca de `url_state` (`proximo_ciclo <=
+     ciclo`), lo fijo (semillas, portadas, hubs del percentil 95 de enlaces
+     salientes) y una muestra al azar del resto. Si algo falla al preparar, el
+     job sale completo con `error_al_preparar`: rastrear de más nunca deja una
+     foto incompleta.
+   - **Spider**: lo del censo anterior que no está en la frontera va al mismo
+     conjunto de «ya rastreado» que usa la reanudación, así que ni los
+     enlaces, ni el sitemap, ni las redirecciones lo piden, sin tocar `parse`.
+     La frontera se pide con la profundidad del censo anterior (no como
+     semilla) y, sin render, condicional (`If-None-Match` /
+     `If-Modified-Since`). Con render no: Chromium que recibe un 304 sin copia
+     en caché pinta una página vacía. Un 304 a una petición condicional es una
+     fila sin hijos con `fetch_mode='not_modified'`: guardada como página
+     normal sería no indexable, y sin guardar nada el job acabaría con
+     «rastreadas > 0, guardadas = 0» (`persistence_failed`). Lo nuevo se
+     descubre como siempre: por los enlaces de lo pedido y por el sitemap,
+     que se lee entero en cada ciclo.
+   - **Arrastre** (`analysis/arrastre.py`), en el worker, después del rastreo
+     y antes del análisis, en una transacción:
+     1. completa los 304 con la fila del anterior;
+     2. copia a `urls` lo del anterior que no está (`fetch_mode='carried'`),
+        con su `last_crawled_at` de entonces. Las columnas que calcula el
+        análisis vuelven a su valor por defecto. Un test obliga a clasificar
+        cada columna nueva de `urls` (copiada, calculada o de la fila) y a
+        copiar todo lo que escribe el pipeline;
+     3. copia los hijos (metadatos, encabezados, hreflang sin retorno ni
+        validez, datos estructurados sin validar, recursos, contenido con el
+        original sin limpiar, cabeceras, extracción a medida, enlaces no
+        rastreables) y los enlaces, de `links` o del Parquet si el anterior
+        está archivado (decisión 150), con el candado del anterior. No copia
+        incidencias, Search Console ni nada del análisis;
+     4. aplica la membresía del sitemap de ESTE rastreo, con la regla de
+        siempre (`True`/`False`/`NULL`). El spider la escribe al cerrar,
+        cuando lo copiado aún no existe, así que deja sus hashes en
+        `sitemap_arrastre`;
+     5. **poda** lo copiado (HTML 2xx) que ya no se alcanza desde las
+        semillas, el sitemap o el destino de una redirección (el spider no
+        guarda la redirección como enlace). Si una página pedida quita el
+        enlace a una que no tocaba, esa saldría huérfana nueva y en la
+        comparación nunca «desaparecería». Un completo no la habría
+        encontrado.
+
+     Con el arrastre hecho (`jobs.incremental.arrastre.hecho`) no se repite.
+     Si el censo anterior ya no existe, el job acaba `failed` con
+     `origen_arrastre_borrado`; si el arrastre falla, con `arrastre_fallido`.
+     Una foto incompleta no es `completed` (decisiones 20 y 28).
+   - **Estado** (`shared/incremental.actualizar_estado`), después del análisis
+     de todo job con `jobs.incremental`, completo o incremental. Por URL:
+     firma del contenido (`urls.content_hash`) y firma SEO (estado, destino,
+     title, description, canonical, robots, H1 y enlaces salientes). El
+     intervalo es adaptativo (StormCrawler): sin cambio crece ×1,4 hasta el
+     máximo; con cambio se acerca al mínimo un 20 % por ciclo. Un error o un
+     muro vuelve a tocar en el siguiente ciclo y sin cabeceras condicionales.
+     Lo copiado conserva su turno. Lo que no está en el job sale de
+     `url_state`. Si en la muestra de control cambia más del umbral, o cambia
+     el robots.txt, el siguiente ciclo es completo. Best-effort: si falla, el
+     siguiente sale completo (`sin_estado`).
+   - En un incremental no corre la comprobación de render por plantilla:
+     miraría páginas que no se han pedido.
+   - **Que no parezca más fresco de lo que es** (decisión 20): la ficha del
+     rastreo dice qué parte es copia y de cuándo es lo más antiguo, y cada URL
+     lleva su `fetch_mode` y su `last_crawled_at` real.
+
+   **Lo que no hace (todavía).** El `lastmod` del sitemap no adelanta el turno
+   de una URL. Los topes por carpeta no cuentan lo copiado. Las sondas de
+   respuesta, las capturas y la comprobación de render solo miran lo pedido.
+   Una página que se ha movido de nivel conserva la profundidad vieja hasta el
+   siguiente completo. Una página que no tocaba y ya no enlaza nadie, pero
+   que se pidió por la frontera, no se poda: se pidió y respondió.
+
+   `tests/test_incremental.py` cubre las reglas puras (completo o
+   incremental, intervalo, estado de una URL) y la clasificación de columnas.
+   `tests/test_incremental_db.py` (Postgres) prueba un ciclo completo y uno
+   incremental de punta a punta: selección, 304 completado, arrastre desde
+   `links` y desde Parquet, sitemap, poda, idempotencia, estado, la muestra de
+   control que fuerza un completo, la base truncada y el origen borrado.
+   `tests/test_spider_incremental.py` prueba el spider: lo que no toca no se
+   pide, la frontera condicional con su profundidad, nada de condicionales
+   con render, el 304 y la reanudación de un incremental ya arrastrado.

@@ -2823,6 +2823,32 @@
           </div>
         </template>
 
+        <!-- Rastreo incremental (decision 220): que parte del censo es copia
+             del anterior y de cuando, para que el dato no parezca mas fresco
+             de lo que es. -->
+        <template x-if="job.incremental && job.incremental.modo === 'incremental' && job.incremental.arrastre">
+          <div class="card mb-2 filete-blue" data-testid="aviso-incremental">
+            <div class="text-sm">
+              <strong>Rastreo incremental.</strong>
+              Se pidieron solo las páginas que tocaban; el
+              <span x-text="fmt.num(job.incremental.arrastre.pct_arrastrado) + ' %'"></span>
+              del censo (<span x-text="fmt.num(job.incremental.arrastre.arrastradas_final)"></span>
+              URLs) está copiado del rastreo anterior<template x-if="job.incremental.arrastre.mas_antigua">
+                <span>; lo más antiguo se pidió el
+                  <span x-text="fmt.dia(job.incremental.arrastre.mas_antigua)"></span></span>
+              </template>.
+              <template x-if="job.incremental.arrastre.no_modificadas">
+                <span><span x-text="fmt.num(job.incremental.arrastre.no_modificadas)"></span>
+                  respondieron que no habían cambiado (304).</span>
+              </template>
+              Su profundidad es la del último rastreo en que se pidieron. Cada
+              <span x-text="(job.config.incremental || {}).completo_cada || 4"></span>
+              ciclos hay un rastreo completo, que es el único que confirma que una
+              página ha desaparecido.
+            </div>
+          </div>
+        </template>
+
         <!-- Topes por carpeta (decision 172): partes del sitio con su cupo
              agotado. El censo esta truncado y no se afirman ausencias. -->
         <template x-if="job.topes_carpeta && job.topes_carpeta.sin_rastrear > 0">

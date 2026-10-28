@@ -81,9 +81,8 @@ class CrawlProfile(Base):
 
     En F1 es «que semillas y que configuracion»: lanzar un job desde un perfil
     hereda cliente -> perfil -> lo que se cambie en el modal, y lo resuelto se
-    copia en `jobs.config`. La programacion, los umbrales de alerta y el modo
-    incremental son de F2/F4 y no estan aqui todavia: anadir columnas que
-    nadie lee invita a creer que hacen algo.
+    copia en `jobs.config`. El modo incremental (decision 220) va en su
+    `config.incremental`, y su estado por URL en `url_state`.
     """
 
     __tablename__ = "crawl_profiles"
@@ -568,6 +567,15 @@ class Job(Base):
     # NULL = el job no tenia topes. Con `sin_rastrear` > 0 el censo esta
     # truncado en esos grupos: el analisis no afirma ausencias ahi.
     topes_carpeta = Column(JSON, nullable=True)
+    # Rastreo incremental (#36 F4, decision 220), lo escribe
+    # `shared/incremental.py`: `{modo: completo|incremental, motivo, ciclo,
+    # ciclos_desde_completo, prev_job_id, seleccion, arrastre, estado,
+    # forzar_completo}`. NULL = el job no es de un perfil con
+    # `incremental.activo`, que es rastrear todo como siempre. En un
+    # incremental, lo que no se pidio se copia del censo `prev_job_id` antes
+    # del analisis (`analysis/arrastre.py`): el job sigue siendo una foto
+    # completa, y `urls.fetch_mode` dice de cada fila si se pidio o no.
+    incremental = Column(JSON(none_as_null=True), nullable=True)
 
     seeds = Column(JSON, nullable=False)  # list of seed URLs
     config = Column(JSON, nullable=False, default=dict)
@@ -663,6 +671,15 @@ class Url(Base):
     redirect_type = Column(Integer, nullable=True)           # HTTP redirect code (301, 302, 307, 308)
     status_text = Column(String(64), nullable=True)          # "OK", "Not Found", "Moved Permanently"
     last_modified = Column(String(128), nullable=True)       # Last-Modified header
+    # `ETag` de la respuesta, para pedirla condicional en el siguiente rastreo
+    # incremental (decision 220). NULL = no la mando o censo anterior.
+    etag = Column(String(256), nullable=True)
+    # Como llego la fila a un job incremental (decision 220): `fetched` (se
+    # pidio y respondio), `not_modified` (304: el servidor dijo que no habia
+    # cambiado y el arrastre la completo con el censo anterior) o `carried`
+    # (no tocaba pedirla: copiada del censo anterior, con su
+    # `last_crawled_at`). NULL = rastreo completo, como todos los de antes.
+    fetch_mode = Column(String(16), nullable=True)
     http_version = Column(String(16), nullable=True)         # "HTTP/1.1", "HTTP/2"
     # Bytes que viajan por el cable (comprimidos): es el peso que cuenta para el
     # presupuesto de rastreo y para las Core Web Vitals. `content_length` es el
@@ -1331,6 +1348,94 @@ class SitemapEntry(Base):
     __table_args__ = (
         Index("ix_sment_job_hash", "job_id", "url_hash"),
     )
+
+
+class UrlState(Base):
+    """Lo que se sabe de cada URL de un perfil entre rastreos (decision 220).
+
+    Una fila por (perfil, URL), con lo necesario para decidir si se pide en el
+    siguiente incremental sin tocar `urls`: cada cuantos ciclos cambia
+    (intervalo adaptativo), en que ciclo toca, sus cabeceras condicionales y
+    sus firmas. La escribe `shared/incremental.actualizar_estado` despues del
+    analisis de cada job del perfil, completo o incremental. Las URLs que
+    desaparecen del censo salen de aqui en esa misma pasada.
+
+    Va por perfil y por `url_hash`, nunca por `urls.id`: el id cambia en cada
+    job.
+    """
+
+    __tablename__ = "url_state"
+
+    profile_id = Column(
+        UUID(as_uuid=True), ForeignKey("crawl_profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    url_hash = Column(String(64), primary_key=True)
+    url = Column(Text, nullable=False)
+    # La profundidad del ultimo rastreo: lo que toca se pide con ella, no
+    # como semilla (si no, el analisis la veria a profundidad 0).
+    profundidad = Column(Integer, nullable=True)
+    etag = Column(String(256), nullable=True)
+    last_modified = Column(String(128), nullable=True)
+    # `urls.content_hash` (contenido principal normalizado) y una firma de lo
+    # SEO (estado, title, description, canonical, robots, H1 y enlaces).
+    firma_contenido = Column(String(64), nullable=True)
+    firma_seo = Column(String(64), nullable=True)
+    # Cada cuantos ciclos se pide, en ciclos del perfil (un ciclo = un job).
+    intervalo = Column(Float, nullable=False, default=1.0)
+    # El ciclo en que vuelve a tocar.
+    proximo_ciclo = Column(Integer, nullable=False, default=0)
+    # Se pide en todos los ciclos: semillas, portadas y hubs.
+    fijo = Column(Boolean, nullable=False, default=False)
+    sin_cambios = Column(Integer, nullable=False, default=0)
+    ultimo_cambio_ciclo = Column(Integer, nullable=True)
+    ultima_peticion = Column(DateTime(timezone=True), nullable=True)
+    last_job_id = Column(
+        UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True,
+    )
+
+    __table_args__ = (
+        Index("ix_url_state_toca", "profile_id", "proximo_ciclo"),
+    )
+
+
+class JobFrontera(Base):
+    """Lo que un job incremental tiene que pedir (decision 220).
+
+    La rellena `shared/incremental.preparar_job` al crear el job, desde
+    `url_state`: lo que toca, lo fijo y una muestra de control al azar de lo
+    que no toca. El spider no sabe de perfiles: lee esto y su job.
+    """
+
+    __tablename__ = "job_frontera"
+
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"),
+                    primary_key=True)
+    url_hash = Column(String(64), primary_key=True)
+    url = Column(Text, nullable=False)
+    profundidad = Column(Integer, nullable=True)
+    etag = Column(String(256), nullable=True)
+    last_modified = Column(String(128), nullable=True)
+    # toca | fijo | control
+    motivo = Column(String(16), nullable=False)
+
+
+class SitemapArrastre(Base):
+    """URLs del censo anterior que estan en el sitemap de ESTE job sin haberse
+    pedido en el (decision 220).
+
+    El spider marca `in_sitemap` al cerrar, cuando las filas arrastradas
+    todavia no existen: deja aqui sus hashes y el arrastre les aplica despues
+    la misma regla `True/False/NULL` que a las demas. Sin esto saldrian con
+    el sitemap de la semana pasada o a NULL, y sus `not_in_sitemap`
+    desaparecerian como «resueltas».
+    """
+
+    __tablename__ = "sitemap_arrastre"
+
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"),
+                    primary_key=True)
+    url_hash = Column(String(64), primary_key=True)
 
 
 class LogImport(Base):

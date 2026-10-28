@@ -421,6 +421,27 @@ class ReglaSegmento(BaseModel):
     si: dict[str, Any] | None = None
 
 
+class IncrementalConfig(BaseModel):
+    """Rastreo incremental de un perfil programado (#36 F4, decision 220).
+
+    Solo lo leen los disparos de una programacion colgada de un perfil
+    (`shared/incremental.preparar_job`): un rastreo puntual o de copia fija lo
+    ignora y rastrea todo. Apagado, nada cambia.
+    """
+
+    activo: bool = False
+    # Un completo cada N ciclos (incluido), y siempre que cambie la config,
+    # las semillas o el robots.txt: es el unico que puede afirmar que una URL
+    # ha desaparecido de verdad.
+    completo_cada: int = Field(default=4, ge=1, le=52)
+    # Fraccion al azar de lo que no toca que se pide igual en cada ciclo. Si
+    # cambia mas de `umbral_control`, el siguiente es completo.
+    muestra_control: float = Field(default=0.1, ge=0, le=1)
+    umbral_control: float = Field(default=0.2, gt=0, le=1)
+    # El intervalo de una URL que no cambia crece hasta esto, en ciclos.
+    intervalo_max: float = Field(default=4.0, ge=1, le=52)
+
+
 class JobConfig(BaseModel):
     """Crawl configuration that travels with every job."""
 
@@ -497,6 +518,8 @@ class JobConfig(BaseModel):
     # (que entra, que no) es lo que el modelo lee para decidir, y sin ella solo
     # tiene el nombre.
     taxonomia: list[str | dict[str, Any]] = Field(default_factory=list, max_length=20)
+    # Rastreo incremental en los programados de un perfil (decision 220).
+    incremental: IncrementalConfig = Field(default_factory=IncrementalConfig)
 
     @field_validator("taxonomia")
     @classmethod
@@ -995,6 +1018,10 @@ class JobDetailResponse(JobResponse):
     # Lo que dejaron sin rastrear los topes por carpeta (decision 172): por
     # regla y por grupo cortado. NULL = el job no tenia topes.
     topes_carpeta: dict[str, Any] | None = None
+    # Rastreo incremental (decision 220): modo, motivo del completo, que se
+    # selecciono y, tras el arrastre, cuanto se copio del censo anterior y de
+    # cuando es. NULL = el perfil no tiene el incremental activo.
+    incremental: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -1170,6 +1197,10 @@ class UrlResponse(BaseModel):
     bloqueada_googlebot: bool | None = None
     # La respuesta era la pagina o un muro delante (decision 103).
     response_class: str | None = None
+    # En un incremental (decision 220): fetched, not_modified o carried
+    # (copiada del censo anterior; su `last_crawled_at` es de entonces).
+    fetch_mode: str | None = None
+    etag: str | None = None
     inlinks_count: int | None = None
     outlinks_count: int | None = None
     external_outlinks_count: int | None = None

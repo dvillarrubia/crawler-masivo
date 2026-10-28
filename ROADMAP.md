@@ -939,8 +939,12 @@ es cada plantilla— y va con
   cliente con su evolución, y rastreos incrementales que solo vuelven a pedir lo
   que cambia.
   Hecho casi todo F1-F3 (revisión del tracker del 27-oct); disparos con
-  candado, cola de programados y «Lanzar ahora» en la decisión 209. Falta:
-  F4 (incremental), `ignore_patterns` y confirmar alertas en dos ejecuciones.
+  candado, cola de programados y «Lanzar ahora» en la decisión 209. F4
+  (incremental) en la decisión 220, opcional por perfil: selección por
+  intervalo adaptativo, peticiones condicionales, arrastre del censo anterior
+  y poda. Falta: medirlo en producción contra un completo del mismo día
+  (criterio de #36), el `lastmod` del sitemap como pista, `ignore_patterns` y
+  confirmar alertas en dos ejecuciones.
 - [#31](https://github.com/dvillarrubia/crawler-masivo/issues/31) **Backlinks**
   de Ahrefs o DataForSEO: un PageRank con la autoridad que entra desde fuera, y
   mapas de redirección para recuperar enlaces perdidos. *Primera parte hecha (decisión 212)*: CSV de Ahrefs, Semrush o Majestic por

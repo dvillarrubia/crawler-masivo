@@ -47,6 +47,9 @@ class PageItem(scrapy.Item):
     indexability_status = scrapy.Field()
     blocked_by_robots = scrapy.Field()
     response_class = scrapy.Field()
+    # Rastreo incremental (decision 220)
+    etag = scrapy.Field()
+    fetch_mode = scrapy.Field()
 
 
 class HtmlMetaItem(scrapy.Item):

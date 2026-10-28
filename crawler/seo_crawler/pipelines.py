@@ -259,6 +259,10 @@ class PostgresPipeline:
         data = dict(item)
         url_hash = data["url_hash"]
         job_id = data["job_id"]
+        # En un incremental (decision 220) toda fila que llega del rastreo se
+        # pidio: `fetched`, salvo el 304, que ya viene marcado.
+        if getattr(spider, "_incremental", None) and not data.get("fetch_mode"):
+            data["fetch_mode"] = "fetched"
 
         try:
             existing = (
@@ -279,7 +283,7 @@ class PostgresPipeline:
                     "text_ratio", "redirect_type", "status_text",
                     "last_modified", "http_version", "transfer_size",
                     "indexability_status", "blocked_by_robots",
-                    "response_class",
+                    "response_class", "etag", "fetch_mode",
                 ):
                     setattr(existing, field, data.get(field))
                 # crawl_depth NO se sobrescribe sin mas: se conserva el MINIMO.
@@ -346,6 +350,8 @@ class PostgresPipeline:
                     indexability_status=data.get("indexability_status"),
                     blocked_by_robots=data.get("blocked_by_robots"),
                     response_class=data.get("response_class"),
+                    etag=data.get("etag"),
+                    fetch_mode=data.get("fetch_mode"),
                 )
                 self.session.add(url_obj)
                 self.session.flush()

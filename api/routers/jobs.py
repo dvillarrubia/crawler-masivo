@@ -558,7 +558,8 @@ def borrar_job(db: Session, job: Job, *, confirmar: bool = True,
     job que no este terminado, y `deleting` no lo esta.
     """
     from shared.models import (CleaningRuleset, CrawlProfile, Decision, EnrichmentRun,
-                               ProfileRun, RobotsTxt)
+                               JobFrontera, ProfileRun, RobotsTxt, SitemapArrastre,
+                               UrlState)
 
     job_id = job.id
     filas: dict[str, int] = {}
@@ -577,6 +578,9 @@ def borrar_job(db: Session, job: Job, *, confirmar: bool = True,
     # A mano y no solo por el ON DELETE SET NULL: igual en cualquier motor.
     db.query(CrawlProfile).filter(CrawlProfile.last_job_id == job_id).update(
         {CrawlProfile.last_job_id: None}, synchronize_session=False)
+    # Y el estado incremental de sus URLs (decision 220) se queda sin job.
+    db.query(UrlState).filter(UrlState.last_job_id == job_id).update(
+        {UrlState.last_job_id: None}, synchronize_session=False)
     # Analisis enriquecido (#40) y reglas de limpieza: a mano, como links e
     # issues (en SQLite no hay ON DELETE CASCADE). Una ejecucion de
     # enriquecido en curso se para sola: en el siguiente lote su fila ya no
@@ -593,7 +597,10 @@ def borrar_job(db: Session, job: Job, *, confirmar: bool = True,
     for nombre, modelo in (("decisions", Decision), ("enrichment_runs", EnrichmentRun),
                            ("cleaning_rulesets", CleaningRuleset), ("robots_txt", RobotsTxt),
                            # La fila de su evolucion (decision 130): una por job.
-                           ("profile_runs", ProfileRun)):
+                           ("profile_runs", ProfileRun),
+                           # Rastreo incremental (decision 220).
+                           ("job_frontera", JobFrontera),
+                           ("sitemap_arrastre", SitemapArrastre)):
         filas[nombre] = db.query(modelo).filter(modelo.job_id == job_id).delete(
             synchronize_session=False)
 

@@ -749,6 +749,10 @@ def _insert_url_batch(
             pagerank=d.get("pagerank"),
             in_sitemap=d.get("in_sitemap"),
             bloqueada_googlebot=d.get("bloqueada_googlebot"),
+            # Si se pidio o se copio del anterior (decision 220): sin esto un
+            # incremental restaurado pasaria por rastreado entero.
+            etag=d.get("etag"),
+            fetch_mode=d.get("fetch_mode"),
         )
         db.add(url)
         db.flush()

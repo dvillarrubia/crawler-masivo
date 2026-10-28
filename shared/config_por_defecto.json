@@ -30,6 +30,7 @@
       "max_outlinks": 100,
       "max_redirect_chain_length": 1,
       "min_word_count": 200,
+      "pagerank_externo_beta": 0.5,
       "respuesta_lenta_grave_ms": 3000,
       "respuesta_lenta_min_paginas": 20,
       "respuesta_lenta_ms": 1000,
@@ -105,6 +106,13 @@
     },
     "impersonate": "chrome150",
     "include_patterns": [],
+    "incremental": {
+      "activo": false,
+      "completo_cada": 4,
+      "intervalo_max": 4.0,
+      "muestra_control": 0.1,
+      "umbral_control": 0.2
+    },
     "marcas": [],
     "max_depth": 3,
     "max_urls": null,
