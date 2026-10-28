@@ -81,6 +81,9 @@ TABLAS_DEL_CENSO = TABLAS_POR_JOB + TABLAS_POR_URL + (
     "robots_txt",
     # La fila de la evolucion de cada job (decision 130).
     "profile_runs",
+    # Rastreo incremental (decision 220): lo que toca pedir y lo del censo
+    # anterior que esta en el sitemap, unas filas por URL del sitio.
+    "job_frontera", "sitemap_arrastre",
 )
 
 

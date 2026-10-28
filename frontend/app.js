@@ -8341,6 +8341,13 @@ const CAMPOS_CONFIG = [
   { ruta: 'crawl_behavior.stall_timeout_minutes', grupo: 'ritmo', etiqueta: 'Darlo por atascado tras (minutos sin avanzar; 0 = nunca)', tipo: 'entero', min: 0, max: 1440 },
   { ruta: 'crawl_behavior.parar_si_bloqueado', grupo: 'ritmo', etiqueta: 'Pararse si el sitio lo bloquea', tipo: SI_NO },
   { ruta: 'crawl_behavior.respetar_retry_after', grupo: 'ritmo', etiqueta: 'Esperar lo que pida el sitio con un 429 o un 503', tipo: SI_NO },
+  // Rastreo incremental (decision 220): solo lo leen los programados de un perfil.
+  { ruta: 'incremental.activo', grupo: 'ritmo', etiqueta: 'Rastreo incremental en los programados', tipo: SI_NO,
+    ayuda: 'Cada ciclo pide solo lo que toca (lo que cambia a menudo, lo nuevo, portadas y hubs, y una muestra al azar) y copia el resto del censo anterior. Un rastreo puntual lo ignora.' },
+  { ruta: 'incremental.completo_cada', grupo: 'ritmo', etiqueta: 'Un rastreo completo cada (ciclos)', tipo: 'entero', min: 1, max: 52,
+    ayuda: 'El completo es el único que confirma que una página ha desaparecido. También sale completo si cambia la configuración, las semillas o el robots.txt.' },
+  { ruta: 'incremental.muestra_control', grupo: 'ritmo', etiqueta: 'Muestra al azar de lo que no toca (0-1)', tipo: 'decimal', min: 0, max: 1,
+    ayuda: 'Si en la muestra cambia más del 20 %, el ciclo siguiente es completo.' },
   { ruta: 'impersonate', grupo: 'ritmo', etiqueta: 'Huella TLS', tipo: 'huella',
     ayuda: 'Va con el navegador con el que se presenta. Lo normal es dejarla automática.' },
 

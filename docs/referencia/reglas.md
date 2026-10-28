@@ -44,6 +44,10 @@
   salen en un `HijosItem` por tipo** (filas como dicts): quien lea la salida
   de `parse` en un test pasa por `items.desplegar()`, y un campo nuevo de una
   fila va en el dict del spider y en su item de una fila. 219.
+- **En un incremental, lo que no toca va al conjunto de «ya rastreado»** del
+  spider (`_already_crawled_hashes`), el mismo de la reanudacion: una forma
+  nueva de encolar URLs tiene que mirarlo, o pedira lo que no tocaba. Un 304
+  solo es «no modificada» si la peticion era condicional. 220.
 - **Un muro no es la pagina** (`urls.response_class`, `shared/respuestas.py`): ni
   indexable ni incidencias de pagina, y un rastreo bloqueado es `failed` y no alerta. 103.
 - **Un tope por carpeta se aplica al encolar** (lo que no cabe no se pide) y su
@@ -77,6 +81,10 @@
   los enlaces del censo dentro del mismo candado (95, 150).
 - **Un job solo es `completed` si su dato esta completo**; cero URLs no es un
   sitio limpio. 28, 32.
+- **Una columna nueva de `urls` o una tabla hija nueva se decide en el
+  arrastre** (`analysis/arrastre.py`): se copia, la calcula el analisis o es de
+  la fila. Lo vigila `tests/test_incremental.py` para `urls`; una tabla hija
+  que no este en `HIJOS` sale vacia en lo arrastrado. 220.
 - **La accesibilidad nunca es `error`** (topa la nota SEO) y lo que axe deja en
   `incomplete` no se afirma; sin paginas evaluadas no hay «sin fallos». Entre
   censos, un aviso de axe casa por plantilla y regla, y solo es «nuevo» o

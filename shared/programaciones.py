@@ -441,6 +441,10 @@ def crear_job_de_disparo(db, programacion, datos: dict[str, Any], ahora: datetim
               status="pending", programacion_id=programacion.id)
     db.add(job)
     db.flush()
+    # Completo o incremental, y si es incremental, que toca (decision 220).
+    from shared.incremental import preparar_job
+
+    preparar_job(db, job)
     if job.profile_id is not None:
         db.query(CrawlProfile).filter(
             CrawlProfile.id == job.profile_id

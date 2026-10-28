@@ -766,10 +766,25 @@ def _run_job(job_id: str) -> None:
     if cancelled:
         final_status = "cancelled"
 
+    # -- Incremental (decision 220): lo no pedido, del censo anterior --
+    # Antes del analisis: el analisis tiene que ver la foto completa. Si el
+    # arrastre falla, la foto esta incompleta y el job no puede ser
+    # `completed` (decision 28): se cierra fallido, sin analizar.
+    motivo_arrastre = None
+    incremental = final_status == "completed" and not cancelled and _es_incremental(job_id)
+    if incremental:
+        motivo_arrastre = _arrastrar(job_id)
+        if motivo_arrastre:
+            final_status = "failed"
+
     # -- Trigger analysis (best-effort) while status is 'analyzing' --
     if final_status == "completed" and not cancelled:
         analisis_ok = _trigger_analysis(job_id)
-        if not job_config.get("render_js", False):
+        if analisis_ok:
+            _actualizar_estado_incremental(job_id)
+        # En un incremental casi todo es copia: la comprobacion de render
+        # miraria paginas que no se han pedido (decision 220).
+        if not job_config.get("render_js", False) and not incremental:
             _comprobar_render_js(job_id)
 
     # -- Finalise status --
@@ -801,6 +816,8 @@ def _run_job(job_id: str) -> None:
                 job_id, razon_cero=razon_cero, sin_guardar=sin_guardar,
                 stalled=stalled, timed_out=timed_out, consumir=True,
                 bloqueo=bloqueo))
+            if motivo_arrastre:
+                motivo = motivo_arrastre
             job.finish_reason = motivo
             if salud is not None:
                 job.health = salud
@@ -847,6 +864,68 @@ def _run_job(job_id: str) -> None:
         # esta archivada: `run_analysis` la restaura y la vuelve a archivar
         # bajo el candado del job, el mismo que toma el archivado.
         _archivar_enlaces(job_id)
+
+
+def _es_incremental(job_id: str) -> bool:
+    """Si el job es un incremental (decision 220). Ante la duda, no."""
+    try:
+        from shared.database import SessionLocal
+        from shared.incremental import es_incremental
+        from shared.models import Job
+
+        session = SessionLocal()
+        try:
+            job = session.get(Job, job_id)
+            return job is not None and es_incremental(job)
+        finally:
+            session.close()
+    except Exception:
+        logger.exception("Job %s: no se pudo saber si es incremental", job_id)
+        return False
+
+
+def _arrastrar(job_id: str) -> str | None:
+    """El arrastre del incremental (decision 220). None si fue bien; si no,
+    el `finish_reason` con el que se cierra el job (fallido): sin el
+    arrastre la foto esta incompleta, y un censo incompleto no es
+    `completed` (decisiones 20 y 28)."""
+    try:
+        from analysis.arrastre import OrigenBorrado, arrastrar
+        from shared.database import SessionLocal
+
+        session = SessionLocal()
+        try:
+            arrastrar(session, job_id)
+            return None
+        except OrigenBorrado:
+            session.rollback()
+            logger.error("Job %s: el censo del que se arrastra ya no existe", job_id)
+            return "origen_arrastre_borrado"
+        finally:
+            session.close()
+    except Exception:
+        logger.exception("Job %s: el arrastre del incremental fallo", job_id)
+        return "arrastre_fallido"
+
+
+def _actualizar_estado_incremental(job_id: str) -> None:
+    """`url_state` del perfil tras analizar un job con incremental (decision
+    220). Best-effort con el `try` cubriendo la funcion ENTERA (decision 74):
+    si falla, el siguiente ciclo del perfil sale completo (`sin_estado`)."""
+    try:
+        from shared.database import SessionLocal
+        from shared.incremental import actualizar_estado
+
+        session = SessionLocal()
+        try:
+            actualizar_estado(session, job_id)
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+    except Exception:
+        logger.exception("Job %s: no se pudo actualizar el estado incremental", job_id)
 
 
 def _registrar_evolucion(job_id: str) -> None:

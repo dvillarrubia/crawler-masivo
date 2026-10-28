@@ -16,9 +16,10 @@ import json
 import logging
 import os
 import time
+import uuid
 from array import array
 from datetime import datetime, timezone
-from typing import Any, Generator
+from typing import Any, Generator, Iterator
 from urllib.parse import parse_qsl, urljoin, urlparse
 
 import redis
@@ -568,6 +569,15 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         # una ejecucion anterior de este job. La frontera se streamea desde
         # la BD en start_requests (ver _iter_frontier), no se carga entera.
         self._already_crawled_hashes: ClavesCompactas | set[int] = set()
+        # Rastreo incremental (decision 220): `jobs.incremental` si el job es
+        # incremental, None si no. Lo de su censo anterior que no toca va al
+        # mismo conjunto de «ya rastreado», asi que ni los enlaces ni el
+        # sitemap ni las redirecciones lo piden; lo que toca sale de
+        # `job_frontera` en `start_requests`, condicional.
+        self._incremental: dict[str, Any] | None = None
+        # Ya hay filas arrastradas (se reanuda un incremental ya cerrado): sus
+        # enlaces son del censo anterior y no se siembran.
+        self._con_arrastre = False
         self._resume_mode: bool = False
         # Sitemap ingestion state. La membresia guarda la clave compacta de
         # cada URL (`_hash_key`, 8 bytes en un array, con repeticiones) y no el
@@ -711,6 +721,10 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
 
             self.seed_urls = job.seeds or []
             self.job_config = job.config or {}
+            inc = getattr(job, "incremental", None) or {}
+            if inc.get("modo") == "incremental" and inc.get("prev_job_id"):
+                self._incremental = inc
+                self._prev_job_id = uuid.UUID(str(inc["prev_job_id"]))
 
             self.max_depth = self.job_config.get("max_depth", 3)
             self.max_urls = self.job_config.get("max_urls")
@@ -983,17 +997,40 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                     self._topes.contar(url_previa, _hash_key(hash_previo))
             if self._already_crawled_hashes:
                 self._resume_mode = True
-                self._crawled_count = (
-                    session.query(Url)
-                    .filter(Url.job_id == self.job_id)
-                    .count()
-                )
+                consulta = session.query(Url).filter(Url.job_id == self.job_id)
+                if self._incremental:
+                    # Lo arrastrado SI gasta `max_urls`: el tope es del censo,
+                    # y el censo lo incluye (decision 220).
+                    self._con_arrastre = session.query(
+                        consulta.filter(Url.fetch_mode == "carried").exists()).scalar()
+                self._crawled_count = consulta.count()
                 logger.info(
                     "Resume mode for job %s: %d URLs already crawled, "
                     "frontier will be streamed from DB",
                     self.job_id,
                     self._crawled_count,
                 )
+            if self._incremental:
+                if not isinstance(self._already_crawled_hashes, ClavesCompactas):
+                    self._already_crawled_hashes = ClavesCompactas.desde(
+                        self._already_crawled_hashes)
+                n = 0
+                for url_previa, h in self._hashes_no_pedir(session):
+                    clave = _hash_key(h)
+                    if self._already_crawled_hashes.anadir(clave):
+                        n += 1
+                        # Lo que no se pide estara en el censo: gasta su cupo
+                        # por carpeta como si se hubiera pedido, o un
+                        # incremental admitiria mas de lo que admite un
+                        # completo sin decir que esta truncado.
+                        if self._topes is not None:
+                            self._topes.contar(url_previa, clave)
+                if self.max_urls is not None:
+                    # Y el tope de URLs, lo mismo.
+                    self.max_urls = max(0, self.max_urls - n)
+                logger.info(
+                    "Incremental (decision 220): %d URLs del censo %s no tocan y no se "
+                    "piden", n, self._incremental.get("prev_job_id"))
         finally:
             session.close()
 
@@ -1087,6 +1124,102 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                 PageMethod(_evaluar_tolerante, _JS_TIEMPOS_DOCUMENTO),
             ],
         }
+
+    def _hashes_no_pedir(self, session) -> Iterator[tuple[str, str]]:
+        """Lo del censo anterior que no toca, `(url, url_hash)`: sus URLs
+        menos las de `job_frontera` (decision 220)."""
+        from sqlalchemy import exists
+
+        from shared.models import JobFrontera, Url
+
+        en_frontera = exists().where(JobFrontera.job_id == self.job_id,
+                                     JobFrontera.url_hash == Url.url_hash)
+        for url, h in (session.query(Url.url, Url.url_hash)
+                       .filter(Url.job_id == self._prev_job_id, ~en_frontera)
+                       .yield_per(10_000)):
+            yield url, h
+
+    def _filas_de_frontera(self) -> Iterator[tuple]:
+        """`job_frontera` del job por lotes (keyset sobre `url_hash`):
+        `(url, url_hash, profundidad, etag, last_modified)`."""
+        from shared.database import SessionLocal
+        from shared.models import JobFrontera
+
+        ultimo = ""
+        while True:
+            session = SessionLocal()
+            try:
+                filas = (
+                    session.query(JobFrontera.url, JobFrontera.url_hash,
+                                  JobFrontera.profundidad, JobFrontera.etag,
+                                  JobFrontera.last_modified)
+                    .filter(JobFrontera.job_id == self.job_id,
+                            JobFrontera.url_hash > ultimo)
+                    .order_by(JobFrontera.url_hash)
+                    .limit(self._LOTE_FRONTERA)
+                    .all()
+                )
+            finally:
+                session.close()
+            if not filas:
+                return
+            self._write_heartbeat()
+            yield from filas
+            ultimo = filas[-1][1]
+
+    def _peticiones_de_frontera(self) -> Generator[Request, None, None]:
+        """Lo que toca en un incremental (decision 220), con su profundidad
+        del censo anterior y, sin render, condicional.
+
+        Con render no: Chromium con `If-None-Match` que recibe un 304 sin copia
+        en cache pinta una pagina vacia. Ahi se pide entera.
+        """
+        n = 0
+        for url, _hash, profundidad, etag, last_modified in self._filas_de_frontera():
+            normalized = normalize_url(url)
+            if _hash_key(compute_url_hash(normalized)) in self._already_crawled_hashes:
+                continue
+            if not self._should_follow(normalized):
+                continue
+            if self._topes is not None:
+                # Se pide siempre (estaba en el censo anterior), y gasta cupo.
+                self._topes.contar(normalized, _hash_key(compute_url_hash(normalized)))
+            depth = 1 if profundidad is None else int(profundidad)
+            req = self._page_request(normalized, depth)
+            if not req.meta.get("playwright") and (etag or last_modified):
+                if etag:
+                    req.headers[b"If-None-Match"] = etag.encode("latin-1", "ignore")
+                if last_modified:
+                    req.headers[b"If-Modified-Since"] = last_modified.encode("latin-1", "ignore")
+                req.meta["condicional"] = True
+            req.priority -= depth * self.crawler.settings.getint("DEPTH_PRIORITY")
+            n += 1
+            yield req
+        logger.info("Incremental: %d URLs de la frontera pedidas", n)
+
+    def _no_modificada(self, response: Response) -> Generator:
+        """Un 304 a una peticion condicional (decision 220): la fila, sin
+        hijos. El arrastre la completa con la del censo anterior antes del
+        analisis; guardarla como pagina normal la haria no indexable, y no
+        guardar nada dejaria un job con «rastreadas > 0, guardadas = 0»."""
+        self._crawled_count += 1
+        self._update_redis_progress()
+        url = response.url
+        parsed = urlparse(url)
+        etag = response.headers.get(b"ETag", b"").decode("latin-1", errors="ignore") or None
+        last_modified = (response.headers.get(b"Last-Modified", b"")
+                         .decode("utf-8", errors="ignore") or None)
+        yield PageItem(
+            url=url, url_hash=compute_url_hash(url), host=parsed.hostname or "",
+            path=parsed.path or "/", scheme=parsed.scheme or "https",
+            is_internal=self._is_internal(url), crawl_depth=response.meta.get("depth", 0),
+            status_code=304, status_group=compute_status_group(304),
+            response_time_ms=round(response.meta.get("download_latency", 0) * 1000, 2),
+            job_id=self.job_id, url_length=len(url),
+            folder_depth=compute_folder_depth(url),
+            etag=etag[:256] if etag else None, last_modified=last_modified,
+            fetch_mode="not_modified",
+        )
 
     def _iter_frontier(self) -> Generator[tuple[str, int], None, None]:
         """Streamea la frontera (links descubiertos pero no rastreados), con la
@@ -1232,6 +1365,10 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             for sm_url in self._extra_sitemap_urls:
                 yield from self._sitemap_request(sm_url)
 
+        # Lo que toca en un incremental (decision 220).
+        if self._incremental:
+            yield from self._peticiones_de_frontera()
+
         # Resume frontier: discovered-but-not-yet-crawled URLs from a previous
         # run, streamed lazily from DB, con la profundidad que habrian tenido
         # (#276): la menor de las paginas que las enlazan, mas uno.
@@ -1262,6 +1399,10 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         # en un rastreo de todo lo que enlazan (a profundidad 1). Las semillas
         # que falten ya se han vuelto a pedir arriba.
         if self.max_depth < 1:
+            return
+        # Un incremental ya arrastrado tiene en `links` los enlaces del censo
+        # anterior: sembrarlos pediria lo que no tocaba.
+        if self._con_arrastre:
             return
         for url, depth in self._iter_frontier():
             normalized = normalize_url(url)
@@ -1591,6 +1732,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                 if h:
                     del_job[_hash_key(h)] = h
             hashes = sorted({del_job[k] for k in self._sitemap_claves if k in del_job})
+            if self._incremental:
+                self._persist_sitemap_arrastre(session, del_job)
             del del_job
             for start in range(0, len(hashes), 5000):
                 batch = hashes[start:start + 5000]
@@ -1629,6 +1772,28 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             logger.exception("Failed to persist sitemap membership")
         finally:
             session.close()
+
+    def _persist_sitemap_arrastre(self, session, del_job: dict[int, str]) -> None:
+        """Lo del censo anterior, sin pedir en este job, que esta en el
+        sitemap de ESTE job (decision 220): el arrastre le pone `in_sitemap`
+        cuando ya existe su fila."""
+        from shared.models import SitemapArrastre, Url
+
+        previas: dict[int, str] = {}
+        for (h,) in session.query(Url.url_hash).filter(
+                Url.job_id == self._prev_job_id).yield_per(20000):
+            k = _hash_key(h)
+            if k not in del_job:
+                previas[k] = h
+        en_sitemap = sorted({previas[k] for k in self._sitemap_claves if k in previas})
+        del previas
+        session.query(SitemapArrastre).filter(
+            SitemapArrastre.job_id == self.job_id).delete(synchronize_session=False)
+        for start in range(0, len(en_sitemap), 5000):
+            session.bulk_insert_mappings(SitemapArrastre, [
+                {"job_id": self.job_id, "url_hash": h}
+                for h in en_sitemap[start:start + 5000]])
+        logger.info("Incremental: %d URLs sin pedir estan en el sitemap", len(en_sitemap))
 
     # ------------------------------------------------------------------
     # URL filtering
@@ -1956,6 +2121,10 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                 except Exception:
                     pass
             self.crawler.engine.close_spider(self, "max_urls_reached")
+            return
+
+        if response.status == 304 and response.request.meta.get("condicional"):
+            yield from self._no_modificada(response)
             return
 
         # Chromium ha acabado en su pagina de error (chrome-error://...): la
@@ -2362,6 +2531,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             indexability_status=indexability_status_val,
             blocked_by_robots=response.meta.get("blocked_by_robots"),
             response_class=clase,
+            etag=(response.headers.get(b"ETag", b"").decode("latin-1", errors="ignore")[:256]
+                  or None),
         )
         # Solo las internas: con follow_external, una tanda de enlaces a redes
         # sociales o medios detras de Cloudflare paraba el rastreo de un sitio
