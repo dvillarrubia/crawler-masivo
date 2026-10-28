@@ -65,6 +65,8 @@ DEPTH_PRIORITY = 1
 SCHEDULER_DISK_QUEUE = "scrapy.squeues.PickleFifoDiskQueue"
 SCHEDULER_MEMORY_QUEUE = "scrapy.squeues.FifoMemoryQueue"
 DUPEFILTER_CLASS = "seo_crawler.cola_disco.DupefilterCompacto"
+# Deja el disco antes de llenarlo, en vez de perder peticiones (decision 216).
+SCHEDULER = "seo_crawler.cola_disco.SchedulerFrontera"
 # Con JOBDIR, Scrapy guardaria `spider.state` para reanudar; aqui se reanuda
 # desde la BD y el directorio se borra al acabar.
 EXTENSIONS = {"scrapy.extensions.spiderstate.SpiderState": None}

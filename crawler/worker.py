@@ -1624,7 +1624,6 @@ def _quizas_recuperar(rconn, ultima_vez: float, ahora: float) -> float:
     """
     if ahora - ultima_vez < RECOVERY_INTERVAL_SECONDS:
         return ultima_vez
-    _limpiar_fronteras_huerfanas()
     _recover_stale_jobs(rconn)
     _recuperar_enriquecidos(rconn)
     _recuperar_logs(rconn)

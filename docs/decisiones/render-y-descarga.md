@@ -1373,7 +1373,21 @@
      ningún rastreo suyo). Si no puede crearlo, la cola va en memoria como
      antes y el rastreo sigue. Nadie reanuda desde ese directorio: la
      reanudación siembra desde la BD, así que la extensión `SpiderState` va
-     apagada.
+     apagada. La limpieza de huérfanos solo corre al arrancar, nunca en la
+     recuperación periódica, que funciona con rastreos en marcha. La primera
+     versión la llamaba también ahí, y la revisión lo encontró: cada 5 minutos
+     borraba la cola de los rastreos vivos (`FileNotFoundError` en el motor y
+     peticiones perdidas).
+   - `SchedulerFrontera` (`cola_disco.py`): el planificador de Scrapy, que
+     deja el disco antes de llenarlo. El de Scrapy solo captura `ValueError` al
+     escribir: con el disco lleno, el `OSError` perdía la petición, y la
+     revisión lo midió (un tmpfs de 300 KB: `finished` a las 1.211 páginas de
+     3.000, con la frontera recortada y un censo que parecía completo). Ahora,
+     cada 1.000 escrituras se mira el espacio libre: por debajo de
+     `FRONTERA_DISCO_MIN_MB` (1.024), o ante cualquier `OSError`, el resto de
+     esa ejecución va a memoria, como antes, y `scheduler/sin_disco` dice por
+     qué. Lo de memoria sale antes que lo de disco, así que el orden en anchura
+     se altera, pero no se pierde nada.
    - Con `JOBDIR`, toda petición que se pueda serializar va a disco, y la que
      no, se queda en memoria y sale antes que las de disco (Scrapy vacía
      primero la de memoria). Las del rastreo se pueden serializar todas
@@ -1395,6 +1409,13 @@
      filtra en `links`, regla 37). Solo cuentan los enlaces que se habrían
      seguido: origen por debajo de `max_depth`, y `follow` salvo con
      `follow_nofollow`. Un origen sin profundidad guardada da la de antes, 1.
+     Lo que sale de `start` no pasa por el `DepthMiddleware` propio, así que la
+     prioridad de la profundidad se resta allí, como en las tandas del sitemap.
+     Antes salía todo con prioridad 0, y un destino a profundidad 3 se pedía
+     antes que lo descubierto a 2. Queda un caso raro: un destino al que se
+     llega a 3 por un origen ya rastreado, y a 2 por otro destino de la
+     frontera aún sin rastrear, entra con 3, y con `max_depth` se pierden sus
+     hijos.
 
    **Medido** el 28-oct con `scripts/bench/frontera_memoria.py`, en la imagen
    del crawler con los ajustes de producción (sin BD ni Redis). Es un sitio en

@@ -602,7 +602,12 @@
    uoc.edu 210 → 43, xataka 433 → 84, lavanguardia 749 → 199, blogs.uoc
    117 → 51, la Wikipedia de Barcelona (1,5 MB) 3,3 → 1,3 s, sintéticas del
    banco 84 → 25. En un rastreo del banco con el prototipo, de 7,5 a 11,3 URL/s.
-   En producción falta el canario de después (Lopesan y La Salle, #284).
+   **En producción**, el canario de Lopesan con la misma config que el de la
+   madrugada del 28-oct (300 URLs, 12 a la vez y sin pausa) pasa de 0,71 a
+   1,17 URL/s: 300 URLs en 256 s. Mientras parsea, el worker sigue al 95 % de
+   un núcleo, pero ahora tiene huecos de hasta un minuto casi a 0 %, esperando
+   al servidor. El de La Salle no sirvió: desde la IP del VPS el sitio
+   respondía 500 a todo, también a un `curl` suelto, y 200 desde fuera.
 
    **Lo que sale es lo mismo.** `tests/test_parse_atajos.py` ejecuta
    `SeoSpider.parse` con el camino de antes (restaurado en el propio test, sin

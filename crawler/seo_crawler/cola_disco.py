@@ -11,11 +11,21 @@ desplazamiento de lectura. El fichero se borra solo al cerrarse.
 from __future__ import annotations
 
 import heapq
+import logging
+import os
+import shutil
 import tempfile
 from array import array
 from bisect import bisect_left
+from itertools import groupby
 
+from scrapy.core.scheduler import Scheduler
 from scrapy.dupefilters import RFPDupeFilter
+
+logger = logging.getLogger(__name__)
+
+# Por debajo de este espacio libre, la cola deja de escribir en disco (#276).
+FRONTERA_DISCO_MIN_MB = int(os.getenv("FRONTERA_DISCO_MIN_MB", "1024"))
 
 
 class ColaEnDisco:
@@ -79,10 +89,13 @@ class ClavesCompactas:
 
     @classmethod
     def desde(cls, claves, fundir_desde: int = 50000) -> "ClavesCompactas":
-        """De un iterable de claves de una vez, sin el set intermedio: lo ya
-        rastreado al reanudar (#276)."""
+        """De un iterable de claves de una vez: lo ya rastreado al reanudar
+        (#276). Se ordena en un array y se quitan las repetidas al copiarlo:
+        sin set ni lista de enteros intermedios (~70 y ~36 bytes por clave)."""
+        orden = array("Q", claves)
+        orden = array("Q", sorted(orden))
         conjunto = cls(fundir_desde)
-        conjunto._orden = array("Q", sorted(set(claves)))
+        conjunto._orden = array("Q", (k for k, _ in groupby(orden)))
         return conjunto
 
     def __bool__(self) -> bool:
@@ -139,6 +152,55 @@ class DupefilterCompacto(RFPDupeFilter):
     def request_seen(self, request) -> bool:
         clave = int.from_bytes(self._fingerprint(request)[:8], "big")
         return not self._vistas.anadir(clave)
+
+
+class SchedulerFrontera(Scheduler):
+    """El planificador de Scrapy, que deja de usar el disco antes de llenarlo
+    (#276).
+
+    El de Scrapy solo captura `ValueError` (lo no serializable) al escribir en
+    la cola de disco: con el disco lleno, el `OSError` subia, la peticion se
+    perdia y el rastreo acababa `finished` con la frontera recortada, un censo
+    incompleto que parecia completo. Aqui, cada `_MIRAR_CADA` escrituras se
+    mira el espacio libre del JOBDIR; por debajo de `FRONTERA_DISCO_MIN_MB`, o
+    ante cualquier `OSError`, lo que llega despues va a memoria, como antes de
+    la 216. Para siempre en esa ejecucion: una escritura a medias deja basura
+    al final del fichero, y lo ya escrito se sigue leyendo bien porque la cola
+    cuenta sus entradas y nunca llega a esa basura. Lo de memoria sale antes
+    que lo de disco (Scrapy vacia primero la de memoria): el orden en anchura
+    se altera, pero no se pierde nada."""
+
+    _MIRAR_CADA = 1000
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._sin_disco = False
+        self._escrituras = 0
+
+    def _dejar_el_disco(self, motivo: str) -> None:
+        self._sin_disco = True
+        logger.warning("La cola deja de usar el disco (%s): lo que se encole a partir de "
+                       "ahora va en memoria", motivo)
+        if self.stats is not None:
+            self.stats.set_value("scheduler/sin_disco", motivo)
+
+    def _dqpush(self, request) -> bool:
+        if self._sin_disco or self.dqs is None:
+            return False
+        if self._escrituras % self._MIRAR_CADA == 0 and self.dqdir:
+            try:
+                libre = shutil.disk_usage(self.dqdir).free
+            except OSError:
+                libre = None
+            if libre is not None and libre < FRONTERA_DISCO_MIN_MB * 1024 * 1024:
+                self._dejar_el_disco(f"quedan {libre // (1024 * 1024)} MB libres")
+                return False
+        self._escrituras += 1
+        try:
+            return super()._dqpush(request)
+        except OSError as exc:
+            self._dejar_el_disco(f"{type(exc).__name__}: {exc}")
+            return False
 
 
 class RecientesAcotados:

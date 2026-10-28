@@ -1263,8 +1263,15 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                 continue
             if not self._cabe_en_tope(normalized):
                 continue
-            yield self._page_request(
-                normalized, self._profundidad_hacia(compute_url_hash(normalized), depth))
+            profundidad = self._profundidad_hacia(compute_url_hash(normalized), depth)
+            req = self._page_request(normalized, profundidad)
+            # Lo que sale de `start` no pasa por el DepthMiddleware propio: la
+            # prioridad de su profundidad se pone aqui, como en las tandas del
+            # sitemap. Sin ella, un destino a profundidad 3 salia antes que lo
+            # que se descubre a 2 y, con `max_urls`, el cupo se gastaba en
+            # orden de hash.
+            req.priority -= profundidad * self.crawler.settings.getint("DEPTH_PRIORITY")
+            yield req
 
     # ------------------------------------------------------------------
     # Sitemap ingestion

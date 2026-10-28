@@ -115,6 +115,7 @@ def test_con_jobdir_la_cola_va_a_disco_y_se_rastrea_lo_mismo(tmp_path, navegador
         "JOBDIR": str(jobdir),
         "SCHEDULER_DISK_QUEUE": "scrapy.squeues.PickleFifoDiskQueue",
         "DUPEFILTER_CLASS": "seo_crawler.cola_disco.DupefilterCompacto",
+        "SCHEDULER": "seo_crawler.cola_disco.SchedulerFrontera",
         "EXTENSIONS": {"scrapy.extensions.spiderstate.SpiderState": None},
     }, simular_navegador=navegador)
     assert ahora[0] == antes[0] and ahora[1] == antes[1]
@@ -133,7 +134,90 @@ def test_el_worker_le_da_a_cada_rastreo_su_jobdir_y_lo_borra(tmp_path, monkeypat
     monkeypatch.setattr(worker, "FRONTERA_DIR", str(tmp_path / "f"))
     a, b = worker._directorio_de_frontera("j1"), worker._directorio_de_frontera("j1")
     assert a != b and os.path.isdir(a) and os.path.basename(a).startswith("j1-")
+    # La recuperacion periodica corre con rastreos en marcha: no toca sus
+    # directorios (lo encontro la revision: se borraban cada 5 minutos).
+    for nombre in ("_recover_stale_jobs", "_recuperar_enriquecidos", "_recuperar_logs"):
+        monkeypatch.setattr(worker, nombre, lambda *a, **k: None)
+    worker._quizas_recuperar(None, 0.0, 10**9)
+    assert os.path.isdir(a) and os.path.isdir(b)
+    # Al arrancar el worker si: no corre ningun rastreo suyo.
     worker._limpiar_fronteras_huerfanas()
     assert os.listdir(tmp_path / "f") == []
     monkeypatch.setattr(worker, "FRONTERA_DIR", "/proc/no-se-puede")
     assert worker._directorio_de_frontera("j1") is None
+
+
+# ---------------------------------------------------------------------------
+# Sin disco: a memoria, sin perder nada
+# ---------------------------------------------------------------------------
+def _planificador(tmp_path):
+    from scrapy import Spider
+    from scrapy.utils.test import get_crawler
+
+    from seo_crawler.cola_disco import SchedulerFrontera
+
+    crawler = get_crawler(Spider, settings_dict={
+        "JOBDIR": str(tmp_path / "jobdir"),
+        "SCHEDULER_DISK_QUEUE": "scrapy.squeues.PickleFifoDiskQueue",
+        "DUPEFILTER_CLASS": "seo_crawler.cola_disco.DupefilterCompacto",
+        # La de serie pide el motor en marcha; lo que se prueba es `_dqpush`.
+        "SCHEDULER_PRIORITY_QUEUE": "scrapy.pqueues.ScrapyPriorityQueue",
+    })
+    crawler.spider = crawler._create_spider("s")
+    planificador = SchedulerFrontera.from_crawler(crawler)
+    planificador.open(crawler.spider)
+    return planificador, crawler
+
+
+def _sacar_todo(planificador):
+    salida = []
+    while (r := planificador.next_request()) is not None:
+        salida.append(r.url)
+    return salida
+
+
+def test_con_espacio_va_a_disco(tmp_path):
+    planificador, crawler = _planificador(tmp_path)
+    for i in range(5):
+        assert planificador.enqueue_request(Request(f"https://x.com/{i}"))
+    assert crawler.stats.get_value("scheduler/enqueued/disk") == 5
+    assert sorted(_sacar_todo(planificador)) == [f"https://x.com/{i}" for i in range(5)]
+
+
+def test_sin_espacio_libre_deja_el_disco(tmp_path, monkeypatch):
+    import seo_crawler.cola_disco as cola_disco
+
+    monkeypatch.setattr(cola_disco, "FRONTERA_DISCO_MIN_MB", 10**9)
+    planificador, crawler = _planificador(tmp_path)
+    for i in range(5):
+        planificador.enqueue_request(Request(f"https://x.com/{i}"))
+    assert crawler.stats.get_value("scheduler/enqueued/memory") == 5
+    assert "MB libres" in crawler.stats.get_value("scheduler/sin_disco")
+    assert len(_sacar_todo(planificador)) == 5
+
+
+def test_un_error_al_escribir_no_pierde_la_peticion(tmp_path):
+    """Con el disco lleno, el `OSError` del planificador de Scrapy perdia la
+    peticion y el rastreo acababa `finished` con la frontera recortada."""
+    planificador, crawler = _planificador(tmp_path)
+    planificador.enqueue_request(Request("https://x.com/en-disco"))
+    original = planificador.dqs.push
+    llamadas = []
+
+    def push_lleno(request):
+        llamadas.append(request.url)
+        raise OSError(28, "No space left on device")
+
+    planificador.dqs.push = push_lleno
+    for i in range(3):
+        planificador.enqueue_request(Request(f"https://x.com/{i}"))
+    assert llamadas == ["https://x.com/0"]  # despues ya ni lo intenta
+    planificador.dqs.push = original
+    assert sorted(_sacar_todo(planificador)) == sorted(
+        ["https://x.com/en-disco"] + [f"https://x.com/{i}" for i in range(3)])
+    assert "OSError" in crawler.stats.get_value("scheduler/sin_disco")
+
+
+def test_claves_compactas_desde_sin_set_quita_repetidas():
+    c = ClavesCompactas.desde(x % 1000 for x in range(10_000))
+    assert len(c) == 1000 and list(c._orden) == list(range(1000))
