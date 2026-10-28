@@ -1527,9 +1527,9 @@
    mismos lotes, mismo `DELETE` previo y mismo `COPY` de la 217. Así un lote
    que falla se lleva lo mismo que antes, no los miles de filas de una
    página; la revisión lo midió con una página de 1.000 recursos. Sigue
-   aceptando los items de una fila. `items.desplegar()` convierte la salida de `parse`
-   en la de antes: lo usan el arnés de tests (`Recolector`), los tests que
-   llaman a `parse` y el banco del pipeline. El hreflang sigue con un item por
+   aceptando los items de una fila. `items.desplegar()` convierte la salida
+   de `parse` en la de antes: lo usan el arnés de tests (`Recolector`) y los
+   tests que llaman a `parse`. El hreflang sigue con un item por
    fila: son pocos.
 
    **Medido** con un sitio local en el que cada página es la sintética del
