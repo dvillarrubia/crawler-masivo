@@ -45,9 +45,7 @@ def _items_de(SeoSpider, url: str, cuerpo: bytes) -> list:
                      headers={b"Content-Type": b"text/html; charset=utf-8"},
                      request=Request(url, meta={"depth": 1, "download_latency": 0.01}))
     t = time.process_time()
-    from seo_crawler.items import desplegar
-
-    salida = [i for i in desplegar(sp.parse(r)) if not isinstance(i, Request)]
+    salida = [i for i in sp.parse(r) if not isinstance(i, Request)]
     return salida, (time.process_time() - t) * 1000
 
 
@@ -89,24 +87,36 @@ def main() -> None:
             cpu0, reloj0 = time.process_time(), time.perf_counter()
             for n in range(args.veces):
                 sal = hashlib.sha256(f"{nombre}-{n}".encode()).hexdigest()
+                def _renombrar(d):
+                    for campo in ("url_hash", "from_url_hash"):
+                        if d.get(campo):
+                            d[campo] = hashlib.sha256((d[campo] + sal).encode()).hexdigest()
+                    if "job_id" in d:
+                        d["job_id"] = str(jid)
+
                 for it in items:
                     copia = type(it)(it)
-                    for campo in ("url_hash", "from_url_hash"):
-                        if copia.get(campo):
-                            copia[campo] = hashlib.sha256((copia[campo] + sal).encode()).hexdigest()
-                    if "job_id" in copia.fields:
-                        copia["job_id"] = str(jid)
+                    if type(copia).__name__ == "HijosItem":
+                        copia["filas"] = [dict(f) for f in copia["filas"]]
+                        for f in copia["filas"]:
+                            _renombrar(f)
+                    else:
+                        _renombrar(copia)
+                        if "job_id" in copia.fields:
+                            copia["job_id"] = str(jid)
                     if copia.get("url") and type(copia).__name__ == "PageItem":
                         copia["url"] = f"{copia['url']}?n={n}"
                     pipe.process_item(copia, spider)
             pipe.close_spider(spider)
             cpu = (time.process_time() - cpu0) * 1000 / args.veces
             reloj = (time.perf_counter() - reloj0) * 1000 / args.veces
+            from seo_crawler.items import desplegar
+
             tipos = {}
-            for it in items:
+            for it in desplegar(items):
                 tipos[type(it).__name__] = tipos.get(type(it).__name__, 0) + 1
             print(f"{nombre}: parse {ms_parse:.0f} ms | pipeline cpu {cpu:.1f} ms, reloj {reloj:.1f} ms "
-                  f"por pagina | items {len(items)} (enlaces {tipos.get('LinkItem', 0)})")
+                  f"por pagina | items {sum(tipos.values())} (enlaces {tipos.get('LinkItem', 0)})")
         with engine.connect() as c:
             filas = {t: c.execute(text(
                 f"select count(*) from {t} x join urls u on u.id = x.{col} where u.job_id = :j"),

@@ -175,3 +175,49 @@ def test_nulos_explicitos_y_textos_largos(bd):
     assert (filas["d1"][5], filas["d1"][7], filas["d1"][10]) == (True, True, "hyperlink")
     assert filas["d2"][8] == "nombre_de_iframe_lar" and filas["d2"][4] == "r" * 128
     assert filas["d2"][6] == "p" * 20
+
+
+def test_un_hijos_item_se_guarda_como_sus_filas_sueltas(bd):
+    """Lo que emite el spider desde la 219: un `HijosItem` con todas las filas
+    de un tipo. Se guarda igual que las filas sueltas, tambien con mas filas
+    que un lote, y un lote que falla no se lleva mas que antes."""
+    from seo_crawler.items import HijosItem
+
+    Sesion, jid = bd
+    filas = [dict(_enlace(jid, 0, k)) for k in range(450)]
+    _pasar(jid, [_pagina(jid, 0), HijosItem(tipo="LinkItem", filas=filas)], batch_size=200)
+    con_hijos = _filas(Sesion, jid)
+    assert len(con_hijos) == 450
+    _pasar(jid, [_pagina(jid, 0)] + [_enlace(jid, 0, k) for k in range(450)], batch_size=200)
+    assert _filas(Sesion, jid) == con_hijos
+    # Una fila que tumba su lote (to_url nulo) en la 3.a: se pierden su lote
+    # de 200 y lo que quede sin confirmar, no las 450.
+    malas = [dict(f) for f in filas]
+    malas[2]["to_url"] = None
+    _pasar(jid, [_pagina(jid, 1), HijosItem(tipo="LinkItem", filas=[
+        {**f, "from_url_hash": "h1"} for f in malas])], batch_size=200)
+    from shared.models import Link, Url
+
+    with Sesion() as s:
+        guardadas = (s.query(Link).join(Url, Url.id == Link.from_url_id)
+                     .filter(Link.job_id == jid, Url.url_hash == "h1").count())
+    assert guardadas == 250
+
+
+def test_textos_de_la_pagina_mas_largos_que_su_columna(bd):
+    """`schema_type` (varios tipos juntos) y el `lang` del hreflang los escribe
+    la pagina: se recortan en vez de tumbar el lote."""
+    from seo_crawler.items import HijosItem, HreflangItem
+    from shared.models import Hreflang, StructuredData, Url
+
+    Sesion, jid = bd
+    _pasar(jid, [_pagina(jid, 0),
+                 HijosItem(tipo="StructuredDataItem", filas=[dict(
+                     url_hash="h0", job_id=str(jid), raw={"@type": "x"}, format="jsonld",
+                     schema_type="T" * 150, json_invalido=None)]),
+                 HreflangItem(url_hash="h0", job_id=str(jid), lang="es-ES-xxxxxxxxxxxxxxxxxxxxx",
+                              href="https://x.com/es", en_body=False, origen="html")])
+    with Sesion() as s:
+        uid = s.query(Url.id).filter(Url.job_id == jid, Url.url_hash == "h0").scalar()
+        assert s.query(StructuredData.schema_type).filter(StructuredData.url_id == uid).scalar() == "T" * 128
+        assert s.query(Hreflang.lang).filter(Hreflang.url_id == uid).scalar() == "es-ES-xxxxxxxxxxxxxx"

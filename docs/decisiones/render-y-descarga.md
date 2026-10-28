@@ -1522,9 +1522,12 @@
    la página como dicts, con los mismos campos que el item de una fila. Se
    emite en el mismo sitio que el bucle al que sustituye, así que el orden
    entre tipos no cambia, y no se emite si no hay filas, como antes. El
-   pipeline mete cada fila en su búfer como si hubiera llegado sola (mismos
-   lotes, mismo `DELETE` previo, mismo `COPY` de la 217), y sigue aceptando
-   los items de una fila. `items.desplegar()` convierte la salida de `parse`
+   pipeline mete cada fila en su búfer como si hubiera llegado sola, y vacía
+   el búfer cada `batch_size` filas también dentro de un mismo `HijosItem`:
+   mismos lotes, mismo `DELETE` previo y mismo `COPY` de la 217. Así un lote
+   que falla se lleva lo mismo que antes, no los miles de filas de una
+   página; la revisión lo midió con una página de 1.000 recursos. Sigue
+   aceptando los items de una fila. `items.desplegar()` convierte la salida de `parse`
    en la de antes: lo usan el arnés de tests (`Recolector`), los tests que
    llaman a `parse` y el banco del pipeline. El hreflang sigue con un item por
    fila: son pocos.
@@ -1535,8 +1538,26 @@
    las mismas 13.438 peticiones, y los items que pasan por Scrapy bajan de
    404.604 a 21.390.
 
+   La revisión encontró además una causa de esos fallos que ya existía.
+   `schema_type` (con varios tipos juntos pasa de 128) y el `lang` del
+   hreflang los escribe la página y no se recortaban a su columna: uno largo
+   tumbaba el lote entero. Ahora se recortan, como los de `links` en la 217.
+
+   En el pipeline, por el camino nuevo y con `scripts/bench/pipeline_por_pagina.py`
+   (que ya no despliega), baja algo más que con la 217: la sintética, de 5,5 a
+   4,2 ms de CPU por página, y Wikipedia, de 74 a 52. Las filas y la firma de
+   los enlaces son las mismas que con master.
+
    **Lo que se rastrea y se guarda, igual.** Comparado master contra la rama
    con las 23 páginas de la revisión de la 215 (Wikipedia, BOE, schema.org,
    MDN, gov.uk, GitHub y las sintéticas), con la configuración por defecto y
    con selectores propios: la salida de `parse`, desplegada, sale idéntica
-   item a item y en el mismo orden.
+   item a item y en el mismo orden. La revisión comparó además lo GUARDADO
+   en Postgres con el pipeline real, master contra la rama, con las 27
+   páginas: con lotes de 200, de 7 y de 100.000, con la página repetida y al
+   reanudar, 0 diferencias en todas las tablas (el RDFa, canonizado: rdflib
+   cambia el orden y los nodos en blanco en cada lectura).
+
+   Tests: `tests/test_pipeline_copy_db.py` mete un `HijosItem` de 450 filas
+   (las mismas filas que sueltas, y un lote que falla solo pierde su trozo) y
+   los textos de la página más largos que su columna.

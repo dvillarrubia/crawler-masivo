@@ -236,10 +236,13 @@ class PostgresPipeline:
         elif isinstance(item, HijosItem):
             # Todos los hijos de un tipo de la pagina (#284): al buffer como
             # si hubieran llegado uno a uno.
+            # En trozos de `batch_size`, como llegaban sueltos: un lote que
+            # falla se lleva lo mismo que antes, no los miles de una pagina.
             clase = CLASES_HIJO[item["tipo"]]
-            self._buffer.extend((clase, fila) for fila in item["filas"])
-            if len(self._buffer) >= self.batch_size:
-                self._flush(spider)
+            for fila in item["filas"]:
+                self._buffer.append((clase, fila))
+                if len(self._buffer) >= self.batch_size:
+                    self._flush(spider)
         elif isinstance(item, (LinkItem, HeadingItem, HreflangItem,
                                StructuredDataItem, ResourceItem)):
             self._buffer.append((type(item), dict(item)))
@@ -965,7 +968,7 @@ class PostgresPipeline:
             return None
         return Hreflang(
             url_id=url_id,
-            lang=data.get("lang"),
+            lang=_recortar(data.get("lang"), 20),  # lo escribe la pagina
             href=data.get("href"),
             en_body=data.get("en_body"),
             origen=data.get("origen"),
@@ -981,7 +984,9 @@ class PostgresPipeline:
             url_id=url_id,
             raw=data.get("raw"),
             format=data.get("format"),
-            schema_type=data.get("schema_type"),
+            # Lo escribe la pagina (varios tipos juntos pasan de 128): sin
+            # recortar, tumbaba el lote entero.
+            schema_type=_recortar(data.get("schema_type"), 128),
             json_invalido=(data.get("json_invalido") or "")[:200] or None,
         )
 
