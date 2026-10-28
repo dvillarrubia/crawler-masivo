@@ -155,9 +155,12 @@ def test_se_guarda_en_robots_txt_y_re_rastrear_la_sustituye(bd):
         [fila] = s.query(RobotsTxt).filter(RobotsTxt.job_id == jid).all()
         assert (fila.status_code, fila.intentos, fila.host) == (503, 3, "127.0.0.1")
         assert fila.comprobacion["status_code"] == 503
-    # El mismo job, otra ejecucion: el robots.txt ya responde.
+    # El mismo job, otra ejecucion: el robots.txt ya responde. Con un nivel
+    # mas, para que quede algo que rastrear: con `max_depth` 1 la frontera
+    # pendiente (desde el nivel 1, y un nofollow) ya no se pide al reanudar
+    # (#276), y sin peticiones no se vuelve a leer el robots.txt.
     _rastrear([200, {"Content-Type": "text/plain"}, "User-agent: *\nAllow: /\n"],
-              bd=URL_BD, job_id=str(jid), puerto=puerto)
+              bd=URL_BD, job_id=str(jid), puerto=puerto, config={**CONFIG, "max_depth": 2})
     with Sesion() as s:
         [fila] = s.query(RobotsTxt).filter(RobotsTxt.job_id == jid).all()
         assert (fila.status_code, fila.intentos, fila.comprobacion) == (200, 1, None)

@@ -542,6 +542,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
     """Broad-crawl SEO spider driven by a job definition in PostgreSQL."""
 
     name = "seo"
+    # Destinos de la frontera por consulta al reanudar (`_iter_frontier`).
+    _LOTE_FRONTERA = 2_000
 
     def __init__(self, job_id: str | None = None, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -568,7 +570,7 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         # Resume support: claves compactas (64-bit) de URLs ya rastreadas en
         # una ejecucion anterior de este job. La frontera se streamea desde
         # la BD en start_requests (ver _iter_frontier), no se carga entera.
-        self._already_crawled_hashes: set[int] = set()
+        self._already_crawled_hashes: ClavesCompactas | set[int] = set()
         self._resume_mode: bool = False
         # Sitemap ingestion state. La membresia guarda la clave compacta de
         # cada URL (`_hash_key`, 8 bytes en un array, con repeticiones) y no el
@@ -960,12 +962,16 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             reintentar_hashes = {
                 _hash_key(compute_url_hash(normalize_url(u))) for u, _ in self._reintentar
             }
-            self._already_crawled_hashes = {
-                _hash_key(row[0])
-                for row in session.query(Url.url_hash)
-                .filter(Url.job_id == self.job_id)
-                .yield_per(10_000)
-            } - reintentar_hashes
+            # En `ClavesCompactas` y no en un set (~70 bytes por clave): con un
+            # millon de URLs rastreadas eran 70 MB solo para saber cuales (#276).
+            self._already_crawled_hashes = ClavesCompactas.desde(
+                clave for clave in (
+                    _hash_key(row[0])
+                    for row in session.query(Url.url_hash)
+                    .filter(Url.job_id == self.job_id)
+                    .yield_per(10_000)
+                ) if clave not in reintentar_hashes
+            )
             if self._topes is not None:
                 # Reanudar: lo ya rastreado gasta su cupo. Lo que se dejo sin
                 # rastrear se vuelve a contar al recorrer la frontera (son
@@ -1074,17 +1080,25 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             ],
         }
 
-    def _iter_frontier(self) -> Generator[str, None, None]:
-        """Streamea la frontera (links descubiertos pero no rastreados).
+    def _iter_frontier(self) -> Generator[tuple[str, int], None, None]:
+        """Streamea la frontera (links descubiertos pero no rastreados), con la
+        profundidad que tendria cada destino: la menor de las paginas que lo
+        enlazan, mas uno.
 
         Paginacion keyset sobre links.id en lotes, con sesion corta por
         lote: memoria acotada y sin cap duro de frontera. Dedup en memoria
         con claves compactas de 64 bits.
+
+        Solo cuentan los enlaces que el rastreo habria seguido (#276): desde
+        una pagina por debajo de `max_depth` y `follow` (o `follow_nofollow`).
+        Antes todo entraba con profundidad 1: reanudar un rastreo con
+        `max_depth` volvia a bajar `max_depth` niveles desde cada destino, y
+        pedia los de las paginas del ultimo nivel y los nofollow.
         """
         from shared.database import SessionLocal
         from shared.models import Link, Url
 
-        batch_size = 2_000
+        batch_size = self._LOTE_FRONTERA
         last_hash = ""
 
         while True:
@@ -1101,26 +1115,33 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                 # los enlaces crecen mucho mas rapido que los destinos.
                 #
                 # Ordenar por to_url_hash aprovecha ademas el indice
-                # ix_links_to_hash (job_id, to_url_hash) que ya existe.
+                # ix_links_to_hash (job_id, to_url_hash) que ya existe. El job
+                # se filtra en `links`; `urls` solo se lee por su clave para la
+                # profundidad del origen.
                 rows = session.execute(
                     text(
                         """
-                        SELECT DISTINCT ON (l.to_url_hash)
-                               l.to_url_hash, l.to_url
+                        SELECT l.to_url_hash, MIN(l.to_url), MIN(o.crawl_depth)
                         FROM links l
+                        JOIN urls o ON o.id = l.from_url_id
                         WHERE l.job_id = :jid
                           AND l.is_internal
                           AND l.to_url_hash > :last_hash
+                          AND (l.follow IS NOT FALSE OR :nofollow)
+                          AND (o.crawl_depth IS NULL OR o.crawl_depth < :maxd)
                           AND NOT EXISTS (
                             SELECT 1 FROM urls u
                             WHERE u.job_id = l.job_id
                               AND u.url_hash = l.to_url_hash
                           )
+                        GROUP BY l.to_url_hash
                         ORDER BY l.to_url_hash
                         LIMIT :lim
                         """
                     ),
-                    {"jid": self.job_id, "last_hash": last_hash, "lim": batch_size},
+                    {"jid": self.job_id, "last_hash": last_hash, "lim": batch_size,
+                     "nofollow": bool(getattr(self, "_follow_nofollow", False)),
+                     "maxd": self.max_depth},
                 ).all()
             finally:
                 session.close()
@@ -1133,11 +1154,12 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             # estancamiento del worker daria por colgado un rastreo sano.
             self._write_heartbeat()
 
-            for to_hash, to_url in rows:
+            for to_hash, to_url, profundidad_origen in rows:
                 last_hash = to_hash
                 if _hash_key(to_hash) in self._already_crawled_hashes:
                     continue
-                yield to_url
+                # Sin profundidad guardada en el origen, la de antes: 1.
+                yield to_url, (1 if profundidad_origen is None else profundidad_origen + 1)
 
     async def start(self):
         """Scrapy 2.13+ entry point.
@@ -1203,9 +1225,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                 yield from self._sitemap_request(sm_url)
 
         # Resume frontier: discovered-but-not-yet-crawled URLs from a previous
-        # run, streamed lazily from DB. Emitted with depth=1 since we know
-        # they were linked from a crawled page; honoring the original depth
-        # would require a join we don't pay for.
+        # run, streamed lazily from DB, con la profundidad que habrian tenido
+        # (#276): la menor de las paginas que las enlazan, mas uno.
         if not self._resume_mode:
             return
         if self._reintentar:
@@ -1234,7 +1255,7 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         # que falten ya se han vuelto a pedir arriba.
         if self.max_depth < 1:
             return
-        for url in self._iter_frontier():
+        for url, depth in self._iter_frontier():
             normalized = normalize_url(url)
             if _hash_key(compute_url_hash(normalized)) in self._already_crawled_hashes:
                 continue
@@ -1242,7 +1263,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                 continue
             if not self._cabe_en_tope(normalized):
                 continue
-            yield self._page_request(normalized, 1)
+            yield self._page_request(
+                normalized, self._profundidad_hacia(compute_url_hash(normalized), depth))
 
     # ------------------------------------------------------------------
     # Sitemap ingestion

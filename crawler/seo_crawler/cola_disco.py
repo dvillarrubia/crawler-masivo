@@ -1,5 +1,6 @@
 """Cola FIFO de URLs en un fichero temporal, y el conjunto compacto de sus
-claves (decision 186).
+claves (decision 186). Y lo que acota la memoria del resto de la frontera
+(#276): el dupefilter con esas claves y un conjunto con tope.
 
 Las URLs de los sitemaps que no caben en la cola de Scrapy esperan aqui, una
 por linea, y se sueltan por tandas. En memoria, una peticion encolada cuesta
@@ -13,6 +14,8 @@ import heapq
 import tempfile
 from array import array
 from bisect import bisect_left
+
+from scrapy.dupefilters import RFPDupeFilter
 
 
 class ColaEnDisco:
@@ -74,6 +77,17 @@ class ClavesCompactas:
         self._nuevas: set[int] = set()
         self._fundir_desde = fundir_desde
 
+    @classmethod
+    def desde(cls, claves, fundir_desde: int = 50000) -> "ClavesCompactas":
+        """De un iterable de claves de una vez, sin el set intermedio: lo ya
+        rastreado al reanudar (#276)."""
+        conjunto = cls(fundir_desde)
+        conjunto._orden = array("Q", sorted(set(claves)))
+        return conjunto
+
+    def __bool__(self) -> bool:
+        return bool(self._orden) or bool(self._nuevas)
+
     def __len__(self) -> int:
         return len(self._orden) + len(self._nuevas)
 
@@ -97,3 +111,69 @@ class ClavesCompactas:
         # (~36 bytes cada uno), el pico es el array viejo mas el nuevo.
         self._orden = array("Q", heapq.merge(self._orden, sorted(self._nuevas)))
         self._nuevas.clear()
+
+
+class DupefilterCompacto(RFPDupeFilter):
+    """El dupefilter de Scrapy con 8 bytes por peticion vista (#276).
+
+    `RFPDupeFilter` guarda la huella entera (20 bytes de sha1 en un `bytes`,
+    ~90 con el set) de cada peticion que pasa, y con `JOBDIR` la escribe ademas
+    en `requests.seen`, que nadie relee: cada rastreo empieza con un directorio
+    nuevo (la reanudacion siembra desde la BD). Aqui van los 64 primeros bits
+    en `ClavesCompactas`, ~15 bytes por clave. Dos peticiones distintas con la
+    misma clave harian que la segunda no se pidiera: con un millon de URLs,
+    ~3e-8 (la paradoja del cumpleanos con 2^64)."""
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        return cls(None, crawler.settings.getbool("DUPEFILTER_DEBUG"),
+                   fingerprinter=crawler.request_fingerprinter)
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._vistas = ClavesCompactas()
+
+    def __len__(self) -> int:
+        return len(self._vistas)
+
+    def request_seen(self, request) -> bool:
+        clave = int.from_bytes(self._fingerprint(request)[:8], "big")
+        return not self._vistas.anadir(clave)
+
+
+class RecientesAcotados:
+    """Conjunto con tope que olvida lo mas antiguo (#276).
+
+    Para lo que solo hace falta recordar un rato: los `url_id` cuyos hijos ya
+    se limpiaron en esta ejecucion (los lotes de una misma pagina llegan
+    seguidos) o la cache url_hash -> url_id del pipeline (un fallo cuesta una
+    consulta, no un dato malo). Sin tope crecian con cada URL del rastreo."""
+
+    def __init__(self, tope: int) -> None:
+        self._tope = tope
+        self._d: dict = {}
+
+    def __len__(self) -> int:
+        return len(self._d)
+
+    def __contains__(self, clave) -> bool:
+        return clave in self._d
+
+    def get(self, clave, defecto=None):
+        return self._d.get(clave, defecto)
+
+    def __setitem__(self, clave, valor) -> None:
+        self._d.pop(clave, None)
+        self._d[clave] = valor
+        while len(self._d) > self._tope:
+            del self._d[next(iter(self._d))]
+
+    def add(self, clave) -> None:
+        self[clave] = None
+
+    def update(self, claves) -> None:
+        for clave in claves:
+            self[clave] = None
+
+    def clear(self) -> None:
+        self._d.clear()

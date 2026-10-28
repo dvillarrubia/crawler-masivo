@@ -35,6 +35,11 @@
   o una redireccion hacia una de ellas va con profundidad 1) y en memoria
   quedan claves de 8-15 bytes. Un sitio con millones de URLs en sus sitemaps
   mataba el rastreo por memoria. 186.
+- **La cola de peticiones va a disco** (un `JOBDIR` por ejecucion, que pone y
+  borra el worker) y el dupefilter guarda 8 bytes por peticion: una peticion
+  tiene que poder serializarse (callback y errback del spider, meta sin objetos
+  vivos) o se queda en memoria y adelanta a las demas. Lo que el spider o el
+  pipeline recuerden por URL va con tope o en `ClavesCompactas`. 216.
 - **Un muro no es la pagina** (`urls.response_class`, `shared/respuestas.py`): ni
   indexable ni incidencias de pagina, y un rastreo bloqueado es `failed` y no alerta. 103.
 - **Un tope por carpeta se aplica al encolar** (lo que no cabe no se pide) y su

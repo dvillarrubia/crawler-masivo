@@ -741,6 +741,9 @@ def main() -> None:
 
     def _spider_closed(self, spider, reason):
         cierre["reason"] = reason
+        # Por donde paso la cola: memoria o disco (JOBDIR, #276).
+        cierre["stats"] = {k: v for k, v in self.crawler.stats.get_stats().items()
+                           if k.startswith(("scheduler/", "dupefilter/"))}
         # Lo que anoto el registro de robots.txt (decision 112).
         try:
             for m in self.crawler.engine.downloader.middleware.middlewares:

@@ -72,7 +72,7 @@ def spider(monkeypatch):
     sp._crawl_subdomains = False
     sp._sondas_de_semillas = lambda: iter(())
     sp._should_follow = lambda url: True
-    sp._iter_frontier = lambda: iter(["https://x.com/enlazada-desde-una-semilla"])
+    sp._iter_frontier = lambda: iter([("https://x.com/enlazada-desde-una-semilla", 1)])
     return sp
 
 

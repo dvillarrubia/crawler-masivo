@@ -58,8 +58,16 @@ USER_AGENT = os.getenv("USER_AGENT", DEFAULT_USER_AGENT)
 # BFS scheduling
 # ---------------------------------------------------------------------------
 DEPTH_PRIORITY = 1
+# La cola en disco solo existe con JOBDIR, y el worker le da a cada rastreo el
+# suyo, nuevo y que borra al acabar (#276). Sin el, la frontera entera vivia en
+# memoria (~4 KB por peticion pendiente) aunque esto dijera lo contrario. Lo
+# que no se puede serializar sigue en memoria, como antes.
 SCHEDULER_DISK_QUEUE = "scrapy.squeues.PickleFifoDiskQueue"
 SCHEDULER_MEMORY_QUEUE = "scrapy.squeues.FifoMemoryQueue"
+DUPEFILTER_CLASS = "seo_crawler.cola_disco.DupefilterCompacto"
+# Con JOBDIR, Scrapy guardaria `spider.state` para reanudar; aqui se reanuda
+# desde la BD y el directorio se borra al acabar.
+EXTENSIONS = {"scrapy.extensions.spiderstate.SpiderState": None}
 
 # ---------------------------------------------------------------------------
 # Logging
