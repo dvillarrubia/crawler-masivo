@@ -1482,10 +1482,12 @@
 
    Es lo mismo que haría el dupefilter. La clave sale de la URL normalizada, y
    dos enlaces con la misma URL normalizada dan la misma `Request` y la misma
-   huella. Ningún middleware del spider descarta una petición por algo que no
-   sea su URL (el `DepthMiddleware` propio no aplica límite), así que la
-   primera no puede haberse quedado fuera por algo que no afectara también a
-   la segunda. Lo que no pasa por este bucle (semillas, sitemap,
+   huella. Antes del dupefilter, nada descarta una petición por algo que no
+   sea su URL: el `DepthMiddleware` propio no aplica límite,
+   `UrlLengthMiddleware` solo mira la longitud y el `OffsiteMiddleware` (en
+   `request_scheduled`) solo mira el host, y el spider no define
+   `allowed_domains`. Así que la primera no puede haberse quedado fuera por
+   algo que no afectara también a la segunda. Lo que no pasa por este bucle (semillas, sitemap,
    redirecciones, reanudación) sigue yendo solo al dupefilter.
 
    **Medido** con un sitio local en el que cada página es la sintética del
@@ -1493,6 +1495,14 @@
    ajustes de producción y sin pipeline: 1.530 páginas, **de 55,9 a 50,3 ms de
    CPU por página (−10 %)**. Se encolan las mismas 13.438 peticiones y salen
    los mismos 404.604 items. `dupefilter/filtered` pasa de 230.550 a 0.
+
+   La revisión comparó master con la rama en 11 escenarios con el arnés
+   (menú repetido, variantes de una misma URL, redirección a una página
+   enlazada, 500 con reintento, robots, URL larga, nofollow, `max_depth`,
+   `max_urls`, topes, modo lista, render simulado y subdominios): las páginas
+   con su profundidad y su código, los items, los enlaces, las peticiones
+   encoladas y la razón de cierre salen idénticos. `dupefilter/filtered` deja
+   de servir de indicador; no lo lee nadie.
 
    Tests: `tests/test_enlaces_pedidos.py`. Comprueba que lo ya pedido (también
    escrito de otra forma que normaliza igual) no se repite, y que con tres
