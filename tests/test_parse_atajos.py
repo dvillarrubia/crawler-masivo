@@ -315,3 +315,24 @@ def test_posicion_con_y_sin_cache(entorno):
     con = [ex._detect_link_position(a, cache) for a in enlaces]
     assert con == [ex._detect_link_position(a) for a in enlaces]
     assert con == [_posicion_original(ex, a) for a in enlaces]
+
+
+def test_un_url_roto_no_tira_la_microdata(entorno):
+    """Lo encontro la revision: con las dos sintaxis en una llamada, una
+    excepcion de pyRdfa por un URL malformado se llevaba tambien la microdata.
+    Es lo unico que cambia en la salida: microdata que antes se perdia."""
+    ex, _ = entorno
+    producto = ('<div itemscope itemtype="https://schema.org/Product">'
+                '<span itemprop="name">Bota</span></div>')
+    for roto in ('<a href="http://[x/en">roto</a>', '<img src="http://[x/i.png">'):
+        for rdfa in ("", '<div vocab="https://schema.org/" typeof="Person"><span property="name">Ana</span></div>'):
+            html = f"<html><body>{roto}{rdfa}{producto}</body></html>"
+            tipos = {(d["format"], d["schema_type"]) for d in ex.extract_structured_data(html, "https://x.com/")}
+            assert ("microdata", "Product") in tipos, (roto, rdfa, tipos)
+
+
+def test_el_tipo_rdf_escrito_entero_tambien_es_rdfa(entorno, monkeypatch):
+    ex, _ = entorno
+    html = ('<html><body><div about="#x" rel="http://www.w3.org/1999/02/22-rdf-syntax-ns#type" '
+            'resource="http://schema.org/Person"></div></body></html>')
+    assert ex._HAY_RDFA.search(html)

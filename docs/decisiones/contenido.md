@@ -581,9 +581,20 @@
      guarda la clasificación de cada ancestro en un dict que crean
      `extract_links` y `extract_enlaces_no_rastreables` para su página.
    - `extract_structured_data`: microdata solo si el HTML contiene `itemscope`;
-     RDFa solo si contiene `typeof=`, `vocab=` o `rdf:type` (sin distinguir
-     mayúsculas, con espacios antes del `=`). Sin `typeof`, el RDFa solo da
-     items sin `@type`, que ya se descartaban.
+     RDFa solo si contiene `typeof=`, `vocab=`, `rdf:type` o el tipo de RDF
+     escrito entero (`22-rdf-syntax-ns#type`), sin distinguir mayúsculas y con
+     espacios antes del `=`. Sin eso, el RDFa solo da items sin `@type`, que ya
+     se descartaban. Se escapa un caso que no se ha visto nunca: el tipo con un
+     prefijo propio (`prefix="r: …#"` y `property="r:type"`). Buscar
+     `\w+:type` lo cogería, pero también el `og:type` de casi todas las
+     páginas, y se perdería el atajo.
+   - **Una llamada a extruct por sintaxis.** Es lo único que cambia en la
+     salida, y a mejor. Con las dos sintaxis en una llamada, cualquier
+     excepción de pyRdfa se llevaba también la microdata. Basta un URL
+     malformado en la página (`href="http://[x/"`, un `src` o un `about=`) para
+     que salte, aunque no haya RDFa. Ahora esa microdata se lee. Al comparar
+     con un censo viejo, puede aparecer como nueva microdata que ya estaba en
+     la página. Lo encontró la revisión, y lo vigila `test_un_url_roto_no_tira_la_microdata`.
    - `normalize_url` y `compute_url_hash`: `lru_cache` de 32.768 entradas
      (son puras; unas decenas de MB como mucho).
 
@@ -609,7 +620,11 @@
    artículo, clases camelCase, U+E000 en el h1, puerto 443 y `/../`). Las de
    terceros con derechos (lavanguardia, xataka, uoc, blogs.uoc) no van en un
    repo público: `PARSE_ATAJOS_PAGINAS=<carpeta>` las añade en local, y con
-   ellas también salió todo igual.
+   ellas también salió todo igual. La revisión lo repitió en procesos
+   separados, master contra la rama, con 19 páginas públicas: Wikipedia,
+   schema.org con microdata y RDFa, el primer de RDFa del W3C, MDN, Astra
+   (1,8 MB de microdata), gov.uk, GitHub y las de arriba. Las 19 salen
+   idénticas item a item. La CPU total pasa de 32,6 s a 16,5 s.
 
    **Lo que no se ha hecho** (#284): escribir los enlaces con `COPY`, un item
    por página en vez de uno por enlace, no crear las `Request` que el

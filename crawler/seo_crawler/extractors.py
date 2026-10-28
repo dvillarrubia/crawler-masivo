@@ -1458,7 +1458,7 @@ def _bloques_json_ld(html_body: str) -> list[tuple[Any, str | None]]:
 
 
 _HAY_MICRODATA = re.compile(r"itemscope", re.I)
-_HAY_RDFA = re.compile(r"\b(?:typeof|vocab)\s*=|rdf:type", re.I)
+_HAY_RDFA = re.compile(r"\b(?:typeof|vocab)\s*=|rdf:type|22-rdf-syntax-ns#type", re.I)
 
 
 def extract_structured_data(html_body: str, url: str = "") -> list[dict[str, Any]]:
@@ -1493,24 +1493,23 @@ def extract_structured_data(html_body: str, url: str = "") -> list[dict[str, Any
 
     # extruct parsea la pagina entera por cada sintaxis aunque no haya nada que
     # leer, y era una de las partes mas caras de `parse` (#284). Microdata sin
-    # `itemscope` no da ningun item; RDFa sin `typeof`/`vocab` (ni `rdf:type`)
-    # solo da items sin @type, que se descartan aqui abajo.
+    # `itemscope` no da ningun item; RDFa sin `typeof`/`vocab` (ni el tipo de
+    # RDF escrito entero) solo da items sin @type, que se descartan aqui abajo.
+    #
+    # Una llamada por sintaxis: con las dos juntas, una excepcion de pyRdfa
+    # (basta un `href="http://[x/"` en la pagina) tiraba tambien la microdata.
     sintaxis = [s for s, patron in (("microdata", _HAY_MICRODATA), ("rdfa", _HAY_RDFA))
                 if patron.search(html_body)]
-    try:
-        import extruct
+    for una in sintaxis:
+        try:
+            import extruct
 
-        otros = extruct.extract(
-            html_body,
-            base_url=url,
-            syntaxes=sintaxis,
-            uniform=True,
-        ) if sintaxis else {}
-    except Exception:
-        otros = {}
-    for fmt, items in otros.items():
-        if isinstance(items, list):
-            data[fmt] = [(item, None) for item in items]
+            otros = extruct.extract(html_body, base_url=url, syntaxes=[una], uniform=True)
+        except Exception:
+            continue
+        for fmt, items in otros.items():
+            if isinstance(items, list):
+                data[fmt] = [(item, None) for item in items]
 
     for fmt, items in data.items():
         formato = fmt.replace("-", "")  # jsonld, microdata, rdfa
