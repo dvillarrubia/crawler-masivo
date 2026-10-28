@@ -585,6 +585,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         # `max_depth` se dejaban de seguir sus enlaces), y no se escriben dos
         # veces (los sitemaps de imagenes repiten la URL de la pagina).
         self._sitemap_pendientes_claves = ClavesCompactas()
+        # Enlaces que ya salieron como peticion del bucle de `parse` (#284).
+        self._enlaces_pedidos = ClavesCompactas()
         # El URLLENGTH_LIMIT de Scrapy (lo fija `from_crawler`; 0 = sin tope).
         self._url_max: float = 2083
         self._sitemap_files_fetched: int = 0
@@ -2773,6 +2775,12 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                         if self._topes is not None and not self._topes.admitir(
                                 link["url"], _hash_key(link_hash)):
                             continue  # tope por carpeta (decision 172)
+                        # Ya pedida desde otra pagina: el dupefilter la tiraria
+                        # (misma URL, misma huella), pero despues de crear la
+                        # Request y de pasarla por los middlewares y el motor.
+                        # Con el menu y el pie, ~200 por pagina (#284).
+                        if not self._enlaces_pedidos.anadir(_hash_key(link_hash)):
+                            continue
                         yield self._page_request(
                             link["url"], self._profundidad_hacia(link_hash, depth + 1))
 
