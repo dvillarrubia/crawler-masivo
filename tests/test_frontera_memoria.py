@@ -216,6 +216,50 @@ def test_un_error_al_escribir_no_pierde_la_peticion(tmp_path):
     assert sorted(_sacar_todo(planificador)) == sorted(
         ["https://x.com/en-disco"] + [f"https://x.com/{i}" for i in range(3)])
     assert "OSError" in crawler.stats.get_value("scheduler/sin_disco")
+    # Esa escritura pudo dejar algo a medias: cuenta como posible perdida.
+    assert crawler.stats.get_value("scheduler/perdidas") == 1
+
+
+def test_un_error_al_sacar_cuenta_como_perdida_y_el_cierre_no_revienta(tmp_path):
+    """Con el disco lleno, cerrar una cola vaciada (guarda su estado) lanza
+    `OSError` dentro de `next_request`, y una entrada escrita a medias no se
+    deserializa: se pierde la peticion, pero se cuenta."""
+    planificador, crawler = _planificador(tmp_path)
+    for i in range(3):
+        planificador.enqueue_request(Request(f"https://x.com/{i}"))
+    original = planificador.dqs.pop
+    planificador.dqs.pop = lambda: (_ for _ in ()).throw(OSError(28, "No space left on device"))
+    assert planificador.next_request() is None
+    assert crawler.stats.get_value("scheduler/perdidas") == 1
+    planificador.dqs.pop = original
+    planificador.enqueue_request(Request("https://x.com/nueva"))
+    assert crawler.stats.get_value("scheduler/enqueued/memory") == 1  # ya no usa el disco
+    planificador.dqs.close = lambda: (_ for _ in ()).throw(OSError(28, "No space left on device"))
+    planificador.close("finished")
+
+
+def test_el_worker_cierra_como_truncado_si_la_cola_perdio_peticiones(monkeypatch):
+    pytest.importorskip("redis")
+    import worker
+    from shared.comparacion import MOTIVOS_TRUNCADO
+
+    marcas = {"job:j:frontera_perdida": "3"}
+
+    class RedisFalso:
+        def get(self, clave):
+            return marcas.get(clave)
+
+        def delete(self, clave):
+            marcas.pop(clave, None)
+
+    monkeypatch.setattr(worker.redis_lib.Redis, "from_url", classmethod(lambda cls, *a, **k: RedisFalso()))
+    kw = dict(razon_cero="", sin_guardar=False, stalled=False, timed_out=False)
+    assert worker._motivo_de_fin("j", consumir=False, **kw) == "frontera_sin_disco"
+    assert "frontera_sin_disco" in MOTIVOS_TRUNCADO
+    # Lo que ya decia otra cosa no se pisa (el tiempo agotado manda).
+    assert worker._motivo_de_fin("j", consumir=False, **{**kw, "timed_out": True}) == "max_runtime_reached"
+    worker._motivo_de_fin("j", consumir=True, **kw)
+    assert worker._motivo_de_fin("j", consumir=False, **kw) == "finished"
 
 
 def test_claves_compactas_desde_sin_set_quita_repetidas():

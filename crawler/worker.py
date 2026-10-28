@@ -811,7 +811,7 @@ def _run_job(job_id: str) -> None:
                 )
             except Exception:
                 pass
-            if motivo in ("max_urls_reached", "max_runtime_reached", "stalled"):
+            if motivo in ("max_urls_reached", "max_runtime_reached", "stalled", "frontera_sin_disco"):
                 logger.warning(
                     "Job %s TRUNCADO por el tope de URLs: el rastreo esta "
                     "incompleto y el PageRank se ha calculado sobre un grafo "
@@ -1184,9 +1184,14 @@ def _motivo_de_fin(job_id: str, *, razon_cero: str, sin_guardar: bool, stalled: 
         if (rc.get(f"job:{job_id}:finish_reason") == "max_urls_reached"
                 and not sin_guardar and not bloqueo):
             motivo = "max_urls_reached"
+        # La cola en disco perdio peticiones (decision 216): la frontera no se
+        # agoto de verdad, aunque Scrapy cerrase con `finished`.
+        if motivo == "finished" and rc.get(f"job:{job_id}:frontera_perdida"):
+            motivo = "frontera_sin_disco"
         if consumir:
             rc.delete(f"job:{job_id}:finish_reason")
             rc.delete(f"job:{job_id}:bloqueo")
+            rc.delete(f"job:{job_id}:frontera_perdida")
     except Exception:
         pass
     return motivo

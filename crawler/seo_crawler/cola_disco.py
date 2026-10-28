@@ -90,8 +90,8 @@ class ClavesCompactas:
     @classmethod
     def desde(cls, claves, fundir_desde: int = 50000) -> "ClavesCompactas":
         """De un iterable de claves de una vez: lo ya rastreado al reanudar
-        (#276). Se ordena en un array y se quitan las repetidas al copiarlo:
-        sin set ni lista de enteros intermedios (~70 y ~36 bytes por clave)."""
+        (#276). Sin el set intermedio (~70 bytes por clave): ordenar crea una
+        lista un momento, ~60 bytes por clave medidos, y se suelta al acabar."""
         orden = array("Q", claves)
         orden = array("Q", sorted(orden))
         conjunto = cls(fundir_desde)
@@ -156,19 +156,25 @@ class DupefilterCompacto(RFPDupeFilter):
 
 class SchedulerFrontera(Scheduler):
     """El planificador de Scrapy, que deja de usar el disco antes de llenarlo
-    (#276).
+    y, si aun asi se llena, lo dice (#276, decision 216).
 
     El de Scrapy solo captura `ValueError` (lo no serializable) al escribir en
     la cola de disco: con el disco lleno, el `OSError` subia, la peticion se
     perdia y el rastreo acababa `finished` con la frontera recortada, un censo
-    incompleto que parecia completo. Aqui, cada `_MIRAR_CADA` escrituras se
-    mira el espacio libre del JOBDIR; por debajo de `FRONTERA_DISCO_MIN_MB`, o
-    ante cualquier `OSError`, lo que llega despues va a memoria, como antes de
-    la 216. Para siempre en esa ejecucion: una escritura a medias deja basura
-    al final del fichero, y lo ya escrito se sigue leyendo bien porque la cola
-    cuenta sus entradas y nunca llega a esa basura. Lo de memoria sale antes
-    que lo de disco (Scrapy vacia primero la de memoria): el orden en anchura
-    se altera, pero no se pierde nada."""
+    incompleto que parecia completo.
+
+    - Cada `_MIRAR_CADA` escrituras se mira el espacio libre del JOBDIR; por
+      debajo de `FRONTERA_DISCO_MIN_MB`, lo que llega despues va a memoria,
+      como antes de la 216, y no se pierde nada. Lo de memoria sale antes que
+      lo de disco (Scrapy vacia primero la de memoria): se altera el orden en
+      anchura.
+    - Si el disco se llena de golpe entre dos miradas (otro proceso, o menos
+      de `_MIRAR_CADA` escrituras), si se puede perder algo: la escritura que
+      falla, una anterior que el sistema escribio a medias sin avisar (queuelib
+      la cuenta entera y al leerla no se deserializa) o la que se saca cuando
+      cerrar la cola vacia falla al guardar su estado. Entonces se pasa a
+      memoria y `perdidas` lo cuenta: el spider lo marca en Redis y el worker
+      cierra el censo como `frontera_sin_disco`, truncado."""
 
     _MIRAR_CADA = 1000
 
@@ -176,6 +182,8 @@ class SchedulerFrontera(Scheduler):
         super().__init__(*args, **kwargs)
         self._sin_disco = False
         self._escrituras = 0
+        # Errores del disco que han podido costar peticiones.
+        self.perdidas = 0
 
     def _dejar_el_disco(self, motivo: str) -> None:
         self._sin_disco = True
@@ -199,8 +207,33 @@ class SchedulerFrontera(Scheduler):
         try:
             return super()._dqpush(request)
         except OSError as exc:
+            self._perder(exc)
             self._dejar_el_disco(f"{type(exc).__name__}: {exc}")
             return False
+
+    def _perder(self, exc: BaseException) -> None:
+        self.perdidas += 1
+        if self.stats is not None:
+            self.stats.inc_value("scheduler/perdidas")
+        if self.perdidas == 1:
+            logger.error("La cola en disco ha fallado (%s): el censo puede quedar incompleto", exc)
+
+    def _dqpop(self):
+        try:
+            return super()._dqpop()
+        except Exception as exc:  # noqa: BLE001 -- OSError al cerrar la cola vacia, o una entrada a medias
+            self._perder(exc)
+            self._dejar_el_disco(f"{type(exc).__name__}: {exc}")
+            return None
+
+    def close(self, reason: str):
+        # El estado de la cola solo sirve para reanudar desde el JOBDIR, que
+        # nadie hace: con el disco lleno, guardarlo no puede tumbar el cierre.
+        try:
+            return super().close(reason)
+        except OSError as exc:
+            logger.warning("No se pudo guardar el estado de la cola al cerrar: %s", exc)
+            return self.df.close(reason)
 
 
 class RecientesAcotados:

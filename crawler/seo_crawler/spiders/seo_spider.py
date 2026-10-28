@@ -1025,6 +1025,15 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             for nombre, ms in sorted(self._presupuesto_a_medida.ms_por_regla.items()):
                 logger.info("Extraccion a medida: %s %.0f ms en total%s", nombre, ms,
                             " (desactivada)" if nombre in self._presupuesto_a_medida.desactivadas else "")
+        # La cola en disco perdio peticiones (decision 216): el worker cierra
+        # el censo como truncado, no como `finished`.
+        crawler = getattr(self, "crawler", None)
+        perdidas = crawler.stats.get_value("scheduler/perdidas", 0) if crawler else 0
+        if perdidas and self._redis:
+            try:
+                self._redis.set(f"job:{self.job_id}:frontera_perdida", int(perdidas), ex=86400)
+            except Exception:
+                logger.warning("No se pudo marcar la frontera perdida en Redis", exc_info=True)
         if self._redis:
             try:
                 self._redis.set(

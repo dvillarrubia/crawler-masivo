@@ -1384,10 +1384,22 @@
      revisión lo midió (un tmpfs de 300 KB: `finished` a las 1.211 páginas de
      3.000, con la frontera recortada y un censo que parecía completo). Ahora,
      cada 1.000 escrituras se mira el espacio libre: por debajo de
-     `FRONTERA_DISCO_MIN_MB` (1.024), o ante cualquier `OSError`, el resto de
-     esa ejecución va a memoria, como antes, y `scheduler/sin_disco` dice por
-     qué. Lo de memoria sale antes que lo de disco, así que el orden en anchura
-     se altera, pero no se pierde nada.
+     `FRONTERA_DISCO_MIN_MB` (1.024), el resto de esa ejecución va a memoria,
+     como antes, y `scheduler/sin_disco` dice por qué. Lo de memoria sale
+     antes que lo de disco, así que el orden en anchura se altera, pero no se
+     pierde nada: con el JOBDIR en un tmpfs de 2 MB, 8.000 de 8.000 páginas.
+     Si el disco se llena de golpe entre dos miradas, sí se puede perder algo,
+     y la segunda revisión lo midió en tres formas:
+     - la escritura que falla;
+     - una anterior que el sistema escribió a medias sin avisar (queuelib la
+       cuenta entera y al leerla no se deserializa);
+     - la petición sacada cuando cerrar la cola vacía falla al guardar su
+       estado.
+     Entonces se pasa a memoria, `scheduler/perdidas` lo cuenta, el spider lo
+     marca en Redis (`job:<id>:frontera_perdida`) y el worker cierra el censo
+     como `frontera_sin_disco`, que está en `MOTIVOS_TRUNCADO`: no se afirman
+     ausencias. En un tmpfs de 1 MB sin umbral se rastrearon 7.968 de 8.000, y
+     quedó contado.
    - Con `JOBDIR`, toda petición que se pueda serializar va a disco, y la que
      no, se queda en memoria y sale antes que las de disco (Scrapy vacía
      primero la de memoria). Las del rastreo se pueden serializar todas

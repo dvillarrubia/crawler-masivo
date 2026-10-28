@@ -4115,6 +4115,7 @@ _TEXTO_TRUNCADO = {
     "stalled": "se quedó parado y se cerró",
     "cancelled": "se canceló a medias",
     "tope_por_carpeta": "dejó partes del sitio sin rastrear por los topes por carpeta",
+    "frontera_sin_disco": "se quedó sin disco para la cola y perdió URLs por rastrear",
 }
 
 
