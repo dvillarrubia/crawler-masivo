@@ -366,6 +366,13 @@
      salientes) y una muestra al azar del resto. Si algo falla al preparar, el
      job sale completo con `error_al_preparar`: rastrear de más nunca deja una
      foto incompleta.
+   - **Lo que no se pide gasta cupo**: cuenta para `max_urls` y para los
+     topes por carpeta (decisión 172) como si se hubiera pedido. Si no, un
+     incremental admitiría más de lo que admite un completo sin decir que
+     está truncado.
+   - **El estado tiene que ser de la base**: si `url_state` lo escribió otro
+     censo (se borró uno más nuevo que la base), los turnos no cuadran con el
+     ciclo y el ciclo sale completo (`estado_de_otro_censo`).
    - **Spider**: lo del censo anterior que no está en la frontera va al mismo
      conjunto de «ya rastreado» que usa la reanudación, así que ni los
      enlaces, ni el sitemap, ni las redirecciones lo piden, sin tocar `parse`.
@@ -390,7 +397,12 @@
         validez, datos estructurados sin validar, recursos, contenido con el
         original sin limpiar, cabeceras, extracción a medida, enlaces no
         rastreables) y los enlaces, de `links` o del Parquet si el anterior
-        está archivado (decisión 150), con el candado del anterior. No copia
+        está archivado (decisión 150). Lo hace con el candado del anterior y
+        releyéndolo después de tomarlo: un re-análisis suyo devuelve sus
+        enlaces al Parquet al soltarlo. Copia también las respuestas
+        sondeadas que este rastreo no ha repetido (enlaces externos y
+        recursos, decisiones 123 y 124), con su fecha: si no, un dominio
+        muerto enlazado desde una página copiada saldría «resuelto». No copia
         incidencias, Search Console ni nada del análisis;
      4. aplica la membresía del sitemap de ESTE rastreo, con la regla de
         siempre (`True`/`False`/`NULL`). El spider la escribe al cerrar,
@@ -398,7 +410,9 @@
         `sitemap_arrastre`;
      5. **poda** lo copiado (HTML 2xx) que ya no se alcanza desde las
         semillas, el sitemap o el destino de una redirección (el spider no
-        guarda la redirección como enlace). Si una página pedida quita el
+        guarda la redirección como enlace). Recorre todos los enlaces, no
+        solo los `is_internal`: con `crawl_subdomains` el spider sigue los
+        de un subdominio aunque la fila diga externo. Si una página pedida quita el
         enlace a una que no tocaba, esa saldría huérfana nueva y en la
         comparación nunca «desaparecería». Un completo no la habría
         encontrado.
@@ -425,8 +439,8 @@
      lleva su `fetch_mode` y su `last_crawled_at` real.
 
    **Lo que no hace (todavía).** El `lastmod` del sitemap no adelanta el turno
-   de una URL. Los topes por carpeta no cuentan lo copiado. Las sondas de
-   respuesta, las capturas y la comprobación de render solo miran lo pedido.
+   de una URL. Las capturas con otro perfil (paridad móvil) y la comprobación
+   de render solo miran lo pedido.
    Una página que se ha movido de nivel conserva la profundidad vieja hasta el
    siguiente completo. Una página que no tocaba y ya no enlaza nadie, pero
    que se pidió por la frontera, no se poda: se pidió y respondió.
@@ -436,7 +450,18 @@
    `tests/test_incremental_db.py` (Postgres) prueba un ciclo completo y uno
    incremental de punta a punta: selección, 304 completado, arrastre desde
    `links` y desde Parquet, sitemap, poda, idempotencia, estado, la muestra de
-   control que fuerza un completo, la base truncada y el origen borrado.
+   control que fuerza un completo, la base truncada, el origen borrado, el
+   subdominio que no se poda, las respuestas sondeadas y el estado de otro
+   censo. La revisión adversarial encontró los cuatro últimos fallos y el del
+   candado, que se reprodujo antes de arreglarlo.
+
+   **Medido** en un sitio local de 31 URLs con ETag y 304, con el worker
+   real (`_run_job`: spider, pipeline, arrastre, análisis y estado): el
+   incremental y un completo del mismo estado del sitio dan las mismas URLs,
+   las mismas incidencias, el mismo PageRank (Spearman 1,0) y los mismos
+   entrantes, profundidades, sitemap e indexabilidad, con 14 peticiones
+   frente a 40. Falta medirlo en un sitio real contra un completo del mismo
+   día, dos veces (decisión 13).
    `tests/test_spider_incremental.py` prueba el spider: lo que no toca no se
    pide, la frontera condicional con su profundidad, nada de condicionales
    con render, el 304 y la reanudación de un incremental ya arrastrado.

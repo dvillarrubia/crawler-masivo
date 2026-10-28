@@ -56,7 +56,7 @@ COPIADAS = (
 # De la fila de ESTE job en un 304: lo que se pidio de verdad (la URL, cuando
 # y a que profundidad se llego) y lo que dijo el servidor.
 PROPIAS_DEL_304 = ("url", "url_hash", "host", "path", "scheme", "is_internal",
-                   "crawl_depth", "last_crawled_at", "etag")
+                   "crawl_depth", "last_crawled_at", "etag", "last_modified")
 # Las de la propia fila: ni se copian ni se reinician.
 DE_LA_FILA = ("id", "job_id", "fetch_mode")
 # Las que calcula el analisis (o el cierre del spider, `in_sitemap`): en una
@@ -138,6 +138,10 @@ def arrastrar(db, job_id) -> dict[str, Any] | None:
     # `links` y borra el Parquet (decision 150), y leerlo a la vez daria uno
     # de los dos a medias.
     db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": clave_de_job(prev.id)})
+    # Releido CON el candado: si se estaba re-analizando, al soltarlo sus
+    # enlaces han vuelto al Parquet, y la marca leida antes diria que estan
+    # en `links` (donde ya no hay nada).
+    db.refresh(prev)
 
     r: dict[str, Any] = {}
     r["no_modificadas"] = _completar_304(db, cur, ant)
@@ -147,6 +151,7 @@ def arrastrar(db, job_id) -> dict[str, Any] | None:
                   for t, con_job, reescribir in HIJOS}
     r["hijos"]["enlaces_no_rastreables"] = _copiar_no_rastreables(db, cur)
     r["enlaces"] = _copiar_links(db, cur, prev)
+    r["respuestas_sondeadas"] = _copiar_sondeadas(db, cur, str(prev.id))
     _membresia_de_sitemap(db, job)
     r["podadas"] = _podar(db, job)
 
@@ -174,7 +179,8 @@ def _completar_304(db, cur: str, ant: str) -> int:
     columnas = [c for c in COPIADAS if c not in PROPIAS_DEL_304]
     asignaciones = ", ".join(f"{c} = o.{c}" for c in columnas)
     n = db.execute(text(f"""
-        UPDATE urls n SET {asignaciones}, etag = COALESCE(n.etag, o.etag)
+        UPDATE urls n SET {asignaciones}, etag = COALESCE(n.etag, o.etag),
+               last_modified = COALESCE(n.last_modified, o.last_modified)
           FROM urls o
          WHERE n.job_id = :cur AND n.fetch_mode = 'not_modified'
            AND o.job_id = :ant AND o.url_hash = n.url_hash
@@ -314,6 +320,27 @@ def _copiar_links(db, cur: str, prev) -> int:
     return n
 
 
+def _copiar_sondeadas(db, cur: str, ant: str) -> int:
+    """Lo que respondieron los enlaces externos y recursos del anterior que
+    este rastreo no ha vuelto a sondear (decisiones 123 y 124).
+
+    Las sondas salen de las paginas pedidas: sin esto, un enlace a un dominio
+    muerto en una pagina copiada dejaria de avisarse y la comparacion lo daria
+    por resuelto. Va con su `fecha` de entonces.
+    """
+    from sqlalchemy import text
+
+    columnas = [c for c in _columnas_de("respuestas_sondeadas") if c not in ("id", "job_id")]
+    n = db.execute(text(f"""
+        INSERT INTO respuestas_sondeadas (job_id, {", ".join(columnas)})
+        SELECT :cur, {", ".join("c." + c for c in columnas)}
+          FROM respuestas_sondeadas c
+         WHERE c.job_id = :ant
+        ON CONFLICT ON CONSTRAINT uq_rsond_job_hash DO NOTHING
+    """), {"cur": cur, "ant": ant}).rowcount
+    return int(n or 0)
+
+
 def _membresia_de_sitemap(db, job) -> None:
     """`in_sitemap` de lo copiado, con el sitemap de ESTE rastreo.
 
@@ -349,6 +376,10 @@ def _membresia_de_sitemap(db, job) -> None:
 def _podar(db, job) -> int:
     """Borra lo copiado que ya no se alcanza desde las semillas, el sitemap o
     el destino de una redireccion de este job.
+
+    Por TODOS los enlaces, no solo los `is_internal`: con `crawl_subdomains`
+    el spider sigue los de un subdominio aunque la fila diga externo, y con
+    `follow_external` los de fuera. Recorrer de mas solo poda de menos.
 
     Una pagina pedida que quita su enlace a una que no tocaba: copiada sin
     mas, saldria con 0 entrantes como huerfana nueva y en la comparacion nunca
@@ -390,7 +421,6 @@ def _podar(db, job) -> int:
               FROM alcanzadas a
               JOIN urls u ON u.job_id = :j AND u.url_hash = a.h
               JOIN links l ON l.job_id = :j AND l.from_url_id = u.id
-             WHERE l.is_internal
         )
         DELETE FROM urls u
          WHERE u.job_id = :j AND u.fetch_mode = 'carried'

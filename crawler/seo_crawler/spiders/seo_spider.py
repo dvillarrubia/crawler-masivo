@@ -999,11 +999,10 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                 self._resume_mode = True
                 consulta = session.query(Url).filter(Url.job_id == self.job_id)
                 if self._incremental:
-                    # Lo arrastrado no se pidio en este job: no gasta
-                    # `max_urls` ni cuenta como rastreado.
+                    # Lo arrastrado SI gasta `max_urls`: el tope es del censo,
+                    # y el censo lo incluye (decision 220).
                     self._con_arrastre = session.query(
                         consulta.filter(Url.fetch_mode == "carried").exists()).scalar()
-                    consulta = consulta.filter(Url.fetch_mode.is_distinct_from("carried"))
                 self._crawled_count = consulta.count()
                 logger.info(
                     "Resume mode for job %s: %d URLs already crawled, "
@@ -1016,8 +1015,19 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                     self._already_crawled_hashes = ClavesCompactas.desde(
                         self._already_crawled_hashes)
                 n = 0
-                for h in self._hashes_no_pedir(session):
-                    n += self._already_crawled_hashes.anadir(_hash_key(h))
+                for url_previa, h in self._hashes_no_pedir(session):
+                    clave = _hash_key(h)
+                    if self._already_crawled_hashes.anadir(clave):
+                        n += 1
+                        # Lo que no se pide estara en el censo: gasta su cupo
+                        # por carpeta como si se hubiera pedido, o un
+                        # incremental admitiria mas de lo que admite un
+                        # completo sin decir que esta truncado.
+                        if self._topes is not None:
+                            self._topes.contar(url_previa, clave)
+                if self.max_urls is not None:
+                    # Y el tope de URLs, lo mismo.
+                    self.max_urls = max(0, self.max_urls - n)
                 logger.info(
                     "Incremental (decision 220): %d URLs del censo %s no tocan y no se "
                     "piden", n, self._incremental.get("prev_job_id"))
@@ -1115,19 +1125,19 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             ],
         }
 
-    def _hashes_no_pedir(self, session) -> Iterator[str]:
-        """Lo del censo anterior que no toca: sus `url_hash` menos los de
-        `job_frontera` (decision 220)."""
+    def _hashes_no_pedir(self, session) -> Iterator[tuple[str, str]]:
+        """Lo del censo anterior que no toca, `(url, url_hash)`: sus URLs
+        menos las de `job_frontera` (decision 220)."""
         from sqlalchemy import exists
 
         from shared.models import JobFrontera, Url
 
         en_frontera = exists().where(JobFrontera.job_id == self.job_id,
                                      JobFrontera.url_hash == Url.url_hash)
-        for (h,) in (session.query(Url.url_hash)
-                     .filter(Url.job_id == self._prev_job_id, ~en_frontera)
-                     .yield_per(10_000)):
-            yield h
+        for url, h in (session.query(Url.url, Url.url_hash)
+                       .filter(Url.job_id == self._prev_job_id, ~en_frontera)
+                       .yield_per(10_000)):
+            yield url, h
 
     def _filas_de_frontera(self) -> Iterator[tuple]:
         """`job_frontera` del job por lotes (keyset sobre `url_hash`):
@@ -1171,6 +1181,9 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                 continue
             if not self._should_follow(normalized):
                 continue
+            if self._topes is not None:
+                # Se pide siempre (estaba en el censo anterior), y gasta cupo.
+                self._topes.contar(normalized, _hash_key(compute_url_hash(normalized)))
             depth = 1 if profundidad is None else int(profundidad)
             req = self._page_request(normalized, depth)
             if not req.meta.get("playwright") and (etag or last_modified):

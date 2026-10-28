@@ -34,13 +34,14 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from shared.models import (  # noqa: E402
     Base, Client, CrawlProfile, Heading, Hreflang, HtmlMeta, Job, JobFrontera, Link,
-    PageContent, Programacion, SitemapArrastre, Url, UrlState,
+    PageContent, Programacion, RespuestaSondeada, SitemapArrastre, Url, UrlState,
 )
 
 pytest.importorskip("seo_crawler.extractors")
 from seo_crawler.extractors import compute_url_hash, normalize_url  # noqa: E402
 
 BASE = "https://x.com"
+BLOG = "https://blog.x.com/post"
 CONFIG = {"max_depth": 5, "incremental": {"activo": True, "completo_cada": 4,
                                           "muestra_control": 0}}
 
@@ -128,6 +129,17 @@ def _censo_anterior(db, prog, perfil):
     d = _url(db, job, "/d", depth=2, cuando=hace)
     _enlaces(db, job, home, "/a", "/b", "/c", "/r")
     _enlaces(db, job, a, "/b")
+    # Un subdominio con `crawl_subdomains`: la fila del enlace dice externo.
+    blog = Url(job_id=job.id, url=BLOG, url_hash=compute_url_hash(normalize_url(BLOG)),
+               host="blog.x.com", path="/post", scheme="https", is_internal=True,
+               is_html=True, crawl_depth=1, status_code=200, status_group="2xx",
+               last_crawled_at=hace)
+    db.add(blog)
+    db.add(Link(job_id=job.id, from_url_id=home.id, to_url=BLOG,
+                to_url_hash=blog.url_hash, is_internal=False, follow=True, repeticiones=1))
+    # Un enlace externo roto, sondeado desde una pagina que no se volvera a pedir.
+    db.add(RespuestaSondeada(job_id=job.id, url_hash="e" * 64, url="https://muerto.example/",
+                             uso="enlace", veredicto="roto", status_code=404))
     _enlaces(db, job, c, "/e")
     for u in (home, a, b, c, e, d):
         db.add(HtmlMeta(url_id=u.id, title=f"titulo {u.path}"))
@@ -148,7 +160,7 @@ def _censo_anterior(db, prog, perfil):
 def _incremental(db, prog, perfil, previo):
     """El incremental, rastreado: home pedida (ya sin enlace a /c), /a con 304
     y /r otra vez 301. Los demas no tocan."""
-    no_tocan = [_h(r) for r in ("/b", "/c", "/e", "/d")]
+    no_tocan = [_h(r) for r in ("/b", "/c", "/e", "/d")] + [compute_url_hash(normalize_url(BLOG))]
     db.query(UrlState).filter(UrlState.profile_id == perfil.id,
                               UrlState.url_hash.in_(no_tocan)).update(
         {"proximo_ciclo": 9}, synchronize_session=False)
@@ -160,13 +172,17 @@ def _incremental(db, prog, perfil, previo):
     frontera = dict(db.query(JobFrontera.url_hash, JobFrontera.motivo)
                     .filter(JobFrontera.job_id == job.id))
     assert frontera == {_h("/"): "fijo", _h("/a"): "toca", _h("/r"): "toca"}
-    assert inc["seleccion"]["conocidas"] == 7
+    assert inc["seleccion"]["conocidas"] == 8
 
     home = _url(db, job, "/", depth=0, fetch_mode="fetched", in_sitemap=True,
                 outlinks_count=3)
-    _url(db, job, "/a", status=304, fetch_mode="not_modified", in_sitemap=False)
+    _url(db, job, "/a", status=304, fetch_mode="not_modified", in_sitemap=False,
+         last_modified="Wed, 28 Oct 2026 10:00:00 GMT")
     _url(db, job, "/r", status=301, redirect="/d", fetch_mode="fetched", in_sitemap=False)
     _enlaces(db, job, home, "/a", "/b", "/r")
+    db.add(Link(job_id=job.id, from_url_id=home.id, to_url=BLOG,
+                to_url_hash=compute_url_hash(normalize_url(BLOG)), is_internal=False,
+                follow=True, repeticiones=1))
     db.add(HtmlMeta(url_id=home.id, title="titulo /"))
     db.add(SitemapArrastre(job_id=job.id, url_hash=_h("/b")))
     job.status, job.sitemaps = "analyzing", {"parcial": False}
@@ -185,7 +201,7 @@ def test_un_ciclo_incremental_entero(db, perfil):
     p, prog = perfil
     previo = _censo_anterior(db, prog, p)
     estado = {e.url_hash: e for e in db.query(UrlState).filter(UrlState.profile_id == p.id)}
-    assert len(estado) == 7 and estado[_h("/")].fijo
+    assert len(estado) == 8 and estado[_h("/")].fijo
     # Solo la home: con casi todas las paginas igual de enlazadas, el
     # percentil 95 no convierte en «hub» a todo el sitio.
     assert {h for h, e in estado.items() if e.fijo} == {_h("/")}
@@ -198,13 +214,19 @@ def test_un_ciclo_incremental_entero(db, perfil):
 
     # /c ya no la enlaza nadie, y /e solo la enlazaba /c: podadas. /d se
     # alcanza por la redireccion de /r aunque ningun enlace vaya a ella.
-    assert set(filas) == {"/", "/a", "/r", "/b", "/d"}
+    # El subdominio se alcanza aunque el enlace diga externo: no se poda.
+    assert set(filas) == {"/", "/a", "/r", "/b", "/d", "/post"}
     assert r["podadas"] == 2 and r["no_modificadas"] == 1
-    assert r["pct_arrastrado"] == pytest.approx(40.0)
+    assert r["pct_arrastrado"] == pytest.approx(50.0)
+    # El enlace roto de una pagina copiada se sigue sabiendo roto.
+    assert db.query(RespuestaSondeada.veredicto).filter(
+        RespuestaSondeada.job_id == job.id).scalar() == "roto"
 
     a = filas["/a"]
     assert (a.fetch_mode, a.status_code, a.is_html, a.content_hash) == \
         ("not_modified", 200, True, "ca")
+    # La cabecera es la de hoy, no la del anterior.
+    assert a.last_modified == "Wed, 28 Oct 2026 10:00:00 GMT"
     # El 304 conserva cuando se pidio de verdad, y su etag.
     assert a.last_crawled_at > datetime.now(timezone.utc) - timedelta(hours=1)
     b = filas["/b"]
@@ -228,13 +250,14 @@ def test_un_ciclo_incremental_entero(db, perfil):
             "SELECT u.path, l.to_url FROM links l JOIN urls u ON u.id = l.from_url_id "
             "WHERE l.job_id = :j"), {"j": str(job.id)})}
     assert salientes == {("/", BASE + "/a"), ("/", BASE + "/b"), ("/", BASE + "/r"),
-                         ("/a", BASE + "/b")}
+                         ("/", BLOG), ("/a", BASE + "/b")}
 
     # Repetirlo no duplica nada.
     assert arrastrar(db, job.id)["hecho"]
-    assert db.query(Url).filter(Url.job_id == job.id).count() == 5
+    assert db.query(Url).filter(Url.job_id == job.id).count() == 6
     assert db.query(HtmlMeta).join(Url, Url.id == HtmlMeta.url_id).filter(
         Url.job_id == job.id).count() == 4
+    assert db.query(RespuestaSondeada).filter(RespuestaSondeada.job_id == job.id).count() == 1
 
     # El estado tras el incremental: lo podado sale, el 304 sin cambios y la
     # home, con otros enlaces, cambiada.
@@ -242,8 +265,9 @@ def test_un_ciclo_incremental_entero(db, perfil):
     db.commit()
     resumen = actualizar_estado(db, job.id)
     estado = {e.url_hash: e for e in db.query(UrlState).filter(UrlState.profile_id == p.id)}
-    assert set(estado) == {_h(x) for x in ("/", "/a", "/r", "/b", "/d")}
-    assert resumen["fuera"] == 2 and resumen["arrastradas"] == 2
+    assert set(estado) == {_h(x) for x in ("/", "/a", "/r", "/b", "/d")} | {
+        compute_url_hash(normalize_url(BLOG))}
+    assert resumen["fuera"] == 2 and resumen["arrastradas"] == 3
     assert estado[_h("/a")].sin_cambios == 1 and estado[_h("/a")].intervalo == pytest.approx(1.4)
     assert estado[_h("/")].ultimo_cambio_ciclo == 2
     assert estado[_h("/b")].proximo_ciclo == 9  # arrastrada: conserva su turno
@@ -318,3 +342,16 @@ def test_la_muestra_de_control_que_cambia_fuerza_un_completo(db, perfil):
     assert (siguiente.incremental["modo"], siguiente.incremental["motivo"]) == \
         ("completo", "forzado_por_el_anterior")
     assert previo is not None
+
+
+def test_si_el_estado_no_es_de_la_base_es_completo(db, perfil):
+    """Se borro un censo mas nuevo que la base: los turnos de `url_state` son
+    de ese, y con el ciclo de la base casi nada tocaria."""
+    p, prog = perfil
+    _censo_anterior(db, prog, p)
+    db.query(UrlState).filter(UrlState.profile_id == p.id,
+                              UrlState.url_hash == _h("/b")).update({"last_job_id": None})
+    db.commit()
+    job = _disparo(db, prog, p)
+    assert (job.incremental["modo"], job.incremental["motivo"]) == \
+        ("completo", "estado_de_otro_censo")

@@ -78,6 +78,20 @@ def _spider(actual):
     return sp
 
 
+def test_lo_que_no_toca_gasta_el_tope_de_urls(bd):
+    from shared.models import Job
+
+    _previo, actual = _preparar(bd)
+    s = bd()
+    job = s.get(Job, actual)
+    job.config = {**job.config, "max_urls": 10}
+    s.commit()
+    s.close()
+    sp = _spider(actual)
+    # /b y /c no se piden pero estaran en el censo: quedan 8 de 10.
+    assert sp.max_urls == 8
+
+
 def test_lo_que_no_toca_no_se_pide(bd):
     from seo_crawler.spiders.seo_spider import _hash_key
 
@@ -169,5 +183,5 @@ def test_reanudar_un_incremental_ya_arrastrado_no_siembra_sus_enlaces(bd):
     s.close()
     sp = _spider(actual)
     assert sp._resume_mode and sp._con_arrastre
-    # Lo arrastrado no cuenta como rastreado en este job.
-    assert sp._crawled_count == 1
+    # Lo arrastrado esta en el censo: gasta `max_urls` como lo demas.
+    assert sp._crawled_count == 2

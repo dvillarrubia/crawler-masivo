@@ -55,6 +55,7 @@ INTERVALO_MIN = 1.0
 SIN_BASE = "sin_censo_anterior"
 BASE_TRUNCADA = "censo_anterior_truncado"
 SIN_ESTADO = "sin_estado"
+ESTADO_DE_OTRO = "estado_de_otro_censo"
 TOCA_COMPLETO = "toca_completo"
 CONFIG_CAMBIADA = "config_cambiada"
 FORZADO = "forzado_por_el_anterior"
@@ -117,6 +118,8 @@ def decidir(cfg: dict[str, Any], base: dict[str, Any] | None,
         return "completo", BASE_TRUNCADA
     if not base.get("estado_ok"):
         return "completo", SIN_ESTADO
+    if base.get("estado_de_otro"):
+        return "completo", ESTADO_DE_OTRO
     if base.get("forzar_completo"):
         return "completo", FORZADO
     if base.get("huella") != huella_actual:
@@ -187,6 +190,11 @@ def _preparar(db, job, cfg: dict[str, Any]) -> dict[str, Any]:
             "ciclos_desde_completo": inc.get("ciclos_desde_completo"),
             "forzar_completo": inc.get("forzar_completo"),
             "estado_ok": bool((inc.get("estado") or {}).get("actualizado")),
+            # `url_state` lo escribio la base: si se borro un censo mas nuevo,
+            # los turnos son de ese y no cuadran con el ciclo de la base.
+            "estado_de_otro": db.query(UrlState.url_hash).filter(
+                UrlState.profile_id == job.profile_id,
+                UrlState.last_job_id.is_distinct_from(base.id)).first() is not None,
         }
     ciclo = int(((base.incremental or {}).get("ciclo") or 0) + 1) if base is not None else 1
     modo, motivo = decidir(cfg, info_base, huella_actual)
