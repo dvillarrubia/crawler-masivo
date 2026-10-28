@@ -1463,3 +1463,36 @@
 
    Tests: `tests/test_frontera_memoria.py` y, contra Postgres,
    `tests/test_frontera_reanudar_db.py` (ver `docs/referencia/testing.md`).
+
+<a id="d219"></a>
+219. **Los hijos de cada página salen en un item por tipo (`HijosItem`), no en
+   uno por fila** (#284, punto 6).
+
+   **Problema.** `parse` emitía un `LinkItem` por enlace, un `HeadingItem` por
+   encabezado, un `ResourceItem` por recurso y un `StructuredDataItem` por
+   bloque. En la página sintética del banco eran unos 260 items por página, y
+   cada uno pasaba por los middlewares del spider, el motor y el pipeline. Un
+   prototipo que solo los juntaba bajaba la CPU del rastreo un tercio.
+
+   **Decisión.** `HijosItem(tipo, filas)` lleva todas las filas de un tipo de
+   la página como dicts, con los mismos campos que el item de una fila. Se
+   emite en el mismo sitio que el bucle al que sustituye, así que el orden
+   entre tipos no cambia, y no se emite si no hay filas, como antes. El
+   pipeline mete cada fila en su búfer como si hubiera llegado sola (mismos
+   lotes, mismo `DELETE` previo, mismo `COPY` de la 217), y sigue aceptando
+   los items de una fila. `items.desplegar()` convierte la salida de `parse`
+   en la de antes: lo usan el arnés de tests (`Recolector`), los tests que
+   llaman a `parse` y el banco del pipeline. El hreflang sigue con un item por
+   fila: son pocos.
+
+   **Medido** con un sitio local en el que cada página es la sintética del
+   banco más 10 enlaces nuevos, con los ajustes de producción y sin pipeline:
+   1.530 páginas, **de 55,9 a 39 ms de CPU por página (−30 %)**. Se encolan
+   las mismas 13.438 peticiones, y los items que pasan por Scrapy bajan de
+   404.604 a 21.390.
+
+   **Lo que se rastrea y se guarda, igual.** Comparado master contra la rama
+   con las 23 páginas de la revisión de la 215 (Wikipedia, BOE, schema.org,
+   MDN, gov.uk, GitHub y las sintéticas), con la configuración por defecto y
+   con selectores propios: la salida de `parse`, desplegada, sale idéntica
+   item a item y en el mismo orden.

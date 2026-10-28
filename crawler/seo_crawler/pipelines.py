@@ -23,6 +23,7 @@ from seo_crawler.items import (
     EnlacesNoRastreablesItem,
     EntidadesAdaptadorItem,
     HeadingItem,
+    HijosItem,
     HreflangItem,
     HtmlMetaItem,
     LinkItem,
@@ -32,6 +33,7 @@ from seo_crawler.items import (
     SitemapEntradasItem,
     SecurityItem,
     StructuredDataItem,
+    CLASES_HIJO,
 )
 
 logger = logging.getLogger(__name__)
@@ -231,6 +233,13 @@ class PostgresPipeline:
             self._handle_sitemap(item)
         elif isinstance(item, EntidadesAdaptadorItem):
             self._handle_entidades(item)
+        elif isinstance(item, HijosItem):
+            # Todos los hijos de un tipo de la pagina (#284): al buffer como
+            # si hubieran llegado uno a uno.
+            clase = CLASES_HIJO[item["tipo"]]
+            self._buffer.extend((clase, fila) for fila in item["filas"])
+            if len(self._buffer) >= self.batch_size:
+                self._flush(spider)
         elif isinstance(item, (LinkItem, HeadingItem, HreflangItem,
                                StructuredDataItem, ResourceItem)):
             self._buffer.append((type(item), dict(item)))

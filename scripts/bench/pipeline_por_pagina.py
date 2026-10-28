@@ -45,7 +45,9 @@ def _items_de(SeoSpider, url: str, cuerpo: bytes) -> list:
                      headers={b"Content-Type": b"text/html; charset=utf-8"},
                      request=Request(url, meta={"depth": 1, "download_latency": 0.01}))
     t = time.process_time()
-    salida = [i for i in sp.parse(r) if not isinstance(i, Request)]
+    from seo_crawler.items import desplegar
+
+    salida = [i for i in desplegar(sp.parse(r)) if not isinstance(i, Request)]
     return salida, (time.process_time() - t) * 1000
 
 

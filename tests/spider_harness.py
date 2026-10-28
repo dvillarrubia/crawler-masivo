@@ -501,7 +501,11 @@ ITEMS: list[dict] = []
 
 class Recolector:
     def process_item(self, item, spider):
-        ITEMS.append({"_tipo": type(item).__name__, **dict(item)})
+        # Un `HijosItem` (#284) se anota como las filas sueltas de antes.
+        from seo_crawler.items import desplegar
+
+        for it in desplegar([item]):
+            ITEMS.append({"_tipo": type(it).__name__, **dict(it)})
         return item
 
 
