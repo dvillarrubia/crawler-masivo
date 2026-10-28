@@ -154,9 +154,24 @@ def test_una_pagina_en_varios_lotes_y_re_rastrearla(bd):
 
 
 def test_un_fallo_del_copy_no_deja_el_lote_a_medias(bd, monkeypatch):
-    """Un valor que la tabla no admite (rel de mas de 128) tumba el lote
+    """Un valor que la tabla no admite (un `to_url` nulo) tumba el lote
     entero, como con el ORM: ni enlaces sueltos ni el DELETE previo."""
     Sesion, jid = bd
     _pasar(jid, [_pagina(jid, 0)] + [_enlace(jid, 0, k) for k in range(3)])
-    _pasar(jid, [_pagina(jid, 0), _enlace(jid, 0, 7), _enlace(jid, 0, 8, rel="x" * 200)])
+    _pasar(jid, [_pagina(jid, 0), _enlace(jid, 0, 7), _enlace(jid, 0, 8, to_url=None)])
     assert [f[2] for f in _filas(Sesion, jid)] == ["d0", "d1", "d2"]
+
+
+def test_nulos_explicitos_y_textos_largos(bd):
+    """Un None explicito recibe el default del modelo (como con el ORM), y un
+    `target` o un `rel` mas largos que su columna se recortan en vez de tumbar
+    el lote."""
+    Sesion, jid = bd
+    _pasar(jid, [_pagina(jid, 0),
+                 _enlace(jid, 0, 1, follow=None, is_internal=None, link_type=None),
+                 _enlace(jid, 0, 2, target="nombre_de_iframe_largo_xx", rel="r" * 200,
+                         link_position="p" * 30)])
+    filas = {f[2]: f for f in _filas(Sesion, jid)}
+    assert (filas["d1"][5], filas["d1"][7], filas["d1"][10]) == (True, True, "hyperlink")
+    assert filas["d2"][8] == "nombre_de_iframe_lar" and filas["d2"][4] == "r" * 128
+    assert filas["d2"][6] == "p" * 20

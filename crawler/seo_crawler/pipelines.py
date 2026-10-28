@@ -64,21 +64,29 @@ def _valor_copy(v) -> str:
             .replace("\n", "\\n").replace("\r", "\\r"))
 
 
+def _por_defecto(v, defecto):
+    return defecto if v is None else v
+
+
+def _recortar(v, n: int):
+    return v[:n] if isinstance(v, str) else v
+
+
 def _copiar(session, tabla: str, columnas: tuple[str, ...], filas: list[tuple]) -> bool:
     """`COPY tabla FROM STDIN` en la transaccion de la sesion. False si la
-    conexion no es de psycopg2 sobre Postgres (los tests con SQLite): entonces
-    el que llama inserta como antes."""
+    conexion no es de psycopg2 sobre Postgres: entonces el que llama inserta
+    con el ORM."""
     import io
 
     conexion = session.connection()
     if conexion.dialect.name != "postgresql":
         return False
-    cursor = conexion.connection.cursor()
-    if not hasattr(cursor, "copy_expert"):
-        return False
-    texto = "\n".join("\t".join(_valor_copy(v) for v in fila) for fila in filas)
-    cursor.copy_expert(f"COPY {tabla} ({', '.join(columnas)}) FROM STDIN",
-                       io.StringIO(texto + "\n"))
+    with conexion.connection.cursor() as cursor:
+        if not hasattr(cursor, "copy_expert"):
+            return False
+        texto = "\n".join("\t".join(_valor_copy(v) for v in fila) for fila in filas)
+        cursor.copy_expert(f"COPY {tabla} ({', '.join(columnas)}) FROM STDIN",
+                           io.StringIO(texto + "\n"))
     return True
 
 
@@ -905,20 +913,24 @@ class PostgresPipeline:
         from_url_id = self._resolve_url_id(data.get("from_url_hash"), job_id)
         if from_url_id is None:
             return None
+        # Un None explicito recibe el default del modelo, como con el ORM
+        # (`bulk_save_objects` omitia la columna). Los VARCHAR se recortan:
+        # un `target` de 21 caracteres (el nombre de un iframe) tumbaba el
+        # lote entero, los enlaces de unas 200 paginas.
         return (
             str(job_id),
             from_url_id,
             data.get("to_url"),
             data.get("to_url_hash"),
             data.get("anchor_text"),
-            data.get("rel"),
-            data.get("is_internal", True),
-            data.get("link_position"),
+            _recortar(data.get("rel"), 128),
+            _por_defecto(data.get("is_internal"), True),
+            _recortar(data.get("link_position"), 20),
             # New Screaming Frog fields
-            data.get("follow", True),
-            data.get("target"),
+            _por_defecto(data.get("follow"), True),
+            _recortar(data.get("target"), 20),
             data.get("alt_text"),
-            data.get("link_type", "hyperlink"),
+            _recortar(_por_defecto(data.get("link_type"), "hyperlink"), 20),
             data.get("repeticiones") or 1,
         )
 

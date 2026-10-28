@@ -1359,9 +1359,18 @@
    demás hijos (encabezados, recursos, datos estructurados, hreflang) siguen
    con el ORM: entre todos son una cuarta parte.
 
-   Hay un solo cambio en lo que se guarda: Postgres no admite U+0000 en un
-   texto, y `_valor_copy` lo quita. Con el ORM, un NUL en un ancla hacía
-   fallar el lote entero, que perdía los enlaces de hasta 200 items.
+   Un `None` explícito en `follow`, `is_internal` o `link_type` recibe el
+   default del modelo, como con el ORM, que omitía la columna. Lo encontró la
+   revisión; hoy el spider no lo manda nunca.
+
+   Lo que se guarda cambia en dos casos, y los dos a mejor:
+   - **El U+0000:** Postgres no lo admite en un texto, y `_valor_copy` lo
+     quita. Con el ORM, un NUL en un ancla hacía fallar el lote entero, que
+     perdía los enlaces de hasta 200 items.
+   - **Los VARCHAR:** `rel`, `target`, `link_position` y `link_type` se
+     recortan a su columna. Un `target` de 21 caracteres (el nombre de un
+     iframe) también tumbaba el lote entero, y además deshacía las páginas sin
+     confirmar. También lo encontró la revisión: pasaba ya antes.
 
    **Medido** con `scripts/bench/pipeline_por_pagina.py`, que pasa los items
    reales de las páginas de `tests/fixtures/paginas/` por el pipeline real
@@ -1375,8 +1384,9 @@
    | Wikipedia (2.195 enlaces) | 130 / 252 ms | 74 / 168 ms |
 
    Las filas de cada tabla son las mismas, y la firma de los enlaces (el md5
-   de cada fila con todas sus columnas, ordenados) es idéntica con un código y
-   con el otro.
+   de `row(...)::text` de cada fila con todas sus columnas, ordenados, para
+   que un nulo no se confunda con un desplazamiento) es idéntica con un código
+   y con el otro.
 
    **Lo que se probó y no se hace.** Precompilar los `CSSSelector` de la
    limpieza (punto 8 de #284): medido, 3,9 frente a 3,7 ms en el BOE y 134

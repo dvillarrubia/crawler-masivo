@@ -116,9 +116,9 @@ def main() -> None:
                                       {"j": str(jid)}).scalar()
             # Independiente del orden de insercion: el md5 de cada fila, ordenados.
             firma = c.execute(text(
-                "select md5(string_agg(h, ',' order by h)) from (select md5(concat_ws('|',"
+                "select md5(string_agg(h, ',' order by h)) from (select md5(row("
                 " l.to_url, l.to_url_hash, l.anchor_text, l.rel, l.is_internal, l.link_position,"
-                " l.follow, l.target, l.alt_text, l.link_type, l.repeticiones, u.url_hash)) h from links l"
+                " l.follow, l.target, l.alt_text, l.link_type, l.repeticiones, u.url_hash)::text) h from links l"
                 " join urls u on u.id = l.from_url_id where l.job_id = :j) x"),
                 {"j": str(jid)}).scalar()
         print("filas:", filas, "firma de enlaces:", firma)
