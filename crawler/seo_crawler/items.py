@@ -183,6 +183,31 @@ class ResourceItem(scrapy.Item):
     is_mixed_content = scrapy.Field()
 
 
+class HijosItem(scrapy.Item):
+    """Los hijos de una pagina de UN tipo, todos juntos (#284): `tipo` es el
+    nombre del item de una fila (`LinkItem`, `HeadingItem`, `ResourceItem`,
+    `StructuredDataItem`) y `filas`, sus dicts tal cual.
+
+    Un item por fila pasaba cada uno por los middlewares del spider, el motor
+    y el pipeline: con ~260 por pagina, un tercio de la CPU del rastreo. El
+    pipeline los trata igual que antes; `desplegar` los vuelve a separar."""
+
+    tipo = scrapy.Field()
+    filas = scrapy.Field()
+
+
+def desplegar(items):
+    """Los items de `parse` con cada `HijosItem` convertido en sus items de una
+    fila, en el mismo orden: lo que emitia el spider antes de #284."""
+    for it in items:
+        if isinstance(it, HijosItem):
+            clase = CLASES_HIJO[it["tipo"]]
+            for fila in it["filas"]:
+                yield clase(**fila)
+        else:
+            yield it
+
+
 class ContentItem(scrapy.Item):
     """Main textual content of a page -- one per HTML response."""
 
@@ -318,3 +343,6 @@ class CapturaAlternativaItem(scrapy.Item):
     diferencias = scrapy.Field()
     volatiles = scrapy.Field()
     detalle = scrapy.Field()
+
+
+CLASES_HIJO = {c.__name__: c for c in (LinkItem, HeadingItem, ResourceItem, StructuredDataItem)}

@@ -524,3 +524,6 @@ Postgres (escapes del formato de texto, NUL, nulos, el camino sin `COPY` con
 las mismas filas, lotes de una misma pagina y re-rastreo, y un fallo que tumba
 el lote entero). El coste del pipeline por pagina se mide con
 `scripts/bench/pipeline_por_pagina.py` (Postgres de pruebas, nunca `crawler_db`).
+Los hijos en un item por tipo (decision 219): el arnes (`Recolector`) y
+`test_parse_atajos.py` despliegan los `HijosItem` con `items.desplegar()`, asi
+que los tests que buscan `LinkItem` siguen igual.

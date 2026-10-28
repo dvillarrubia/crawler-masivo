@@ -220,7 +220,10 @@ def _parse(SeoSpider, url, body, extraction):
     respuesta = HtmlResponse(url, status=200, body=body,
                              headers={b"Content-Type": b"text/html; charset=utf-8"},
                              request=Request(url, meta={"depth": 1, "download_latency": 0.01}))
-    return list(sp.parse(respuesta))
+    from seo_crawler.items import desplegar
+
+    # Los hijos de cada tipo salen juntos (#284): se comparan fila a fila.
+    return list(desplegar(sp.parse(respuesta)))
 
 
 @pytest.mark.parametrize("extraction", [

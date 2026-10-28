@@ -100,15 +100,12 @@ from seo_crawler.items import (
     ContentItem,
     CustomExtractionItem,
     EnlacesNoRastreablesItem,
-    HeadingItem,
+    HijosItem,
     HreflangItem,
     HtmlMetaItem,
-    LinkItem,
     PageItem,
-    ResourceItem,
     SecurityItem,
     SitemapEntradasItem,
-    StructuredDataItem,
 )
 
 logger = logging.getLogger(__name__)
@@ -2529,9 +2526,10 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             data_nosnippet=data_nosnippet,
         )
 
-        # Headings
-        for heading in extract_headings(selector):
-            yield HeadingItem(
+        # Headings. Los hijos de cada tipo van en UN item por pagina
+        # (`HijosItem`, #284): uno por fila costaba un tercio de la CPU.
+        encabezados = [
+            dict(
                 url_hash=final_hash,
                 job_id=self.job_id,
                 tag=heading["tag"],
@@ -2539,6 +2537,10 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                 text=heading["text"],
                 oculto=heading.get("oculto"),
             )
+            for heading in extract_headings(selector)
+        ]
+        if encabezados:
+            yield HijosItem(tipo="HeadingItem", filas=encabezados)
 
         # Page-level nofollow: meta robots / X-Robots-Tag "nofollow" (or
         # "none") makes EVERY link on the page nofollow, as Google applies it.
@@ -2556,8 +2558,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         links = extract_links(selector, base_url, self.allowed_hosts, page_nofollow=page_nofollow)
         # Se guardan agrupados (repeticiones), pero se SIGUEN todos: el
         # seguimiento de mas abajo usa `links`, no lo agrupado.
-        for link in agrupar_enlaces(links):
-            yield LinkItem(
+        filas_enlaces = [
+            dict(
                 repeticiones=link["repeticiones"],
                 from_url_hash=final_hash,
                 to_url=link["url"],
@@ -2573,6 +2575,10 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                 alt_text=link.get("alt_text"),
                 link_type=link.get("link_type", "hyperlink"),
             )
+            for link in agrupar_enlaces(links)
+        ]
+        if filas_enlaces:
+            yield HijosItem(tipo="LinkItem", filas=filas_enlaces)
 
         # Los que Google no puede seguir (decision 106). Tabla aparte: no son
         # aristas del grafo ni se siguen. Siempre se emite, aunque vaya vacio,
@@ -2600,8 +2606,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             except Exception as exc:
                 logger.debug("Structured data extraction failed for %s: %s", response.url, exc)
                 sd_items = []
-            for sd in sd_items:
-                yield StructuredDataItem(
+            filas_sd = [
+                dict(
                     url_hash=final_hash,
                     job_id=self.job_id,
                     raw=sd["raw"],
@@ -2609,12 +2615,16 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                     schema_type=sd["schema_type"],
                     json_invalido=sd.get("json_invalido"),
                 )
+                for sd in sd_items
+            ]
+            if filas_sd:
+                yield HijosItem(tipo="StructuredDataItem", filas=filas_sd)
 
         # Resources (extract_resources already returns width, height,
         # is_mixed_content)
         resources = extract_resources(selector, base_url)
-        for resource in resources:
-            yield ResourceItem(
+        filas_recursos = [
+            dict(
                 url_hash=final_hash,
                 job_id=self.job_id,
                 resource_url=resource["url"],
@@ -2625,6 +2635,10 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                 height=resource.get("height"),
                 is_mixed_content=resource.get("is_mixed_content", False),
             )
+            for resource in resources
+        ]
+        if filas_recursos:
+            yield HijosItem(tipo="ResourceItem", filas=filas_recursos)
 
         # Sondas de lo que la pagina enlaza fuera y de lo que embebe
         # (decisiones 123 y 124): no son URLs del censo ni gastan max_urls.

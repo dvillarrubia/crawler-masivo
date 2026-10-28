@@ -40,6 +40,10 @@
   tiene que poder serializarse (callback y errback del spider, meta sin objetos
   vivos) o se queda en memoria y adelanta a las demas. Lo que el spider o el
   pipeline recuerden por URL va con tope o en `ClavesCompactas`. 216.
+- **Los enlaces, encabezados, recursos y datos estructurados de una pagina
+  salen en un `HijosItem` por tipo** (filas como dicts): quien lea la salida
+  de `parse` en un test pasa por `items.desplegar()`, y un campo nuevo de una
+  fila va en el dict del spider y en su item de una fila. 219.
 - **Un muro no es la pagina** (`urls.response_class`, `shared/respuestas.py`): ni
   indexable ni incidencias de pagina, y un rastreo bloqueado es `failed` y no alerta. 103.
 - **Un tope por carpeta se aplica al encolar** (lo que no cabe no se pide) y su
