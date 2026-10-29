@@ -5959,6 +5959,14 @@ def run_analysis(job_id: str) -> None:
         session = SessionLocal()
         restaurado = False
         try:
+            # Un censo vaciado por la retencion (decision 223) ya no tiene
+            # URLs: analizarlo lo dejaria sin incidencias y le reescribiria
+            # la evolucion con ceros.
+            from shared.models import Job
+
+            if session.execute(select(Job.status).where(Job.id == job_id)).scalar() == "vaciado":
+                logger.warning("Job %s vaciado por la retencion: no se analiza", job_id)
+                return
             # Un censo completado tiene sus enlaces en Parquet desde que acabo
             # su analisis (decision 150). Re-analizarlo —a mano, o la
             # referencia de la comparacion (decision 93)— los devuelve a

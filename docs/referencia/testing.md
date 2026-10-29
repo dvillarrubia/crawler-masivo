@@ -141,6 +141,10 @@ cuenta de bytes como funcion pura, que un «no se sabe» no se convierta en un
 cero, que un censo archivado tiene tamano sin gastar presupuesto, y la
 medicion contra Postgres con `ALMACENAMIENTO_TEST_DATABASE_URL`). Los dos
 corren tambien en el trabajo de la API.
+Retencion por perfil (decision 223): `test_retencion_db.py` contra Postgres
+(que se vacia y que se queda, la evolucion conservada y sin recontar, un
+vaciado no es base del incremental, apagada no toca nada, a medias se termina
+en la pasada siguiente y el worker no falla si revienta).
 Intencion (decision 176): `test_intencion.py` (preguntas y modulos, las
 busquedas de la ventana y de la propiedad activa, sin Search Console lo dice, la
 estimacion por busqueda distinta, de punta a punta con el `FakeLLM` y relanzar a

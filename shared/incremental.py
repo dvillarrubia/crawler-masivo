@@ -63,8 +63,9 @@ SIN_PERFIL = "sin_perfil"
 ERROR = "error_al_preparar"
 
 # Lo que no entra en la huella de la configuracion: el propio bloque
-# incremental (cambiar la muestra de control no invalida lo copiado).
-_FUERA_DE_LA_HUELLA = ("incremental",)
+# incremental (cambiar la muestra de control no invalida lo copiado) y la
+# retencion (decision 223), que no cambia que se rastrea.
+_FUERA_DE_LA_HUELLA = ("incremental", "retencion")
 
 
 def config_de(config: dict | None) -> dict[str, Any]:

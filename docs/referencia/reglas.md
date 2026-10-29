@@ -107,6 +107,10 @@
 - **Un censo se borra con `borrar_job`** (ficha, cliente y borrado en masa): es la que
   quita tambien el Parquet de sus enlaces archivados y sus capturas de pantalla
   (`shared/capturas_pantalla.py`, en el mismo volumen). Decisiones 96 y 173.
+  Su nucleo vive en `shared/borrado.py`, que comparte con la retencion.
+- **Un censo `vaciado` (retencion, decision 223) no es `completed`**: solo
+  conserva su fila y su `profile_runs`. Lo que lea un censo filtra por
+  `completed` (no por «terminado»), y nada lo vuelve a analizar ni a contar.
 - Una tabla nueva del censo entra en `shared/almacenamiento.py` y en el borrado
   en masa en el mismo PR: lo exige el test de tablas del censo.
 - **Un contenedor efimero se borra con `docker rm -fv`**, no `-f`: el `--rm` no

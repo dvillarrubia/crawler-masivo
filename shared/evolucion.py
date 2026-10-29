@@ -55,7 +55,7 @@ CRITERIO = 1
 # Estados en los que un job ya no va a cambiar (salvo re-analisis): los que
 # tienen fila. `cancelled` no: lo cancela quien lo lanzo, y en una serie solo
 # meteria ruido.
-TERMINADOS = ("completed", "failed", "stalled")
+TERMINADOS = ("completed", "failed", "stalled", "vaciado")
 
 TOP_TIPOS = 10
 
@@ -192,6 +192,10 @@ def registrar(session, job_id, *, solo_si_falta: bool = False) -> dict[str, Any]
     from shared.models import Job, ProfileRun
 
     job_id = _como_uuid(job_id)
+    if session.execute(select(Job.status).where(Job.id == job_id)).scalar() == "vaciado":
+        # Sus URLs ya no estan (decision 223): contar ahora daria ceros, y su
+        # fila es lo unico que queda de el.
+        return None
     fila = session.execute(select(ProfileRun).where(ProfileRun.job_id == job_id)).scalar_one_or_none()
     if solo_si_falta and fila is not None:
         job = session.execute(select(Job.analisis_version, Job.status, Job.finish_reason)
@@ -271,7 +275,9 @@ def motivo_no_comparable(job: dict[str, Any], fila: dict[str, Any] | None) -> st
     if fila is None:
         return "sin_agregado"
     status = job.get("status")
-    if status != "completed":
+    # Un censo vaciado por la retencion (decision 223) conserva sus cifras
+    # aqui: es el censo completado que fue.
+    if status not in ("completed", "vaciado"):
         return status or "desconocido"
     if (job.get("finish_reason") or "") in MOTIVOS_TRUNCADO:
         return "truncado"
