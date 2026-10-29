@@ -541,3 +541,9 @@ Lo que tarda cada fase del analisis en un censo sintetico grande (decision 226):
 Los hijos en un item por tipo (decision 219): el arnes (`Recolector`) y
 `test_parse_atajos.py` despliegan los `HijosItem` con `items.desplegar()`, asi
 que los tests que buscan `LinkItem` siguen igual.
+La instalacion de cero (docs/INSTALACION.md): `test_init_db_vacia.py` pasa
+`init_db()` sobre una base de datos desechable recien creada en el servidor de
+`PAGERANK_TEST_DATABASE_URL` y comprueba que crea la extension `vector` y las
+tablas, y que repetirlo no falla. Necesita un Postgres con pgvector y el paquete
+`pgvector`, asi que corre en la imagen de la API, no en la del crawler, y en la
+CI de hoy (`postgres:16-alpine`) se salta.
