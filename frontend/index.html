@@ -2841,6 +2841,12 @@
                 <span><span x-text="fmt.num(job.incremental.arrastre.no_modificadas)"></span>
                   respondieron que no habían cambiado (304).</span>
               </template>
+              <template x-if="job.incremental.lastmod && job.incremental.lastmod.rescatadas">
+                <span><span x-text="fmt.num(job.incremental.lastmod.rescatadas)"></span>
+                  se pidieron porque el sitemap decía que habían cambiado<span
+                  x-show="job.incremental.lastmod.topado"> (y había más: el sitemap da
+                  por cambiadas demasiadas para fiarse)</span>.</span>
+              </template>
               Su profundidad es la del último rastreo en que se pidieron. Cada
               <span x-text="(job.config.incremental || {}).completo_cada || 4"></span>
               ciclos hay un rastreo completo, que es el único que confirma que una

@@ -185,3 +185,83 @@ def test_reanudar_un_incremental_ya_arrastrado_no_siembra_sus_enlaces(bd):
     assert sp._resume_mode and sp._con_arrastre
     # Lo arrastrado esta en el censo: gasta `max_urls` como lo demas.
     assert sp._crawled_count == 2
+
+
+# --- El lastmod del sitemap como pista (decision 224) ------------------------
+
+def _con_estado(bd, previo, actual, filas):
+    """Perfil para los dos jobs y su `url_state`: ruta -> ultima_peticion."""
+    from datetime import datetime, timezone
+
+    from shared.models import Job, UrlState
+
+    perfil = uuid.uuid4()
+    s = bd()
+    for jid in (previo, actual):
+        s.get(Job, jid).profile_id = perfil
+    for ruta, ultima in filas.items():
+        s.add(UrlState(profile_id=perfil, url_hash=_h(ruta), url=BASE + ruta, profundidad=2,
+                       etag=f'"{ruta}"', intervalo=4, proximo_ciclo=9,
+                       ultima_peticion=datetime(2026, 10, *ultima, tzinfo=timezone.utc)
+                       if ultima else None))
+    s.commit()
+    s.close()
+
+
+def _sitemap(sp, entradas):
+    from scrapy.http import XmlResponse
+
+    cuerpo = ("<?xml version='1.0'?><urlset xmlns='http://www.sitemaps.org/schemas/sitemap/0.9'>"
+              + "".join(f"<url><loc>{BASE}{r}</loc>" + (f"<lastmod>{m}</lastmod>" if m else "")
+                        + "</url>" for r, m in entradas) + "</urlset>").encode()
+    resp = XmlResponse(BASE + "/sitemap.xml", status=200, body=cuerpo,
+                       request=Request(BASE + "/sitemap.xml"))
+    return [r for r in sp.parse_sitemap_response(resp) if isinstance(r, Request)]
+
+
+def test_el_lastmod_rescata_lo_que_cambio_despues_de_pedirse(bd):
+    previo, actual = _preparar(bd)
+    # /b se pidio el 20 y /c sin ultima peticion conocida; las dos no tocan.
+    _con_estado(bd, previo, actual, {"/b": (20, 9), "/c": None})
+    sp = _spider(actual)
+    tope = sp.max_urls
+    pedidas = _sitemap(sp, [("/b", "2026-10-22"), ("/c", "2026-10-28"), ("/b", "2099-01-01")])
+    por_url = {r.url: r for r in pedidas}
+    # /b: lastmod posterior a su ultima peticion -> se pide, condicional.
+    assert list(por_url) == [BASE + "/b"]
+    assert por_url[BASE + "/b"].headers.get(b"If-None-Match") == b'"/b"'
+    assert por_url[BASE + "/b"].meta.get("condicional") is True
+    assert sp._lastmod["rescatadas"] == 1
+    assert sp.max_urls == (None if tope is None else tope + 1)
+
+
+def test_un_lastmod_anterior_o_futuro_no_rescata(bd):
+    previo, actual = _preparar(bd)
+    _con_estado(bd, previo, actual, {"/b": (25, 9), "/c": (20, 9)})
+    sp = _spider(actual)
+    pedidas = _sitemap(sp, [("/b", "2026-10-22T08:00:00+00:00"), ("/c", "2099-01-01"),
+                            ("/c", "no es una fecha")])
+    assert [r.url for r in pedidas] == []
+    assert sp._lastmod["rescatadas"] == 0
+
+
+def test_el_lastmod_tiene_tope_y_no_repite(bd):
+    previo, actual = _preparar(bd)
+    _con_estado(bd, previo, actual, {"/b": (20, 9), "/c": (20, 9)})
+    sp = _spider(actual)
+    sp._lastmod["tope"] = 1
+    primera = _sitemap(sp, [("/b", "2026-10-28"), ("/c", "2026-10-28")])
+    assert len([r for r in primera if r.url in (BASE + "/b", BASE + "/c")]) == 1
+    assert sp._lastmod["topado"] is True
+    sp._lastmod.update(tope=10, topado=False)
+    # Otro sitemap con las mismas: la ya vista no se vuelve a mirar.
+    segunda = _sitemap(sp, [("/b", "2026-10-28"), ("/c", "2026-10-28")])
+    assert [r.url for r in segunda if r.url in (BASE + "/b", BASE + "/c")] == []
+
+
+def test_sin_incremental_el_lastmod_no_rescata_nada(bd):
+    from seo_crawler.spiders.seo_spider import SeoSpider
+
+    sp = SeoSpider(job_id="j")
+    assert sp._rescatar_por_lastmod([types.SimpleNamespace(url=BASE + "/b",
+                                                           lastmod="2026-10-28")]) == []

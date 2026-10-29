@@ -508,3 +508,40 @@
    recontarlos, la base del incremental que no elige un vaciado, apagada no
    toca nada, a medias se termina en la pasada siguiente, y el worker no
    falla si la retención revienta.
+
+<a id="d224"></a>
+224. **El `lastmod` del sitemap como pista del incremental** (#36, lo que
+   quedaba de F4).
+
+   **Problema.** La selección del incremental (220) se decide al crear el job
+   con lo que se sabe del pasado: el intervalo de cada URL. Una página que
+   cambió antes de que le tocara se copia del censo anterior hasta su turno,
+   aunque el sitemap del propio sitio diga que ha cambiado.
+
+   **Decisión.** Al leer cada sitemap en un incremental, el spider
+   (`_rescatar_por_lastmod`) pide, además, lo que no tocaba y el sitemap da por
+   cambiado: una URL apartada como «no se pide» cuyo `lastmod` se puede leer,
+   no es futuro (`shared/sitemaps.es_futuro`) y es posterior a
+   `url_state.ultima_peticion`. Va condicional, como la frontera, y sin
+   `ultima_peticion` no se compara ni se rescata.
+   - **El cupo.** Lo rescatado ya gastó su `max_urls` y su tope de carpeta al
+     apartarse; se le devuelve el de `max_urls`, porque ahora lo cuenta
+     `parse`. El de carpeta no se vuelve a contar.
+   - **El tope.** Muchos CMS escriben la fecha de hoy en todas las URLs del
+     sitemap: fiarse convertiría cada incremental en un completo. Se rescata
+     como mucho el 20 % de lo que no tocaba (al menos 50). Pasado eso se para,
+     se anota `topado` y la ficha dice que el sitemap no es de fiar.
+   - **Cada URL una vez**, aunque salga en varios sitemaps, y nunca una que el
+     job ya tiene (al reanudar).
+   - Lo rescatado va en `jobs.incremental["lastmod"]` (`rescatadas`, `tope`,
+     `topado`) y en la tarjeta del incremental de la ficha.
+
+   **Comprobado** con el sitio local de la 220 y el worker real: el sitemap
+   del segundo ciclo da `lastmod` de ahora a una página que no tocaba, se pide
+   (condicional, 304) y el incremental sigue saliendo igual que el completo:
+   mismas URLs e incidencias, PageRank con Spearman 1,0.
+
+   Tests: `tests/test_spider_incremental.py` (rescata lo cambiado después de
+   pedirse con su `If-None-Match` y devuelve el cupo; no rescata con `lastmod`
+   anterior, futuro, ilegible ni sin `ultima_peticion`; el tope y que no
+   repite; sin incremental no hace nada).
