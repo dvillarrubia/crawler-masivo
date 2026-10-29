@@ -154,3 +154,46 @@ def test_sin_logs_las_columnas_quedan_a_null(sesion, job, limpiar):  # noqa: F81
     sesion.expire_all()
     assert sesion.get(Url, filas["/"].id).googlebot_visitas is None
     assert sesion.get(Job, j.id).logs_resumen is None
+
+
+def test_el_presupuesto_por_plantilla(sesion, job, limpiar):  # noqa: F811
+    """En que tipo de pagina se va Googlebot (#35 con #12): por las plantillas
+    del cliente y, si no casa ninguna, por la forma de la ruta."""
+    from test_pagerank_db import N_ARTICULOS
+
+    j, filas = job
+    limpiar.append(_con_logs(sesion, j))
+    sesion.get(Job, j.id).config = {"templates": [{"nombre": "articulo", "patron": "^/blog/"}]}
+    sesion.commit()
+    _analizar(sesion, j)
+
+    filas_r = {p["plantilla"]: p for p in sesion.get(Job, j.id).logs_resumen["por_plantilla"]}
+    art = filas_r["articulo"]
+    # /blog/a1 (5) y /blog/a3 (4); la de /blog/a1?orden=precio no es indexable.
+    assert (art["visitas"], art["urls"], art["urls_visitadas"]) == (9, N_ARTICULOS + 1, 2)
+    assert (art["indexables"], art["indexables_visitadas"]) == (N_ARTICULOS, 2)
+    primera = sesion.get(Job, j.id).logs_resumen["por_plantilla"][0]
+    assert primera["visitas"] == 400 and primera["plantilla"] != "articulo"
+    # Lo que el rastreo no encontro no entra en ninguna plantilla del censo.
+    total = sum(p["visitas"] for p in filas_r.values())
+    assert total == 417 - 6
+    assert abs(sum(p["parte"] for p in filas_r.values()) - 1) < 0.01
+
+
+def test_reparto_por_plantilla_saca_las_que_google_no_visita():
+    """Pasado el tope de filas, las plantillas sin visitas pero con indexables
+    siguen saliendo: que Google no pase por una plantilla es lo que importa."""
+    import types
+
+    from analysis import avisos_de_logs
+    from shared.plantillas import plantilla_de
+
+    urls = [types.SimpleNamespace(id=i, url=f"https://x.com/s{i}/p", path=f"/s{i}/p")
+            for i in range(avisos_de_logs.MAX_PLANTILLAS + 5)]
+    reglas = [(f"s{i}", f"^/s{i}/") for i in range(len(urls))]
+    visitas = {i: 10 + i for i in range(avisos_de_logs.MAX_PLANTILLAS + 2)}
+    filas = avisos_de_logs.reparto_por_plantilla(urls, visitas, urls, reglas, plantilla_de)
+    nombres = [f["plantilla"] for f in filas]
+    assert len(nombres) == avisos_de_logs.MAX_PLANTILLAS + 3
+    assert {"s32", "s33", "s34"} <= set(nombres)
+    assert all(f["visitas"] == 0 for f in filas[avisos_de_logs.MAX_PLANTILLAS:])

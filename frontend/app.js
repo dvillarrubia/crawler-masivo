@@ -8443,7 +8443,12 @@ function bloqueLogs(job) {
   const bots = Object.entries(r.otros_bots || {}).filter(([, d]) => d.visitas)
     .sort((a, b) => b[1].visitas - a[1].visitas).slice(0, 8)
     .map(([b, d]) => ({ bot: NOMBRE_BOT_LOG[b] || b, visitas: d.visitas, verificadas: d.verificadas, falsas: d.falsas, sin_comprobar: d.sin_comprobar }));
-  return { frases, no_en_censo: r.no_en_censo || [], bots };
+  // El reparto por plantilla (#35 con #12): la de mas visitas primero.
+  const plantillas = (r.por_plantilla || []).map(p => ({
+    ...p, pct: p.parte != null ? fmt.pct(100 * p.parte, 1) : '—',
+    cobertura: p.indexables ? pct(p.indexables_visitadas, p.indexables) : '—',
+  }));
+  return { frases, no_en_censo: r.no_en_censo || [], bots, plantillas };
 }
 
 const FUENTE_BACKLINKS = { ahrefs: 'Ahrefs', semrush: 'Semrush', majestic: 'Majestic', generico: 'un CSV' };

@@ -1702,6 +1702,18 @@
      - sin logs a NULL.
    - `tests/test_logs_frontend.py`: el bloque del Resumen.
 
+   **Ampliación (29-oct, #35 con #12): el reparto por plantilla.**
+   `logs_resumen.por_plantilla` dice en qué tipo de página se va Googlebot:
+   por cada plantilla (`config.templates` del cliente y, si no casa ninguna,
+   la forma de la ruta, la misma `plantilla_de` de los avisos), sus visitas
+   verificadas, la parte del total, cuántas URLs del censo tiene y cuántas
+   visitó, y lo mismo de las indexables. Solo cuenta lo que el censo tiene;
+   lo que el rastreo no encontró sigue en `no_en_censo`. Salen las 30 de más
+   visitas y, aparte, las que no tienen ninguna pero sí indexables: que Google
+   no pase por una plantilla entera es justo lo que hay que ver. En la ficha,
+   una tabla dentro del bloque «Googlebot en los logs». Tests en
+   `tests/test_logs_db.py`.
+
 <a id="d214"></a>
 214. **Las trampas de rastreo se detectan sobre lo ya rastreado, una por plantilla, con cuántas URLs genera y qué parte del rastreo se lleva** (#14, parte determinista)
 
