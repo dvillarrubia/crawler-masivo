@@ -9,7 +9,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | Fichero | Tema | Decisiones |
 |---|---|---|
 | [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76, 193, 209, 220 |
-| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga, robots.txt y sitemaps en la cola | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140, 172, 173, 174, 186, 216, 218, 219 |
+| [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga, robots.txt y sitemaps en la cola | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140, 172, 173, 174, 186, 216, 218, 219, 222 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124, 153, 154, 155, 187, 198, 215 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137, 156, 160, 164, 167, 170, 171 |
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152, 183, 195, 212, 217 |
@@ -247,6 +247,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 218 | Un enlace ya pedido desde otra página no vuelve a crear su `Request` (`_enlaces_pedidos`, claves compactas): el dupefilter la tiraba igual, después de pasar por middlewares y motor; −10 % de CPU por página con las mismas peticiones encoladas | [`render-y-descarga`](render-y-descarga.md#d218) |
 | 219 | Los hijos de cada página (enlaces, encabezados, recursos, datos estructurados) salen en un `HijosItem` por tipo, no en uno por fila; el pipeline los mete en su búfer igual y `items.desplegar()` devuelve la salida de antes: −30 % de CPU por página, misma salida | [`render-y-descarga`](render-y-descarga.md#d219) |
 | 220 | Rastreo incremental en los programados de un perfil: se pide lo que toca (intervalo adaptativo, fijos y muestra de control, condicional sin render) y lo demás se copia del censo anterior antes del análisis, con poda de lo que ya no se alcanza; cada job sigue siendo una foto completa | [`worker-y-cola`](worker-y-cola.md#d220) |
+| 222 | Encabezados, hreflang, datos estructurados y recursos también con `COPY`; `synchronous_commit = off` solo en la sesión del pipeline; el cancel de Redis una vez por segundo. Wikipedia, de 54 a 23 ms de CPU de pipeline por página. El hilo escritor, medido y descartado | [`render-y-descarga`](render-y-descarga.md#d222) |
 
 ## Anadir una decision
 

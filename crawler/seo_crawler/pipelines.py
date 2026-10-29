@@ -47,6 +47,13 @@ _TOPE_HIJOS_LIMPIADOS = 50_000
 _COLUMNAS_LINK = ("job_id", "from_url_id", "to_url", "to_url_hash", "anchor_text", "rel",
                   "is_internal", "link_position", "follow", "target", "alt_text",
                   "link_type", "repeticiones")
+# Y las de los demas hijos (decision 222), en el orden de su `_fila_*`. La
+# primera es siempre `url_id`.
+_COLUMNAS_HEADING = ("url_id", "tag", "position", "text", "oculto")
+_COLUMNAS_HREFLANG = ("url_id", "lang", "href", "en_body", "origen")
+_COLUMNAS_SD = ("url_id", "raw", "format", "schema_type", "json_invalido")
+_COLUMNAS_RESOURCE = ("url_id", "resource_url", "resource_type", "alt_text", "width",
+                      "height", "is_mixed_content")
 
 
 def _valor_copy(v) -> str:
@@ -74,10 +81,16 @@ def _recortar(v, n: int):
     return v[:n] if isinstance(v, str) else v
 
 
-def _copiar(session, tabla: str, columnas: tuple[str, ...], filas: list[tuple]) -> bool:
+def _copiar(session, tabla: str, columnas: tuple[str, ...], filas: list[tuple],
+            json_en: tuple[int, ...] = ()) -> bool:
     """`COPY tabla FROM STDIN` en la transaccion de la sesion. False si la
     conexion no es de psycopg2 sobre Postgres: entonces el que llama inserta
-    con el ORM."""
+    con el ORM.
+
+    Las posiciones de `json_en` son columnas JSON: se serializan con el
+    serializador del motor, como el ORM, y un None es el JSON `null`, no un
+    NULL de SQL (el tipo `JSON` del ORM, sin `none_as_null`, hacia lo mismo).
+    """
     import io
 
     conexion = session.connection()
@@ -86,10 +99,31 @@ def _copiar(session, tabla: str, columnas: tuple[str, ...], filas: list[tuple]) 
     with conexion.connection.cursor() as cursor:
         if not hasattr(cursor, "copy_expert"):
             return False
+        if json_en:
+            import json
+
+            serializar = getattr(conexion.dialect, "_json_serializer", None) or json.dumps
+            filas = [tuple(serializar(v) if i in json_en else v for i, v in enumerate(fila))
+                     for fila in filas]
         texto = "\n".join("\t".join(_valor_copy(v) for v in fila) for fila in filas)
         cursor.copy_expert(f"COPY {tabla} ({', '.join(columnas)}) FROM STDIN",
                            io.StringIO(texto + "\n"))
     return True
+
+
+def _sin_esperar_al_disco(session) -> None:
+    """`synchronous_commit = off` en cada transaccion de esta sesion, y solo
+    en ella (decision 222): el commit no espera a que el WAL llegue al disco.
+    Si Postgres se cae, se pierden como mucho los ultimos ~600 ms de
+    escrituras confirmadas, nunca a medias (la BD sigue consistente), y la
+    reanudacion vuelve a pedir esas paginas porque no estan en `urls`."""
+    from sqlalchemy import event
+
+    def _al_empezar(_session, _transaccion, conexion):
+        if conexion.dialect.name == "postgresql":
+            conexion.exec_driver_sql("SET LOCAL synchronous_commit TO OFF")
+
+    event.listen(session, "after_begin", _al_empezar)
 
 
 class PostgresPipeline:
@@ -100,8 +134,8 @@ class PostgresPipeline:
       carry the primary dedup key ``job_id + url_hash``).
     * ``SecurityItem`` is upserted individually (linked to Url by url_hash).
     * ``LinkItem``, ``HeadingItem``, ``HreflangItem``, ``StructuredDataItem``,
-      and ``ResourceItem`` are accumulated and bulk-inserted every
-      ``PIPELINE_BATCH_SIZE`` items.
+      and ``ResourceItem`` are accumulated and written with ``COPY`` every
+      ``PIPELINE_BATCH_SIZE`` items (decisiones 217 y 222).
     """
 
     def __init__(self, batch_size: int = 200, commit_every: int = 50):
@@ -175,6 +209,7 @@ class PostgresPipeline:
         from shared.models import Url
 
         self.session = SessionLocal()
+        _sin_esperar_al_disco(self.session)
         # El contador arranca en lo que YA hay guardado de este job, no en
         # cero. Cada reanudacion abre un proceso de Scrapy nuevo con su propia
         # tuberia, y al cerrar escribia su cuenta local en
@@ -838,43 +873,34 @@ class PostgresPipeline:
 
         from shared.models import Heading, Hreflang, Link, Resource, StructuredData
 
-        item_type_map = {
-            HeadingItem: self._make_heading,
-            HreflangItem: self._make_hreflang,
-            StructuredDataItem: self._make_structured_data,
-            ResourceItem: self._make_resource,
+        # Cada hijo, como fila para COPY y no como objeto del ORM (decisiones
+        # 217 y 222): crear y volcar cada objeto costaba mas que escribirlo.
+        filas_de = {
+            LinkItem: self._fila_link,
+            HeadingItem: self._fila_heading,
+            HreflangItem: self._fila_hreflang,
+            StructuredDataItem: self._fila_structured_data,
+            ResourceItem: self._fila_resource,
         }
-
         # Collect url_ids per child type so we can delete stale rows
         # before inserting (prevents duplicates on re-crawl).
         url_ids_by_type: dict[type, set[int]] = {}
-
-        objects: list = []
-        # Los enlaces, como filas para COPY y no como objetos del ORM (#284):
-        # son 3 de cada 4 hijos, y crear y volcar cada objeto costaba mas que
-        # escribirlo.
-        enlaces: list[tuple] = []
+        filas: dict[type, list[tuple]] = {}
         for item_cls, data in self._buffer:
-            if item_cls is LinkItem:
-                fila = self._fila_link(data)
-                if fila is not None:
-                    enlaces.append(fila)
-                    url_ids_by_type.setdefault(LinkItem, set()).add(fila[1])
+            hacer = filas_de.get(item_cls)
+            fila = hacer(data) if hacer else None
+            if fila is None:
                 continue
-            factory = item_type_map.get(item_cls)
-            if factory:
-                obj = factory(data)
-                if obj is not None:
-                    objects.append(obj)
-                    # Track url_id for pre-insert cleanup
-                    uid = getattr(obj, "url_id", None)
-                    if uid is not None:
-                        url_ids_by_type.setdefault(item_cls, set()).add(uid)
+            filas.setdefault(item_cls, []).append(fila)
+            # El url_id: el `from_url_id` en `links`, la primera en el resto.
+            url_ids_by_type.setdefault(item_cls, set()).add(
+                fila[1] if item_cls is LinkItem else fila[0])
 
         self._buffer.clear()
 
-        if not objects and not enlaces:
+        if not filas:
             return
+        n_filas = sum(len(v) for v in filas.values())
 
         try:
             # Delete existing child rows for the same url_ids to avoid
@@ -908,19 +934,26 @@ class PostgresPipeline:
                         ).delete(synchronize_session=False)
                         pending_deletes.append((already, to_delete))
 
-            if enlaces and not _copiar(self.session, Link.__tablename__, _COLUMNAS_LINK, enlaces):
-                self.session.bulk_insert_mappings(
-                    Link, [dict(zip(_COLUMNAS_LINK, fila)) for fila in enlaces])
-            if objects:
-                self.session.bulk_save_objects(objects)
+            destino = {
+                LinkItem: (Link, _COLUMNAS_LINK, ()),
+                HeadingItem: (Heading, _COLUMNAS_HEADING, ()),
+                HreflangItem: (Hreflang, _COLUMNAS_HREFLANG, ()),
+                StructuredDataItem: (StructuredData, _COLUMNAS_SD, (1,)),
+                ResourceItem: (Resource, _COLUMNAS_RESOURCE, ()),
+            }
+            for item_cls, de_tipo in filas.items():
+                model, columnas, json_en = destino[item_cls]
+                if not _copiar(self.session, model.__tablename__, columnas, de_tipo, json_en):
+                    self.session.bulk_insert_mappings(
+                        model, [dict(zip(columnas, fila)) for fila in de_tipo])
             self.session.commit()
             self._uncommitted = 0
             for already, to_delete in pending_deletes:
                 already.update(to_delete)
-            logger.debug("Flushed %d child items to database", len(objects) + len(enlaces))
+            logger.debug("Flushed %d child items to database", n_filas)
         except Exception:
             self._rollback()
-            logger.exception("Batch flush failed for %d items", len(objects) + len(enlaces))
+            logger.exception("Batch flush failed for %d items", n_filas)
 
     # ------------------------------------------------------------------
     # Factory helpers (dict -> ORM object)
@@ -952,66 +985,40 @@ class PostgresPipeline:
             data.get("repeticiones") or 1,
         )
 
-    def _make_heading(self, data: dict):
-        from shared.models import Heading
-
+    def _fila_heading(self, data: dict) -> tuple | None:
         url_id = self._resolve_url_id(data.get("url_hash"), data.get("job_id"))
         if url_id is None:
             return None
-        return Heading(
-            url_id=url_id,
-            tag=data.get("tag"),
-            position=data.get("position", 0),
-            text=data.get("text"),
-            oculto=data.get("oculto"),
-        )
+        return (url_id, data.get("tag"), data.get("position", 0), data.get("text"),
+                data.get("oculto"))
 
-    def _make_hreflang(self, data: dict):
-        from shared.models import Hreflang
-
+    def _fila_hreflang(self, data: dict) -> tuple | None:
         url_id = self._resolve_url_id(data.get("url_hash"), data.get("job_id"))
         if url_id is None:
             return None
-        return Hreflang(
-            url_id=url_id,
-            lang=_recortar(data.get("lang"), 20),  # lo escribe la pagina
-            href=data.get("href"),
-            en_body=data.get("en_body"),
-            origen=data.get("origen"),
-        )
+        return (url_id,
+                _recortar(data.get("lang"), 20),  # lo escribe la pagina
+                data.get("href"), data.get("en_body"), data.get("origen"))
 
-    def _make_structured_data(self, data: dict):
-        from shared.models import StructuredData
-
+    def _fila_structured_data(self, data: dict) -> tuple | None:
         url_id = self._resolve_url_id(data.get("url_hash"), data.get("job_id"))
         if url_id is None:
             return None
-        return StructuredData(
-            url_id=url_id,
-            raw=data.get("raw"),
-            format=data.get("format"),
-            # Lo escribe la pagina (varios tipos juntos pasan de 128): sin
-            # recortar, tumbaba el lote entero.
-            schema_type=_recortar(data.get("schema_type"), 128),
-            json_invalido=(data.get("json_invalido") or "")[:200] or None,
-        )
+        return (url_id,
+                data.get("raw"),
+                data.get("format"),
+                # Lo escribe la pagina (varios tipos juntos pasan de 128): sin
+                # recortar, tumbaba el lote entero.
+                _recortar(data.get("schema_type"), 128),
+                (data.get("json_invalido") or "")[:200] or None)
 
-    def _make_resource(self, data: dict):
-        from shared.models import Resource
-
+    def _fila_resource(self, data: dict) -> tuple | None:
         url_id = self._resolve_url_id(data.get("url_hash"), data.get("job_id"))
         if url_id is None:
             return None
-        return Resource(
-            url_id=url_id,
-            resource_url=data.get("resource_url"),
-            resource_type=data.get("resource_type"),
-            alt_text=data.get("alt_text"),
-            # New Screaming Frog fields
-            width=data.get("width"),
-            height=data.get("height"),
-            is_mixed_content=data.get("is_mixed_content", False),
-        )
+        return (url_id, data.get("resource_url"), data.get("resource_type"),
+                data.get("alt_text"), data.get("width"), data.get("height"),
+                data.get("is_mixed_content", False))
 
     # ------------------------------------------------------------------
     # URL-ID resolution

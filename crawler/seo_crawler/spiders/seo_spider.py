@@ -3215,11 +3215,26 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             pass
 
     def _should_cancel(self) -> bool:
-        """Check whether a cancel signal has been set in Redis."""
+        """Check whether a cancel signal has been set in Redis.
+
+        Como mucho una consulta por segundo (decision 222): se llama en cada
+        `parse`, y a 50 paginas por segundo eran 50 idas y vueltas a Redis
+        sincronas en el hilo del rastreo para algo que se pide a mano.
+
+        Una vez visto, se recuerda: las respuestas que ya venian de camino
+        tampoco se parsean, como cuando se miraba en cada una.
+        """
         if self._redis is None:
             return False
+        if getattr(self, "_cancelado", False):
+            return True
+        ahora = time.monotonic()
+        if ahora - getattr(self, "_cancel_mirado", 0.0) < 1.0:
+            return False
+        self._cancel_mirado = ahora
         try:
             val = self._redis.get(f"job:{self.job_id}:cancel")
-            return val is not None and str(val).lower() in ("1", "true", "yes")
+            self._cancelado = val is not None and str(val).lower() in ("1", "true", "yes")
+            return self._cancelado
         except Exception:
             return False

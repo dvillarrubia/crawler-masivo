@@ -221,3 +221,85 @@ def test_textos_de_la_pagina_mas_largos_que_su_columna(bd):
         uid = s.query(Url.id).filter(Url.job_id == jid, Url.url_hash == "h0").scalar()
         assert s.query(StructuredData.schema_type).filter(StructuredData.url_id == uid).scalar() == "T" * 128
         assert s.query(Hreflang.lang).filter(Hreflang.url_id == uid).scalar() == "es-ES-xxxxxxxxxxxxxx"
+
+
+def _hijos_raros(jid):
+    """Una pagina con encabezados, hreflang, datos estructurados y recursos de
+    textos raros, nulos y JSON de todo tipo (decision 222)."""
+    from seo_crawler.items import HeadingItem, HreflangItem, ResourceItem, StructuredDataItem
+
+    base = dict(url_hash="h0", job_id=str(jid))
+    items = [_pagina(jid, 0)]
+    for k, texto in enumerate(RAROS):
+        items.append(HeadingItem(**base, tag=f"h{k % 6 + 1}", position=k,
+                                 text=texto, oculto=[None, True, False][k % 3]))
+        items.append(ResourceItem(**base, resource_url=f"https://x.com/r/{k}.png",
+                                  resource_type="image", alt_text=texto,
+                                  width=k or None, height=None if k % 2 else 10 * k,
+                                  is_mixed_content=bool(k % 2)))
+        items.append(HreflangItem(**base, lang=f"es-{k}", href=f"https://x.com/{k}",
+                                  en_body=[None, True, False][k % 3],
+                                  origen="html" if k % 2 else None))
+    raws = [{"@type": "Product", "name": "ñ 🙂 \t \\ \"comillas\"", "n": [1, 2.5, None]},
+            [{"@id": "_:b0"}], "texto suelto", 7, None, {}]
+    for k, raw in enumerate(raws):
+        items.append(StructuredDataItem(**base, raw=raw, format="jsonld",
+                                        schema_type=f"T{k}", json_invalido="roto" if k == 4 else None))
+    return items
+
+
+def _filas_hijos(Sesion, jid):
+    from sqlalchemy import text
+
+    with Sesion() as s:
+        consultas = {
+            "headings": "select tag, position, text, oculto from headings",
+            "resources": "select resource_url, resource_type, alt_text, width, height,"
+                         " is_mixed_content, size_bytes from resources",
+            "hreflang": "select lang, href, en_body, origen, return_tag_ok, lang_valid from hreflang",
+            "structured_data": "select raw::text, json_typeof(raw), raw is null, format,"
+                               " schema_type, json_invalido, validation_status from structured_data",
+        }
+        return {t: sorted(map(tuple, s.execute(text(
+            f"{sql} x where x.url_id in (select id from urls where job_id = :j)"),
+            {"j": str(jid)})), key=repr)
+            for t, sql in consultas.items()}
+
+
+def test_los_demas_hijos_con_copy_y_sin_copy_igual(bd, monkeypatch):
+    """Encabezados, recursos, hreflang y datos estructurados por COPY guardan
+    lo mismo que por el ORM (sin el NUL, que el ORM no puede escribir): el
+    texto JSON identico y un `raw` None como JSON `null`, no NULL de SQL."""
+    import seo_crawler.pipelines as pipelines
+
+    Sesion, jid = bd
+
+    def sin_nul(it):
+        return not any("\x00" in v for v in dict(it).values() if isinstance(v, str))
+
+    items = [it for it in _hijos_raros(jid) if sin_nul(it)]
+    _pasar(jid, items, batch_size=7)
+    con_copy = _filas_hijos(Sesion, jid)
+    assert len(con_copy["headings"]) == len(RAROS) - 1
+    assert len(con_copy["structured_data"]) == 6
+    nulo = [f for f in con_copy["structured_data"] if f[4] == "T4"][0]
+    assert nulo[1:3] == ("null", False)
+    with Sesion() as s:
+        from shared.models import Url
+        s.query(Url).filter(Url.job_id == jid).delete()
+        s.commit()
+    monkeypatch.setattr(pipelines, "_copiar", lambda *a, **k: False)
+    _pasar(jid, items, batch_size=7)
+    assert _filas_hijos(Sesion, jid) == con_copy
+
+
+def test_los_demas_hijos_con_nul_y_re_rastreo(bd):
+    """El NUL se quita en vez de tumbar el lote, y re-rastrear la pagina
+    sustituye sus hijos."""
+    Sesion, jid = bd
+    _pasar(jid, _hijos_raros(jid))
+    filas = _filas_hijos(Sesion, jid)
+    assert len(filas["headings"]) == len(RAROS)
+    assert ("h4", 9, "nuldentro", None) in filas["headings"]
+    _pasar(jid, _hijos_raros(jid))
+    assert _filas_hijos(Sesion, jid) == filas
