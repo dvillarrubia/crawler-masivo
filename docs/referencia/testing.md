@@ -141,6 +141,9 @@ cuenta de bytes como funcion pura, que un «no se sabe» no se convierta en un
 cero, que un censo archivado tiene tamano sin gastar presupuesto, y la
 medicion contra Postgres con `ALMACENAMIENTO_TEST_DATABASE_URL`). Los dos
 corren tambien en el trabajo de la API.
+Prevision de disco (decision 225): `test_prevision_disco.py` (veredicto y
+reserva, estimacion por el censo del perfil contra Postgres con los enlaces
+archivados, y el 409 de `POST /api/jobs` que `forzar_disco` salta).
 Retencion por perfil (decision 223): `test_retencion_db.py` contra Postgres
 (que se vacia y que se queda, la evolucion conservada y sin recontar, un
 vaciado no es base del incremental, apagada no toca nada, a medias se termina

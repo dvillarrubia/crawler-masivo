@@ -14,10 +14,12 @@ moriria con un 422 sobre un id invalido en vez de contestar.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+import uuid
+
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from shared.almacenamiento import resumen_de_disco
+from shared.almacenamiento import frase_de_disco, prevision_de_disco, resumen_de_disco
 from shared.database import get_session
 
 from api.schemas import Almacenamiento
@@ -36,3 +38,14 @@ def ver_almacenamiento(db: Session = Depends(get_session)):
     magnitud, no una cifra para un informe.
     """
     return resumen_de_disco(db)
+
+
+@router.get("/prevision")
+def prever_disco(cliente_id: uuid.UUID | None = Query(None), profile_id: uuid.UUID | None = Query(None),
+                 max_urls: int | None = Query(None, ge=1), db: Session = Depends(get_session)):
+    """Si un rastreo de este perfil (o cliente) cabe en el disco (#281,
+    decision 225): lo que ocupara mientras rastrea, por el ultimo censo del
+    mismo sitio, frente a lo libre. `no_se_sabe` sin un censo con el que
+    estimarlo."""
+    p = prevision_de_disco(db, cliente_id=cliente_id, profile_id=profile_id, max_urls=max_urls)
+    return {**p, "frase": frase_de_disco(p)}

@@ -44,7 +44,10 @@ Dos cosas que conviene tener claras antes de leer una cifra de aqui:
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Iterable
+
+logger = logging.getLogger(__name__)
 
 # Tablas que llevan `job_id` y que, por tanto, se pueden contar por censo sin
 # unir con nada (decision 37).
@@ -372,3 +375,128 @@ def resumen_de_disco(db) -> dict[str, Any]:
         "nota": NOTA_DE_ESPACIO,
         **archivo,
     }
+
+
+# --- Prevision de disco antes de lanzar un rastreo (#281, decision 225) -----
+
+# Lo que se deja siempre libre: Postgres sin disco se para para todos (los
+# rastreos en marcha, la API y los demas servicios del VPS), y el WAL, el
+# analisis y el VACUUM necesitan holgura.
+RESERVA_MIN_BYTES = 5 * 1024 ** 3
+RESERVA_FRACCION = 0.05
+
+
+def espacio_en_disco() -> dict[str, int] | None:
+    """Total y libre del disco donde viven la base y el archivo. En los
+    contenedores del VPS, `/` y los volumenes son el mismo disco. None si no
+    se puede leer."""
+    import os
+    import shutil
+
+    ruta = os.getenv("ARCHIVO_DIR", "/data/archivo")
+    try:
+        uso = shutil.disk_usage(ruta if os.path.isdir(ruta) else "/")
+        return {"total": int(uso.total), "libre": int(uso.free)}
+    except OSError:
+        return None
+
+
+def _censo_de_referencia(db, cliente_id, profile_id):
+    """El ultimo censo completado con URLs del mismo perfil o, sin el, del
+    mismo cliente: el mismo sitio, con su numero de enlaces por pagina."""
+    from shared.models import Job
+
+    for filtro in ((Job.profile_id == profile_id) if profile_id else None,
+                   (Job.cliente_id == cliente_id) if cliente_id else None):
+        if filtro is None:
+            continue
+        job = (db.query(Job).filter(filtro, Job.status == "completed",
+                                    Job.total_urls_crawled > 0)
+               .order_by(Job.created_at.desc()).first())
+        if job is not None:
+            return job
+    return None
+
+
+def veredicto_de_disco(previstos: int | None, libre: int | None, total: int | None) -> str:
+    """`no_cabe`, `justo`, `cabe` o `no_se_sabe`. Funcion pura."""
+    if previstos is None or libre is None or total is None:
+        return "no_se_sabe"
+    util = libre - max(RESERVA_MIN_BYTES, int(total * RESERVA_FRACCION))
+    if previstos > util:
+        return "no_cabe"
+    if previstos > util / 2:
+        return "justo"
+    return "cabe"
+
+
+def prevision_de_disco(db, *, cliente_id=None, profile_id=None, max_urls: int | None = None
+                       ) -> dict[str, Any]:
+    """Cuanto ocupara en la base un rastreo MIENTRAS rastrea, y si cabe.
+
+    Por URL, lo que ocupa el ultimo censo completado del mismo perfil (o
+    cliente) contando sus enlaces como filas de `links` aunque esten
+    archivados: durante el rastreo y el analisis estan en Postgres, y es
+    entonces cuando se llena el disco (decisiones 95 y 150). Por el
+    `max_urls` del rastreo o, sin tope, por las URLs de ese censo.
+
+    Sin censo de referencia, sin Postgres o sin poder leer el disco no se
+    afirma nada (`no_se_sabe`): un sitio nuevo puede tener 20 enlaces por
+    pagina o 700. Nunca lanza.
+    """
+    disco = espacio_en_disco()
+    salida: dict[str, Any] = {
+        "veredicto": "no_se_sabe", "libre_bytes": disco and disco["libre"],
+        "total_bytes": disco and disco["total"], "previstos_bytes": None,
+        "por_url_bytes": None, "urls_previstas": None, "referencia": None, "motivo": None,
+    }
+    try:
+        if not es_postgres(db):
+            salida["motivo"] = "sin Postgres no se mide lo que ocupa cada fila"
+            return salida
+        ref = _censo_de_referencia(db, cliente_id, profile_id)
+        if ref is None:
+            salida["motivo"] = "no hay un censo anterior de este sitio con el que estimarlo"
+            return salida
+        archivado = ref.enlaces_archivados or None
+        filas = filas_por_job(db, [ref.id], presupuesto_s=5.0,
+                              sin_enlaces=[ref.id] if archivado else ()).get(ref.id, {})
+        if archivado:
+            filas["links"] = int(archivado.get("filas") or 0)
+        por_fila = bytes_por_fila(db)
+        por_url_hijas = bytes_por_url_de_las_hijas(db)
+        db.rollback()  # suelta los SET LOCAL statement_timeout de la medicion
+        total_ref = estimar_bytes(filas, por_fila, por_url_hijas)
+        urls_ref = filas.get("urls") or 0
+        salida["referencia"] = {"job_id": str(ref.id), "nombre": ref.name, "urls": urls_ref,
+                                "enlaces": filas.get("links")}
+        if total_ref is None or not urls_ref:
+            salida["motivo"] = "no se pudo medir el censo de referencia"
+            return salida
+        por_url = total_ref / urls_ref
+        urls = int(max_urls) if max_urls else urls_ref
+        salida.update(por_url_bytes=int(por_url), urls_previstas=urls,
+                      previstos_bytes=int(por_url * urls))
+        salida["veredicto"] = veredicto_de_disco(salida["previstos_bytes"], salida["libre_bytes"],
+                                                 salida["total_bytes"])
+    except Exception:
+        db.rollback()
+        logger.exception("No se pudo prever el disco del rastreo")
+        salida["motivo"] = "fallo al estimarlo"
+    return salida
+
+
+def frase_de_disco(p: dict[str, Any]) -> str | None:
+    """La prevision en una frase para quien lanza. None si no hay nada que
+    decir (cabe o no se sabe)."""
+    if p.get("veredicto") not in ("no_cabe", "justo"):
+        return None
+    gb = 1024 ** 3
+    texto = (f"Se prevé que ocupe unos {p['previstos_bytes'] / gb:.1f} GB mientras rastrea "
+             f"({p['urls_previstas']:,} URLs a {p['por_url_bytes'] / 1024:.0f} kB cada una, como "
+             f"«{(p.get('referencia') or {}).get('nombre')}»), y quedan "
+             f"{p['libre_bytes'] / gb:.1f} GB libres en el disco.").replace(",", ".")
+    if p["veredicto"] == "no_cabe":
+        return texto + (" No cabe dejando la reserva mínima: Postgres se pararía para todos. "
+                        "Baja max_urls, borra o vacía censos viejos, o fuerza el lanzamiento.")
+    return texto + " Cabe, pero se come más de la mitad de lo que queda."
