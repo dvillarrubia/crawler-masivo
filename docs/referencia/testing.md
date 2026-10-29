@@ -522,7 +522,10 @@ pendientes se mide con `scripts/bench/frontera_memoria.py` (`--modo antes|ahora`
 Los enlaces con `COPY` (#284, decision 217): `test_pipeline_copy_db.py` contra
 Postgres (escapes del formato de texto, NUL, nulos, el camino sin `COPY` con
 las mismas filas, lotes de una misma pagina y re-rastreo, y un fallo que tumba
-el lote entero). El coste del pipeline por pagina se mide con
+el lote entero; desde la decision 222, tambien encabezados, hreflang, datos
+estructurados y recursos, con el `raw` None como JSON `null`) y
+`test_cancel_espaciado.py` (el cancel de Redis, una lectura por segundo y
+recordado). El coste del pipeline por pagina se mide con
 `scripts/bench/pipeline_por_pagina.py` (Postgres de pruebas, nunca `crawler_db`).
 Los hijos en un item por tipo (decision 219): el arnes (`Recolector`) y
 `test_parse_atajos.py` despliegan los `HijosItem` con `items.desplegar()`, asi

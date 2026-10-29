@@ -1561,3 +1561,65 @@
    Tests: `tests/test_pipeline_copy_db.py` mete un `HijosItem` de 450 filas
    (las mismas filas que sueltas, y un lote que falla solo pierde su trozo) y
    los textos de la página más largos que su columna.
+
+<a id="d222"></a>
+222. **Los demás hijos también con `COPY`, el commit sin esperar al disco y el
+   cancel de Redis una vez por segundo** (#278).
+
+   **Problema.** Tras la 217, los encabezados, el hreflang, los datos
+   estructurados y los recursos seguían creando un objeto del ORM por fila y
+   volcándose con `bulk_save_objects`: en Wikipedia, la mitad de la CPU del
+   pipeline. Cada commit del rastreo esperaba al `fsync` del WAL, y `parse`
+   preguntaba a Redis por el cancel en cada página, de forma síncrona, en el
+   hilo del rastreo.
+
+   **Decisión.**
+   - Los cuatro hijos salen como tuplas (`_fila_heading`, `_fila_hreflang`,
+     `_fila_structured_data`, `_fila_resource`) y se escriben con el mismo
+     `_copiar` de la 217, en la misma transacción que el `DELETE` previo. La
+     columna JSON `raw` se serializa con el serializador del motor, como el
+     ORM, y un `None` es el JSON `null`, no un NULL de SQL, como hacía el tipo
+     `JSON` sin `none_as_null`. Sin `COPY` (SQLite) va por
+     `bulk_insert_mappings`.
+   - `synchronous_commit = off` con `SET LOCAL` en cada transacción de la
+     sesión del pipeline, y solo en ella: la API y el analizador no cambian.
+     Si Postgres se cae, se pierden como mucho los últimos ~600 ms de
+     escrituras confirmadas, nunca a medias, y la reanudación vuelve a pedir
+     esas páginas porque no están en `urls`.
+   - `_should_cancel` lee Redis como mucho una vez por segundo y, cuando ve el
+     cancel, lo recuerda: las respuestas que venían de camino tampoco se
+     parsean, como antes.
+
+   **Medido** con `scripts/bench/pipeline_por_pagina.py`, dos pasadas por
+   código, CPU y reloj por página en el pipeline:
+
+   | Página | master | 222 |
+   |---|---|---|
+   | Wikipedia | 54 / 105-124 ms | 23 / 61 ms |
+   | Sintética | 4,3 / 8-9 ms | 3,6 / 7-7,5 ms |
+   | BOE | 3,3 / 5,5-6 ms | 2,5 / 4,3 ms |
+
+   **Lo mismo guardado.** Las páginas de `tests/fixtures/paginas/`, dos
+   veces cada una (la segunda, como re-rastreo), con lotes de 200 y de 7,
+   master contra la rama: encabezados, hreflang, recursos y enlaces dan la
+   misma firma; los datos estructurados JSON-LD, el mismo texto JSON byte a
+   byte. El RDFa cambia de una pasada a otra también en master (rdflib,
+   como en la 219); su tipo JSON y `json_invalido` coinciden.
+
+   **Lo que no se hace, y por qué.**
+   - **Escribir en un hilo aparte** (primer punto de #278). Medido: en la
+     página sintética, la espera a la BD es ~3,7 ms de unos 40 por página, y
+     en Wikipedia ~50 de casi 2.000. Un hilo escritor ganaría menos de un
+     10 %, y en el VPS (2 CPU, el GIL de Python) menos aún, a cambio de que
+     la reanudación y el re-rastreo (`_deleted_child_url_ids`) dejen de ser
+     atómicos con el parseo.
+   - **Afinar el Postgres de producción** (`shared_buffers` en 128 MB,
+     `max_wal_size` en 1 GB, los de serie). Cambiarlo reinicia Postgres en el
+     despliegue y le quita memoria a los demás servicios del VPS (7 GB, otros
+     tres Postgres): es una decisión de operación, no de código.
+
+   Tests: `tests/test_pipeline_copy_db.py` (los cuatro hijos con textos raros,
+   nulos y JSON de todo tipo dan lo mismo con `COPY` y sin él, el `raw` None
+   como JSON `null`, el NUL quitado y el re-rastreo sustituye) y
+   `tests/test_cancel_espaciado.py` (una lectura por segundo, y el cancel visto
+   se recuerda).
