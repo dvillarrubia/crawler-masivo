@@ -1,6 +1,8 @@
 # Environment
 .env
 .env.local
+# Puertos propios de cada ordenador (docs/INSTALACION.md)
+docker-compose.override.yml
 
 # Python
 __pycache__/

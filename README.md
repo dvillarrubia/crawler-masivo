@@ -124,10 +124,12 @@ Navegador ──▶ API (FastAPI, sirve también la interfaz y /mcp)
 
 ## Puesta en marcha (local)
 
+Guía completa, con requisitos y problemas frecuentes:
+[`docs/INSTALACION.md`](docs/INSTALACION.md). En corto:
+
 ```bash
 cp .env.example .env              # pon un API_TOKEN de 24 caracteres o más
-docker compose up -d --build
-docker compose exec api python scripts/init_db.py
+docker compose up -d --build      # la API crea la base de datos al arrancar
 ```
 
 La interfaz queda en <http://127.0.0.1:8000>; se entra con el `API_TOKEN`.
@@ -161,6 +163,7 @@ Chromium. Cómo destaparlos:
 
 | Para… | Lee |
 |---|---|
+| Instalarlo en tu ordenador con Docker | [`docs/INSTALACION.md`](docs/INSTALACION.md) |
 | Reglas que no se pueden romper e índice de todo | [`CLAUDE.md`](CLAUDE.md) |
 | Por qué cada cosa es como es (más de 200 decisiones, por tema) | [`docs/decisiones/README.md`](docs/decisiones/README.md) |
 | API, módulos y checks del analizador | [`docs/referencia/api-y-modulos.md`](docs/referencia/api-y-modulos.md) |

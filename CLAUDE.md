@@ -86,6 +86,7 @@ analisis y borrado estan en [`docs/referencia/reglas.md`](docs/referencia/reglas
 
 | Si vas a... | Lee |
 |---|---|
+| Instalarlo de cero en un ordenador (equipo) | [`docs/INSTALACION.md`](docs/INSTALACION.md) |
 | Cambiar cualquier comportamiento | [`docs/decisiones/README.md`](docs/decisiones/README.md) (decisiones por tema y numero) y la seccion de [`reglas.md`](docs/referencia/reglas.md) del area |
 | Entender la arquitectura, el frontend o los servicios | [`docs/referencia/arquitectura.md`](docs/referencia/arquitectura.md) |
 | Tocar API, extractores, checks del analizador, middlewares | [`docs/referencia/api-y-modulos.md`](docs/referencia/api-y-modulos.md) |
