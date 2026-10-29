@@ -44,14 +44,18 @@ _VERSION_HTTP_CURL = {1: "HTTP/1.0", 2: "HTTP/1.1", 3: "HTTP/2", 30: "HTTP/3"}
 CLAVES_DE_MEDIDA = ("ttfb_s", "content_encoding_servido", "bytes_comprimidos",
                     "http_protocol")
 
+# Sesiones de curl reutilizables por handler (decision 221). Pasado el tope,
+# cada peticion con `curl_options` nuevas va en una sesion de un solo uso.
+MAX_SESIONES_CURL = 8
+
 
 def medidas_de_curl(infos: dict, *, cabecera_encoding: str | None,
                     download_size: int | None, http_version) -> dict:
     """Las medidas de una respuesta de curl_cffi, como van a `request.meta`.
 
     - ``ttfb_s``: STARTTRANSFER - PRETRANSFER, el tiempo del SERVIDOR (y de la
-      red de ida y vuelta) sin DNS, TCP ni TLS, que con una sesion nueva por
-      peticion es lo que mas pesa en `download_latency`. None si curl no lo dio.
+      red de ida y vuelta) sin DNS, TCP ni TLS, que en una conexion nueva
+      es lo que mas pesa en `download_latency`. None si curl no lo dio.
     - ``content_encoding_servido``: la cabecera tal cual (en minusculas) o
       ``identity`` si no venia: aqui SI se sabe que llego sin comprimir.
     - ``bytes_comprimidos``: lo que bajo por el cable, sin cabeceras.
@@ -87,6 +91,14 @@ def _clase_con_medidas():
     cambios —`curl_infos` en la sesion, las medidas a `request.meta` antes de
     que se quite `Content-Encoding`, y la limpieza de las del intento
     anterior—. Si se sube la version, hay que volver a copiarlo.
+
+    Y un cuarto (decision 221): la sesion de curl NO es una por peticion. Hay
+    una por juego de `curl_options` (en la practica, una por rastreo), con
+    tantos handles como `CONCURRENT_REQUESTS`, y se reutiliza: keep-alive,
+    HTTP/2 multiplexado y cache de DNS, como un navegador. La sesion no guarda
+    cookies (`discard_cookies`), y curl borra las del handle antes de cada
+    peticion: las cookies las pone Scrapy en cada `Request`, como antes, y no
+    se cuela ninguna de un host a otro (decision 114).
     """
     from curl_cffi import CurlInfo
     from curl_cffi.requests import AsyncSession
@@ -98,18 +110,53 @@ def _clase_con_medidas():
     infos_pedidas = [CurlInfo.PRETRANSFER_TIME, CurlInfo.STARTTRANSFER_TIME]
 
     class ImpersonateConMedidas(ImpersonateDownloadHandler):
+        def __init__(self, crawler: Crawler) -> None:
+            super().__init__(crawler)
+            self._sesiones: dict[str, AsyncSession] = {}
+            self._handles = max(1, crawler.settings.getint("CONCURRENT_REQUESTS", 16))
+
+        def _sesion(self, curl_options: dict) -> AsyncSession | None:
+            """La sesion compartida para estas `curl_options`; None si ya hay
+            demasiadas (un proxy rotatorio con credenciales por peticion): esa
+            peticion va en una sesion suya, como antes."""
+            clave = repr(sorted(curl_options.items(), key=lambda kv: int(kv[0])))
+            sesion = self._sesiones.get(clave)
+            if sesion is None:
+                if len(self._sesiones) >= MAX_SESIONES_CURL:
+                    return None
+                sesion = AsyncSession(max_clients=self._handles, curl_options=curl_options,
+                                      curl_infos=infos_pedidas, discard_cookies=True)
+                self._sesiones[clave] = sesion
+            return sesion
+
+        async def close(self):
+            sesiones, self._sesiones = list(self._sesiones.values()), {}
+            for sesion in sesiones:
+                try:
+                    await sesion.close()
+                except Exception:  # noqa: BLE001 -- cerrar una no impide cerrar las demas
+                    logger.debug("No se pudo cerrar una sesion de curl", exc_info=True)
+            resultado = super().close()
+            if hasattr(resultado, "__await__"):
+                await resultado
+
         async def _download_request(self, request: Request):
             for clave in CLAVES_DE_MEDIDA:
                 request.meta.pop(clave, None)
             request_copy = request.copy()
             curl_options = CurlOptionsParser(request_copy).as_dict()
+            request_args = RequestParser(request_copy).as_dict()
 
-            async with AsyncSession(max_clients=1, curl_options=curl_options,
-                                    curl_infos=infos_pedidas) as client:
-                request_args = RequestParser(request_copy).as_dict()
-                start_time = time.time()
-                response = await client.request(**request_args)
-                download_latency = time.time() - start_time
+            sesion = self._sesion(curl_options)
+            start_time = time.time()
+            if sesion is not None:
+                response = await sesion.request(**request_args)
+            else:
+                async with AsyncSession(max_clients=1, curl_options=curl_options,
+                                        curl_infos=infos_pedidas,
+                                        discard_cookies=True) as client:
+                    response = await client.request(**request_args)
+            download_latency = time.time() - start_time
 
             try:
                 request.meta.update(medidas_de_curl(

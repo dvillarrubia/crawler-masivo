@@ -1562,6 +1562,52 @@
    (las mismas filas que sueltas, y un lote que falla solo pierde su trozo) y
    los textos de la página más largos que su columna.
 
+<a id="d221"></a>
+221. **Una sesión de curl compartida por rastreo: las conexiones se
+   reutilizan** (#277).
+
+   **Problema.** El handler de curl_cffi (el de scrapy-impersonate, y nuestra
+   copia de la 109) abría una `AsyncSession(max_clients=1)` nueva en cada
+   petición: TCP, TLS y DNS desde cero cada vez. Un navegador reutiliza las
+   conexiones; abrir una por página con huella de Chrome es una rareza que un
+   WAF podría notar (hipótesis, decisión 132), y en un sitio lejano o rápido
+   es la mitad del tiempo de cada descarga.
+
+   **Decisión.** `ImpersonateConMedidas` guarda una sesión por juego de
+   `curl_options` (en la práctica, una por rastreo), con tantos handles como
+   `CONCURRENT_REQUESTS`, y la cierra en `close()`. Keep-alive, HTTP/2
+   multiplexado y caché de DNS, como un navegador. Si un rastreo llegase a
+   tener más de `MAX_SESIONES_CURL` (8) juegos distintos (un proxy rotatorio
+   con credenciales por petición), cada petición nueva va en una sesión de un
+   solo uso, como antes.
+
+   **Cookies (decisión 114).** La sesión compartida no guarda ninguna
+   (`discard_cookies=True`) y curl borra las del handle antes de cada petición
+   (`COOKIELIST ALL`). Las cookies las sigue poniendo Scrapy en cada `Request`,
+   así que una cookie del servidor o del login no pasa a otra petición ni a
+   otro host salvo que Scrapy la mande. Si se cancela una descarga, curl_cffi
+   devuelve el handle al pool (captura `BaseException`).
+
+   **Lo que cambia en las medidas.** `ttfb_s` sigue siendo el tiempo del
+   servidor (STARTTRANSFER − PRETRANSFER). `download_latency`, que es lo que
+   mira AutoThrottle, baja al no pagar el TLS: el ritmo se acerca a lo que
+   aguanta el servidor, y la pausa mínima del job (`request_delay`) sigue
+   siendo el suelo.
+
+   **Medido** con `scripts/bench/conexiones.py`: sitio HTTPS local, 300
+   páginas, 50 ms de ida y vuelta con netem. Con concurrencia 2, **de 6,3 a
+   13,1 URL/s**; con 8, **de 17,4 a 56 URL/s**.
+
+   **Pendiente** (#277): un canario contra un sitio con WAF para comprobar
+   que no hay más muros que antes (`response_class`).
+
+   Tests: `tests/test_handler_conexiones.py`, con el handler real contra un
+   servidor con keep-alive: 20 páginas de dos en dos van por como mucho 4
+   conexiones (antes, 20), una cookie que pone el servidor no vuelve en la
+   siguiente petición, y la que manda una `Request` no pasa a la siguiente ni
+   a otro host. Los dos fallan con una sesión por petición o sin
+   `discard_cookies`.
+
 <a id="d222"></a>
 222. **Los demás hijos también con `COPY`, el commit sin esperar al disco y el
    cancel de Redis una vez por segundo** (#278).

@@ -259,7 +259,9 @@ contra servidores locales: TTFB con 300 ms de espera, gzip e `identity`,
 `http_version` sin render, un 429 con `Retry-After` en segundos y un 503 con
 fecha HTTP con los huecos medidos en el servidor, y un HTTPS caducado que da
 `tls_error` con su motivo y la ficha de la sonda; ademas Navigation Timing
-contra Chromium), `test_sonda_tls.py` (la sonda contra certificados hechos en
+contra Chromium), `test_handler_conexiones.py` (decisión 221: el handler real
+reutiliza conexiones con keep-alive y no cuela cookies entre peticiones ni
+hosts), `test_sonda_tls.py` (la sonda contra certificados hechos en
 el test: caducado, a 3 dias, otro nombre, autofirmado, solo TLS 1.0; y la
 excepcion real de curl_cffi), `test_retry_after.py` (el parser y el
 middleware con un slot simulado: sube, no lo baja AUTOTHROTTLE, vuelve al
