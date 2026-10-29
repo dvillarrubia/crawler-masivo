@@ -84,7 +84,7 @@ from seo_crawler.sitemaps import (
     parse_robots_sitemaps,
 )
 from shared.indexabilidad import SEPARADOR_CABECERAS, es_nofollow, estado_indexabilidad
-from shared.sitemaps import compactar_hreflang
+from shared.sitemaps import compactar_hreflang, es_futuro, leer_lastmod
 from shared.respuestas import (
     NO_VALIDAS, UMBRAL_POR_DEFECTO, VENTANA_POR_DEFECTO, VentanaDeSalud,
     clasificar_respuesta,
@@ -135,6 +135,10 @@ SITEMAP_EN_COLA_MAX = int(os.getenv("SITEMAP_EN_COLA_MAX", "100000"))
 # con `hreflang` a NULL (no se sabe) y `jobs.sitemaps.hreflang_recortado` lo
 # dice, para que el analisis no afirme ausencias.
 SITEMAP_HREFLANG_MAX = int(os.getenv("SITEMAP_HREFLANG_MAX", "2000000"))
+# Rescates por `lastmod` en un incremental (decision 224): como mucho esta
+# fraccion de lo que no tocaba, y nunca menos de este minimo.
+LASTMOD_FRACCION_MAX = 0.2
+LASTMOD_RESCATES_MIN = 50
 
 # Redirecciones seguidas que se siguen en una cadena, como Chromium y Firefox
 # (20, `ERR_TOO_MANY_REDIRECTS`). Google deja de seguir a las 10, pero cortar
@@ -578,6 +582,12 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         # Ya hay filas arrastradas (se reanuda un incremental ya cerrado): sus
         # enlaces son del censo anterior y no se siembran.
         self._con_arrastre = False
+        # El `lastmod` del sitemap como pista (decision 224): lo que no tocaba
+        # y el sitemap dice que cambio despues de la ultima peticion se pide
+        # igual, condicional. Con tope, por si el sitio pone «hoy» en todas.
+        self._profile_id = None
+        self._lastmod_vistas = ClavesCompactas()
+        self._lastmod: dict[str, Any] = {"rescatadas": 0, "tope": 0, "topado": False}
         self._resume_mode: bool = False
         # Sitemap ingestion state. La membresia guarda la clave compacta de
         # cada URL (`_hash_key`, 8 bytes en un array, con repeticiones) y no el
@@ -725,6 +735,7 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             if inc.get("modo") == "incremental" and inc.get("prev_job_id"):
                 self._incremental = inc
                 self._prev_job_id = uuid.UUID(str(inc["prev_job_id"]))
+                self._profile_id = job.profile_id
 
             self.max_depth = self.job_config.get("max_depth", 3)
             self.max_urls = self.job_config.get("max_urls")
@@ -1028,6 +1039,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
                 if self.max_urls is not None:
                     # Y el tope de URLs, lo mismo.
                     self.max_urls = max(0, self.max_urls - n)
+                self._lastmod["tope"] = max(LASTMOD_RESCATES_MIN,
+                                            int(n * LASTMOD_FRACCION_MAX))
                 logger.info(
                     "Incremental (decision 220): %d URLs del censo %s no tocan y no se "
                     "piden", n, self._incremental.get("prev_job_id"))
@@ -1050,6 +1063,7 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
     def spider_closed(self, spider, reason):
         """Persist sitemap membership, push final count, close Redis."""
         self._persist_sitemap_membership()
+        self._persist_lastmod()
         self._persist_sitemaps_leidos()
         self._persist_topes()
         if self._sondas_activas():
@@ -1184,18 +1198,133 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
             if self._topes is not None:
                 # Se pide siempre (estaba en el censo anterior), y gasta cupo.
                 self._topes.contar(normalized, _hash_key(compute_url_hash(normalized)))
-            depth = 1 if profundidad is None else int(profundidad)
-            req = self._page_request(normalized, depth)
-            if not req.meta.get("playwright") and (etag or last_modified):
-                if etag:
-                    req.headers[b"If-None-Match"] = etag.encode("latin-1", "ignore")
-                if last_modified:
-                    req.headers[b"If-Modified-Since"] = last_modified.encode("latin-1", "ignore")
-                req.meta["condicional"] = True
-            req.priority -= depth * self.crawler.settings.getint("DEPTH_PRIORITY")
             n += 1
-            yield req
+            yield self._peticion_condicional(normalized, profundidad, etag, last_modified)
         logger.info("Incremental: %d URLs de la frontera pedidas", n)
+
+    def _peticion_condicional(self, normalized: str, profundidad, etag, last_modified) -> Request:
+        """La peticion de una URL del censo anterior: con su profundidad y,
+        sin render, condicional (decision 220)."""
+        depth = 1 if profundidad is None else int(profundidad)
+        req = self._page_request(normalized, depth)
+        if not req.meta.get("playwright") and (etag or last_modified):
+            if etag:
+                req.headers[b"If-None-Match"] = etag.encode("latin-1", "ignore")
+            if last_modified:
+                req.headers[b"If-Modified-Since"] = last_modified.encode("latin-1", "ignore")
+            req.meta["condicional"] = True
+        req.priority -= depth * self.crawler.settings.getint("DEPTH_PRIORITY")
+        return req
+
+    def _rescatar_por_lastmod(self, entradas) -> list[Request]:
+        """Lo que no tocaba y el sitemap da por cambiado (decision 224).
+
+        Una entrada se rescata si su URL estaba en lo que no se pide, su
+        `lastmod` se puede leer, no es futuro y es posterior a la ultima vez que
+        se pidio (`url_state.ultima_peticion`). Sin `ultima_peticion` no se
+        puede comparar y no se rescata. Lo rescatado ya habia gastado su cupo
+        de `max_urls` y de carpeta al apartarse: se le devuelve el de
+        `max_urls`, porque ahora lo cuenta `parse`.
+
+        Con tope (`_lastmod["tope"]`): un sitio que pone la fecha de hoy en
+        todas las URLs convertiria cada incremental en un completo.
+        """
+        if not self._incremental or self._profile_id is None or self._lastmod["topado"]:
+            return []
+        leido = datetime.now(timezone.utc)
+        candidatas: dict[str, tuple[str, datetime]] = {}
+        for entrada in entradas:
+            lastmod = leer_lastmod(entrada.lastmod)
+            if lastmod is None or es_futuro(lastmod, leido):
+                continue
+            normalized = normalize_url(entrada.url)
+            if not self._is_internal(normalized):
+                continue
+            url_hash = compute_url_hash(normalized)
+            clave = _hash_key(url_hash)
+            if clave not in self._already_crawled_hashes:
+                continue
+            if not self._lastmod_vistas.anadir(clave):
+                continue
+            candidatas[url_hash] = (normalized, lastmod)
+        if not candidatas:
+            return []
+        peticiones = []
+        estado = self._estado_para_lastmod(list(candidatas))
+        for url_hash, (normalized, lastmod) in candidatas.items():
+            fila = estado.get(url_hash)
+            if fila is None:
+                continue
+            ultima, etag, last_modified, profundidad = fila
+            if ultima is None:
+                continue
+            if ultima.tzinfo is None:
+                ultima = ultima.replace(tzinfo=timezone.utc)
+            if lastmod <= ultima:
+                continue
+            if self._lastmod["rescatadas"] >= self._lastmod["tope"]:
+                self._lastmod["topado"] = True
+                logger.warning(
+                    "Incremental: el sitemap da por cambiadas mas de %d URLs que no "
+                    "tocaban; no se rescatan mas por lastmod (decision 224)",
+                    self._lastmod["tope"])
+                break
+            if not self._should_follow(normalized):
+                continue
+            self._lastmod["rescatadas"] += 1
+            if self.max_urls is not None:
+                self.max_urls += 1
+            peticiones.append(self._peticion_condicional(
+                normalized, profundidad, etag, last_modified))
+        return peticiones
+
+    def _estado_para_lastmod(self, hashes: list[str]) -> dict[str, tuple]:
+        """`url_state` de estas URLs del perfil que este job aun no tiene:
+        `url_hash -> (ultima_peticion, etag, last_modified, profundidad)`."""
+        from sqlalchemy import exists
+
+        from shared.database import SessionLocal
+        from shared.models import Url, UrlState
+
+        salida: dict[str, tuple] = {}
+        session = SessionLocal()
+        try:
+            ya_en_el_job = exists().where(Url.job_id == self.job_id,
+                                          Url.url_hash == UrlState.url_hash)
+            for inicio in range(0, len(hashes), 5000):
+                for h, ultima, etag, lm, prof in (
+                        session.query(UrlState.url_hash, UrlState.ultima_peticion,
+                                      UrlState.etag, UrlState.last_modified,
+                                      UrlState.profundidad)
+                        .filter(UrlState.profile_id == self._profile_id,
+                                UrlState.url_hash.in_(hashes[inicio:inicio + 5000]),
+                                ~ya_en_el_job)):
+                    salida[h] = (ultima, etag, lm, prof)
+        finally:
+            session.close()
+        return salida
+
+    def _persist_lastmod(self) -> None:
+        """Lo rescatado por `lastmod` en `jobs.incremental["lastmod"]`, para
+        la ficha. Best-effort: el `try` cubre la funcion entera."""
+        try:
+            if not self._incremental:
+                return
+            from shared.database import SessionLocal
+            from shared.models import Job
+
+            session = SessionLocal()
+            try:
+                job = session.get(Job, uuid.UUID(str(self.job_id)))
+                if job is not None and job.incremental:
+                    inc = dict(job.incremental)
+                    inc["lastmod"] = dict(self._lastmod)
+                    job.incremental = inc
+                    session.commit()
+            finally:
+                session.close()
+        except Exception:
+            logger.exception("No se pudo guardar lo rescatado por lastmod")
 
     def _no_modificada(self, response: Response) -> Generator:
         """Un 304 a una peticion condicional (decision 220): la fila, sin
@@ -1485,6 +1614,8 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
 
         for child in lectura.hijos:
             yield from self._sitemap_request(child)
+
+        yield from self._rescatar_por_lastmod(lectura.entradas)
 
         # Entradas internas de ESTE fichero para `sitemap_entries` (decision
         # 126): una por URL normalizada, aunque el sitemap la escriba de dos

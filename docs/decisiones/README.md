@@ -9,7 +9,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | Fichero | Tema | Decisiones |
 |---|---|---|
 | [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga, robots.txt y sitemaps en la cola | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140, 172, 173, 174, 186, 216, 218, 219, 221, 222 |
-| [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76, 193, 209, 220, 223 |
+| [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76, 193, 209, 220, 223, 224 |
 | [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga, robots.txt y sitemaps en la cola | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140, 172, 173, 174, 186, 216, 218, 219 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124, 153, 154, 155, 187, 198, 215 |
 | [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137, 156, 160, 164, 167, 170, 171 |
@@ -251,6 +251,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 221 | Una sesión de curl compartida por rastreo, sin guardar cookies: keep-alive, HTTP/2 y DNS reutilizados como un navegador; de 17 a 56 URL/s con 50 ms de ida y vuelta y concurrencia 8 | [`render-y-descarga`](render-y-descarga.md#d221) |
 | 222 | Encabezados, hreflang, datos estructurados y recursos también con `COPY`; `synchronous_commit = off` solo en la sesión del pipeline; el cancel de Redis una vez por segundo. Wikipedia, de 54 a 23 ms de CPU de pipeline por página. El hilo escritor, medido y descartado | [`render-y-descarga`](render-y-descarga.md#d222) |
 | 223 | Retención por perfil (`config.retencion`, apagada; 8 por defecto): al cerrar un rastreo, los censos más viejos que los últimos completados se vacían (`status='vaciado'`) y conservan su fila y su punto de evolución; la referencia de una programación activa no se toca | [`worker-y-cola`](worker-y-cola.md#d223) |
+| 224 | El `lastmod` del sitemap como pista del incremental: lo que no tocaba y el sitemap da por cambiado después de su última petición se pide igual, condicional, con tope del 20 % por si el sitio pone «hoy» en todas | [`worker-y-cola`](worker-y-cola.md#d224) |
 
 ## Anadir una decision
 

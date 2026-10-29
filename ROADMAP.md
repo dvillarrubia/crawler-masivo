@@ -943,8 +943,8 @@ es cada plantilla— y va con
   (incremental) en la decisión 220, opcional por perfil: selección por
   intervalo adaptativo, peticiones condicionales, arrastre del censo anterior
   y poda; retención por perfil que vacía los censos viejos y conserva su
-  evolución en la 223. Falta: medirlo en producción contra un completo del
-  mismo día (criterio de #36), el `lastmod` del sitemap como pista,
+  evolución en la 223; el `lastmod` del sitemap como pista en la 224. Falta:
+  medirlo en producción contra un completo del mismo día (criterio de #36),
   `ignore_patterns` y confirmar alertas en dos ejecuciones.
 - [#31](https://github.com/dvillarrubia/crawler-masivo/issues/31) **Backlinks**
   de Ahrefs o DataForSEO: un PageRank con la autoridad que entra desde fuera, y
