@@ -465,3 +465,46 @@
    `tests/test_spider_incremental.py` prueba el spider: lo que no toca no se
    pide, la frontera condicional con su profundidad, nada de condicionales
    con render, el 304 y la reanudación de un incremental ya arrastrado.
+
+<a id="d223"></a>
+223. **Retención por perfil: los censos viejos se vacían y conservan su punto
+   de evolución** (#36, lo que quedaba de F4).
+
+   **Problema.** Con los semanales, cada perfil suma un censo completo por
+   semana, y el borrado en masa (96) es a mano. Además, borrar un censo con
+   `borrar_job` se lleva su fila de `profile_runs` (130): la evolución del
+   cliente perdería el histórico justo cuando más vale.
+
+   **Decisión** (con David, 29-oct: conservar la evolución, 8 por defecto).
+   - `config.retencion = {activo: false, conservar: 8}` en `JobConfig`,
+     apagada: nada se toca hasta que se activa en un perfil. Fuera de la
+     huella del incremental (220): no cambia qué se rastrea.
+   - Al cerrar cualquier rastreo de un perfil con la retención activa, el
+     worker (`_aplicar_retencion`, best-effort con el `try` entero) vacía los
+     terminados creados antes del `conservar`-ésimo completado más reciente.
+     Lo más nuevo se queda aunque haya fallado. Tampoco se vacía el último
+     completado de una programación activa del perfil, que es la referencia
+     de su siguiente rastreo (78, 86), ni un censo con el candado tomado (93,
+     95): se salta y lo coge la siguiente pasada.
+   - **Vaciar** (`shared/retencion.py`) es borrar lo que pesa —URLs y lo que
+     cuelga de ellas, enlaces, incidencias, el Parquet y las capturas— y
+     dejar la fila de `jobs` con `status='vaciado'` y su `profile_runs`.
+     Antes de borrar nada se asegura de que el punto de evolución existe; un
+     completado sin él no se vacía. El núcleo del borrado se sacó de
+     `borrar_job` a `shared/borrado.py` (el worker no lleva `api/`), con
+     `conservar_evolucion` como única diferencia.
+   - **Por trozos y con tiempo** (300 s por pasada): el estado pasa a
+     `vaciado` antes del primer `DELETE`, y un vaciado con URLs vuelve a
+     salir en la siguiente pasada hasta quedar vacío.
+   - **`vaciado` no es `completed`**: la comparación, la base del incremental,
+     el archivado, los enlaces compartidos (143) y los exports no lo eligen
+     nunca, sin tocar ninguno. Solo la evolución lo acepta como un punto
+     comparable más, y ni `registrar` ni `run_analysis` lo vuelven a contar:
+     con las URLs borradas saldrían ceros.
+
+   Tests: `tests/test_retencion_db.py`, contra Postgres: qué se vacía y qué
+   se queda (la referencia de la programación, los más nuevos aunque fallen),
+   las filas que se van y las que no, la evolución con los vaciados y sin
+   recontarlos, la base del incremental que no elige un vaciado, apagada no
+   toca nada, a medias se termina en la pasada siguiente, y el worker no
+   falla si la retención revienta.

@@ -125,6 +125,7 @@ const STATUS_LABEL = {
   failed:    'Fallido',
   cancelled: 'Cancelado',
   deleting:  'Borrándose',
+  vaciado:   'Vaciado',
 };
 
 const ISSUE_LABEL = {
@@ -6074,7 +6075,7 @@ function app() {
 
     // ------- Helpers -------
     statusColor(s) {
-      return { pending:'badge-pending', running:'badge-running', analyzing:'badge-running', completed:'badge-completed', failed:'badge-failed', cancelled:'badge-neutral', deleting:'badge-neutral' }[s] || 'badge-pending';
+      return { pending:'badge-pending', running:'badge-running', analyzing:'badge-running', completed:'badge-completed', failed:'badge-failed', cancelled:'badge-neutral', deleting:'badge-neutral', vaciado:'badge-neutral' }[s] || 'badge-pending';
     },
 
     barColor(group) {
@@ -8348,6 +8349,10 @@ const CAMPOS_CONFIG = [
     ayuda: 'El completo es el único que confirma que una página ha desaparecido. También sale completo si cambia la configuración, las semillas o el robots.txt.' },
   { ruta: 'incremental.muestra_control', grupo: 'ritmo', etiqueta: 'Muestra al azar de lo que no toca (0-1)', tipo: 'decimal', min: 0, max: 1,
     ayuda: 'Si en la muestra cambia más del 20 %, el ciclo siguiente es completo.' },
+  { ruta: 'retencion.activo', grupo: 'ritmo', etiqueta: 'Vaciar los rastreos viejos del perfil', tipo: SI_NO,
+    ayuda: 'Al acabar cada rastreo, los más antiguos que los últimos completados se vacían: se borran sus URLs, enlaces e incidencias y se queda su punto en la evolución.' },
+  { ruta: 'retencion.conservar', grupo: 'ritmo', etiqueta: 'Rastreos completados que se conservan enteros', tipo: 'entero', min: 2, max: 200,
+    ayuda: 'Con los semanales, 8 son dos meses.' },
   { ruta: 'impersonate', grupo: 'ritmo', etiqueta: 'Huella TLS', tipo: 'huella',
     ayuda: 'Va con el navegador con el que se presenta. Lo normal es dejarla automática.' },
 

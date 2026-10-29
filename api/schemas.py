@@ -442,6 +442,19 @@ class IncrementalConfig(BaseModel):
     intervalo_max: float = Field(default=4.0, ge=1, le=52)
 
 
+class RetencionConfig(BaseModel):
+    """Retencion de censos de un perfil (decision 223).
+
+    Al cerrar un rastreo del perfil, el worker vacia los terminados mas
+    antiguos que sus `conservar` censos completados mas recientes: borra sus
+    URLs, enlaces e incidencias y deja la fila del job (`status='vaciado'`) y
+    su punto de la evolucion. Apagado, no se toca nada.
+    """
+
+    activo: bool = False
+    conservar: int = Field(default=8, ge=2, le=200)
+
+
 class JobConfig(BaseModel):
     """Crawl configuration that travels with every job."""
 
@@ -520,6 +533,7 @@ class JobConfig(BaseModel):
     taxonomia: list[str | dict[str, Any]] = Field(default_factory=list, max_length=20)
     # Rastreo incremental en los programados de un perfil (decision 220).
     incremental: IncrementalConfig = Field(default_factory=IncrementalConfig)
+    retencion: RetencionConfig = Field(default_factory=RetencionConfig)
 
     @field_validator("taxonomia")
     @classmethod

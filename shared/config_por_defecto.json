@@ -127,6 +127,10 @@
       "crawl_pdfs": true,
       "crawl_svg": true
     },
+    "retencion": {
+      "activo": false,
+      "conservar": 8
+    },
     "robots_mode": "respect",
     "segmentos": [],
     "sitemap_urls": [],

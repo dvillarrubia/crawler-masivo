@@ -557,9 +557,7 @@ def borrar_job(db: Session, job: Job, *, confirmar: bool = True,
     lo guardaria en un Parquet vacio (decision 95). Ninguno de los dos mira un
     job que no este terminado, y `deleting` no lo esta.
     """
-    from shared.models import (CleaningRuleset, CrawlProfile, Decision, EnrichmentRun,
-                               JobFrontera, ProfileRun, RobotsTxt, SitemapArrastre,
-                               UrlState)
+    from shared.models import CrawlProfile, UrlState
 
     job_id = job.id
     filas: dict[str, int] = {}
@@ -581,69 +579,12 @@ def borrar_job(db: Session, job: Job, *, confirmar: bool = True,
     # Y el estado incremental de sus URLs (decision 220) se queda sin job.
     db.query(UrlState).filter(UrlState.last_job_id == job_id).update(
         {UrlState.last_job_id: None}, synchronize_session=False)
-    # Analisis enriquecido (#40) y reglas de limpieza: a mano, como links e
-    # issues (en SQLite no hay ON DELETE CASCADE). Una ejecucion de
-    # enriquecido en curso se para sola: en el siguiente lote su fila ya no
-    # existe y el worker deja de llamar.
-    #
-    # Lo del analisis semantico y Search Console NO se borra a mano, y es a
-    # proposito: `semantic_analyses` cuelga del job y el resto de las URLs,
-    # los cuatro con ON DELETE CASCADE. Importar aqui `shared.semantic_models`
-    # registraria sus tablas de pgvector en el `MetaData` compartido, y
-    # entonces el `create_all` de los tests contra un Postgres SIN la
-    # extension (el `postgres:16-alpine` de CI) revienta — se llevaria por
-    # delante `test_pagerank_db.py`, que no tiene nada que ver con esto.
-    # El robots.txt de cada host (decisiones 112 y 113): unas pocas filas.
-    for nombre, modelo in (("decisions", Decision), ("enrichment_runs", EnrichmentRun),
-                           ("cleaning_rulesets", CleaningRuleset), ("robots_txt", RobotsTxt),
-                           # La fila de su evolucion (decision 130): una por job.
-                           ("profile_runs", ProfileRun),
-                           # Rastreo incremental (decision 220).
-                           ("job_frontera", JobFrontera),
-                           ("sitemap_arrastre", SitemapArrastre)):
-        filas[nombre] = db.query(modelo).filter(modelo.job_id == job_id).delete(
-            synchronize_session=False)
+    from shared.borrado import borrar_filas_del_job
 
-    # Las grandes. `urls` arrastra html_meta, headings, page_content y
-    # demas por el ON DELETE CASCADE de la BD. `custom_extraction` (decision
-    # 104) lleva `job_id` y va a mano: en SQLite no hay CASCADE, y por trozos
-    # como las otras, porque son una fila por URL y regla.
-    from shared.models import (AdapterEntity, CapturaAlternativa, CustomExtraction,
-                               EnlaceNoRastreable, RespuestaSondeada, SitemapEntry)
-
-    for nombre, modelo in (("links", Link), ("issues", Issue),
-                           ("custom_extraction", CustomExtraction),
-                           # Enlaces no rastreables (decision 106): job_id, igual.
-                           ("enlaces_no_rastreables", EnlaceNoRastreable),
-                           # Capturas con otro perfil (decision 119): job_id, igual.
-                           ("capturas_alternativas", CapturaAlternativa),
-
-                           # Sondas de respuesta (decisiones 123 y 124): job_id, igual.
-                           ("respuestas_sondeadas", RespuestaSondeada),
-                           # Entradas de sitemap (decision 126): job_id, igual.
-                           ("sitemap_entries", SitemapEntry),
-                           # Entidades de la REST API de WordPress (decision 161).
-                           ("adapter_entities", AdapterEntity), ("urls", Url)):
-        borradas = 0
-        while True:
-            if trozo:
-                sub = (db.query(modelo.id).filter(modelo.job_id == job_id)
-                       .limit(trozo).scalar_subquery())
-                n = db.query(modelo).filter(modelo.id.in_(sub)).delete(
-                    synchronize_session=False)
-            else:
-                n = db.query(modelo).filter(modelo.job_id == job_id).delete(
-                    synchronize_session=False)
-            borradas += n
-            if not trozo:
-                break
-            db.commit()
-            if n < trozo:
-                break
-            if hasta is not None and _reloj() >= hasta:
-                filas[nombre] = borradas
-                return {"completo": False, "filas": filas}
-        filas[nombre] = borradas
+    completo = borrar_filas_del_job(db, job_id, filas, trozo=trozo, hasta=hasta,
+                                    reloj=lambda: _reloj())
+    if not completo:
+        return {"completo": False, "filas": filas}
 
     db.delete(job)
     if confirmar:

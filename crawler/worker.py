@@ -865,6 +865,13 @@ def _run_job(job_id: str) -> None:
         # bajo el candado del job, el mismo que toma el archivado.
         _archivar_enlaces(job_id)
 
+    # Lo ultimo: vaciar los censos viejos del perfil (decision 223), despues de
+    # comparar (la referencia se elige entre los completados, y los que se
+    # conservan son los mas recientes) y con cualquier final, para que un
+    # perfil que falla a menudo no acumule.
+    if final_status in ("completed", "failed", "stalled", "cancelled"):
+        _aplicar_retencion(job_id)
+
 
 def _es_incremental(job_id: str) -> bool:
     """Si el job es un incremental (decision 220). Ante la duda, no."""
@@ -926,6 +933,29 @@ def _actualizar_estado_incremental(job_id: str) -> None:
             session.close()
     except Exception:
         logger.exception("Job %s: no se pudo actualizar el estado incremental", job_id)
+
+
+def _aplicar_retencion(job_id: str) -> None:
+    """Vacia los censos viejos del perfil del job (decision 223) si su perfil
+    lo tiene activo. Best-effort con el `try` cubriendo la funcion ENTERA
+    (decision 74): si falla, los censos se quedan como estaban y la siguiente
+    pasada lo intenta otra vez."""
+    try:
+        from shared.database import SessionLocal
+        from shared.retencion import aplicar
+
+        session = SessionLocal()
+        try:
+            resumen = aplicar(session, job_id)
+            if resumen and (resumen["vaciados"] or resumen["saltados"]):
+                logger.info("Job %s: retencion del perfil %s", job_id, resumen)
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+    except Exception:
+        logger.exception("Job %s: no se pudo aplicar la retencion del perfil", job_id)
 
 
 def _registrar_evolucion(job_id: str) -> None:
