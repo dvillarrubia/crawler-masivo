@@ -51,6 +51,8 @@ MIN_VISITAS_ERROR = 2
 MAX_DIAS_ENTRE = 30
 MAX_NO_EN_CENSO = 30
 MAX_EJEMPLOS = 10
+# Filas del reparto por plantilla en `logs_resumen` (las de mas visitas).
+MAX_PLANTILLAS = 30
 # `shared.comparacion.ANCLADOS_POR_GRUPO` repite la lista (la API no importa
 # `analysis/`); un test comprueba que coinciden.
 TIPOS_ANCLADOS_POR_GRUPO = ("indexable_sin_visitas_googlebot", "googlebot_recibe_error")
@@ -108,7 +110,7 @@ def _dia_del_censo(job) -> datetime:
 def avisar(an) -> dict[str, Any] | None:
     from shared.backlinks import clave_backlink, indice_de_censo, rango_de
     from shared.models import Job, LogUrl, Url
-    from shared.plantillas import firma_de_ruta
+    from shared.plantillas import firma_de_ruta, plantilla_de, reglas_de_plantilla
 
     an._flush_issues()
     job = an.session.get(Job, an.job_id)
@@ -249,6 +251,10 @@ def avisar(an) -> dict[str, Any] | None:
             avisos += 1
     an._flush_issues()
 
+    por_plantilla = reparto_por_plantilla(
+        urls, visitas, indexables, reglas_de_plantilla((job.config or {}).get("templates")),
+        plantilla_de)
+
     lista_fuera = sorted(no_en_censo.values(), key=lambda x: -x["visitas"])[:MAX_NO_EN_CENSO]
     for x in lista_fuera:
         x["codigos"] = dict(x["codigos"])
@@ -260,9 +266,45 @@ def avisar(an) -> dict[str, Any] | None:
         "visitas": total, "falsas": falsas, "sin_comprobar": sin_comprobar,
         "parte_movil": round(movil / total, 4) if total else None,
         "indexables": len(indexables), "indexables_visitadas": visitadas,
-        "reparto": dict(reparto), "no_en_censo": lista_fuera,
+        "reparto": dict(reparto), "por_plantilla": por_plantilla, "no_en_censo": lista_fuera,
         "apartado": imp.resumen or {},
         "otros_bots": {b: d for b, d in (imp.bots or {}).items() if b != BOT_PRINCIPAL},
     }
     logger.info("Logs del job %s: %d visitas de Googlebot verificado, %d avisos", an.job_id, total, avisos)
     return job.logs_resumen
+
+
+def reparto_por_plantilla(urls, visitas: dict, indexables, reglas, plantilla_de) -> list[dict[str, Any]]:
+    """En que tipo de pagina se va el presupuesto de Googlebot (#35, #12).
+
+    Por plantilla (`config.templates` del cliente y, si no casa ninguna, la
+    forma de la ruta: la misma `plantilla_de` que los avisos), las visitas de
+    Googlebot verificado a URLs del censo, cuantas URLs tiene y cuantas
+    visito, y lo mismo de las indexables. Solo lo que el censo tiene: lo que
+    Google visita y el rastreo no encontro va aparte (`no_en_censo`). Las
+    `MAX_PLANTILLAS` de mas visitas, y las que no tienen ninguna si tienen
+    indexables (que Google no pase por una plantilla entera es justo lo que
+    hay que ver).
+    """
+    ids_indexables = {u.id for u in indexables}
+    filas: dict[str, dict[str, Any]] = {}
+    for u in urls:
+        nombre = plantilla_de(u.path or urlsplit(u.url).path, reglas)
+        f = filas.setdefault(nombre, {"plantilla": nombre, "visitas": 0, "urls": 0, "urls_visitadas": 0,
+                                      "indexables": 0, "indexables_visitadas": 0})
+        n = visitas.get(u.id, 0)
+        f["urls"] += 1
+        f["visitas"] += n
+        f["urls_visitadas"] += 1 if n else 0
+        if u.id in ids_indexables:
+            f["indexables"] += 1
+            f["indexables_visitadas"] += 1 if n else 0
+    total = sum(f["visitas"] for f in filas.values())
+    for f in filas.values():
+        f["parte"] = round(f["visitas"] / total, 4) if total else None
+    orden = sorted(filas.values(), key=lambda f: (-f["visitas"], -f["indexables"], f["plantilla"]))
+    arriba = orden[:MAX_PLANTILLAS]
+    vistas = {f["plantilla"] for f in arriba}
+    sin_visitas = [f for f in orden[MAX_PLANTILLAS:] if not f["visitas"] and f["indexables"]
+                   and f["plantilla"] not in vistas][:MAX_PLANTILLAS]
+    return arriba + sin_visitas

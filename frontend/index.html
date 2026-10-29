@@ -3213,6 +3213,16 @@
           <div class="card mb-2 text-sm" data-testid="logs-bloque" x-data="{ get bl() { return bloqueLogs(job) } }">
             <div class="google-cab"><h2>Googlebot en los logs</h2><span class="text-dim">Log del servidor</span></div>
             <template x-for="(f, n) in bl.frases" :key="'l' + n"><p class="google-frase" x-text="f"></p></template>
+            <details class="google-paginas" x-show="bl.plantillas.length" data-testid="logs-plantillas">
+              <summary class="text-dim">En qué tipo de página se va (por plantilla)</summary>
+              <p class="text-dim">Las visitas de Googlebot a cada plantilla del rastreo y cuántas de sus páginas indexables visitó. Una plantilla importante con poca cobertura, o una de poco valor que se lleva mucho, es lo que hay que mirar.</p>
+              <table class="tbl fs-sm"><thead><tr><th>Plantilla</th><th class="ta-r">Visitas</th><th class="ta-r">Del total</th><th class="ta-r">Indexables visitadas</th></tr></thead>
+                <tbody><template x-for="p in bl.plantillas" :key="p.plantilla">
+                  <tr><td class="informe-url" x-text="p.plantilla"></td><td class="ta-r" x-text="fmt.num(p.visitas)"></td>
+                    <td class="ta-r" x-text="p.pct"></td>
+                    <td class="ta-r" x-text="p.indexables ? fmt.num(p.indexables_visitadas) + ' de ' + fmt.num(p.indexables) + ' (' + p.cobertura + ')' : '—'"></td></tr>
+                </template></tbody></table>
+            </details>
             <details class="google-paginas" x-show="bl.no_en_censo.length" data-testid="logs-no-en-censo">
               <summary class="text-dim" x-text="'Lo que Googlebot visita y el rastreo no encontró (' + fmt.num(bl.no_en_censo.length) + ')'"></summary>
               <p class="text-dim">Huérfanas de verdad, URLs antiguas o con parámetros. Si dan error, redirigirlas; si no deben existir, que no las enlace nada.</p>
@@ -5182,8 +5192,8 @@
                             <span class="text-dim text-xs" x-text="(d.is_internal ? 'Interno' : 'Externo') + (d.nofollow ? ' · ' + fmt.num(d.nofollow) + ' nofollow' : '')"></span>
                           </td>
                           <td data-label="Estado"><span class="badge" :class="estadoDestino(d.estado_destino).clase" :data-tip="tipEstadoDestino(d)" x-text="textoEstadoDestino(d)"></span></td>
-                          <td class="num" data-label="Páginas" x-text="fmt.num(d.paginas)"></td>
-                          <td class="num" data-label="Apariciones" x-text="fmt.num(d.apariciones)"></td>
+                          <td class="ta-r" data-label="Páginas" x-text="fmt.num(d.paginas)"></td>
+                          <td class="ta-r" data-label="Apariciones" x-text="fmt.num(d.apariciones)"></td>
                           <td class="td-anclas" data-label="Anclas" :title="textoAnclas(d)"><div class="truncate" x-text="textoAnclas(d)"></div></td>
                           <td class="td-accion"><button type="button" class="btn btn-sm" @click="quienEnlaza(d)">Quién la enlaza</button></td>
                         </tr>
@@ -5229,7 +5239,7 @@
                           <td data-label="Posición" x-text="fmt.position(l.link_position)"></td>
                           <td data-label="Tipo" x-text="l.is_internal ? 'Interno' : 'Externo'"></td>
                           <td data-label="Follow" :class="l.follow === false ? 'severity-warning' : ''" x-text="l.follow ? 'Sí' : l.follow === false ? 'No' : '—'"></td>
-                          <td class="num" data-label="Veces" x-text="l.repeticiones || 1"></td>
+                          <td class="ta-r" data-label="Veces" x-text="l.repeticiones || 1"></td>
                         </tr>
                       </template>
                     </tbody>

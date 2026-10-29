@@ -965,8 +965,8 @@ es cada plantilla— y va con
   servidor**: qué rastrea Googlebot de verdad, cruzado con el rastreo.
   *Primera parte hecha (decisión 213)*: subida por cliente, lectura en el worker en
   streaming, Googlebot verificado por sus rangos de IP, cobertura, presupuesto y dos
-  avisos. Falta: probarlo con un log real de 1 GB y un cliente, y el reparto por tipo
-  de página (#12).
+  avisos; el reparto del presupuesto por plantilla (29-oct). Falta: probarlo con un
+  log real de 1 GB y un cliente.
 - [#33](https://github.com/dvillarrubia/crawler-masivo/issues/33)
   **WordPress**: cruzar el rastreo con lo que el propio WordPress dice que tiene
   publicado. Hecha la lectura de la REST API durante el rastreo y cuatro avisos
