@@ -8,6 +8,7 @@ porque el reactor de Twisted no se reinicia.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import textwrap
@@ -88,8 +89,11 @@ GUION = textwrap.dedent('''
 
 @pytest.fixture(scope="module")
 def vistas():
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    entorno = {**os.environ, "PYTHONPATH": os.pathsep.join(
+        [raiz, os.path.join(raiz, "crawler"), os.environ.get("PYTHONPATH", "")])}
     proc = subprocess.run([sys.executable, "-c", GUION], capture_output=True, text=True,
-                          timeout=120)
+                          timeout=120, env=entorno)
     assert "@@VISTAS@@" in proc.stdout, proc.stdout + proc.stderr[-4000:]
     return json.loads(proc.stdout.split("@@VISTAS@@", 1)[1].split("\n", 1)[0])
 
