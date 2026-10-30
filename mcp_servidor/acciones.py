@@ -97,6 +97,18 @@ def _plan(api: Api, cliente: str, perfil: str | None, canario: bool, ajustes: di
             "semillas_propias": bool(semillas)}
 
 
+def _disco(api: Api, plan: dict) -> dict | None:
+    """Si cabe en el disco (decision 225), para ensenarlo antes de confirmar.
+    Si no se puede preguntar, None: no impide simular."""
+    try:
+        p = api.get("/almacenamiento/prevision", cliente_id=plan["cliente_id"],
+                    profile_id=(plan["perfil"] or {}).get("id"),
+                    max_urls=plan["efectiva"].get("max_urls"))
+    except Exception:
+        return None
+    return {"veredicto": p.get("veredicto"), "frase": p.get("frase"), "motivo": p.get("motivo")}
+
+
 def lanzar_rastreo(api: Api, cliente: str, perfil: str | None = None, canario: bool = False,
                    ajustes: dict | None = None, semillas: list[str] | None = None,
                    nombre: str | None = None, confirmar: bool = False) -> dict:
@@ -110,7 +122,8 @@ def lanzar_rastreo(api: Api, cliente: str, perfil: str | None = None, canario: b
              "tipo": "canario" if canario else "censo", "semillas": plan["semillas"],
              "configuracion": {k: plan["efectiva"].get(k) for k in _RESUMEN},
              "limite_horas": (plan["efectiva"].get("crawl_behavior") or {}).get("max_runtime_hours"),
-             "cambios_sobre_lo_heredado": plan["cambios"], "en_marcha_ahora": _en_marcha(api)}
+             "cambios_sobre_lo_heredado": plan["cambios"], "en_marcha_ahora": _en_marcha(api),
+             "disco": _disco(api, plan)}
     if not confirmar:
         return {"simulacion": True, **vista,
                 "siguiente_paso": "Nada lanzado. Si es esto, llama otra vez con confirmar=true."}

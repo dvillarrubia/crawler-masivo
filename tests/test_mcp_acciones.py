@@ -43,6 +43,9 @@ class ApiFalsa:
             perfil = next((x for x in self.perfiles if x["id"] == q.get("profile_id")), None)
             return httpx.Response(200, json={"cliente_id": CID, "config": HEREDADA,
                                              "seeds": perfil["seeds"] if perfil else []})
+        if p == "/api/almacenamiento/prevision":
+            return httpx.Response(200, json={"veredicto": "justo", "frase": "Cabe, pero justo.",
+                                             "motivo": None, "max_urls": q.get("max_urls")})
         if p == "/api/jobs" and req.method == "GET":
             items = [{"id": "otro", "name": "Saunier", "status": "running", "total_urls_crawled": 900}]
             return httpx.Response(200, json={"items": items if q.get("status") == "running" else []})
@@ -197,3 +200,11 @@ def test_endpoints_lista_los_get_de_la_api():
     rutas = [e["ruta"] for e in H.endpoints(_api(ApiFalsa()))]
     assert rutas == ["/jobs/{job_id}/urls/detalle", "/jobs"]
     assert H.endpoints(_api(ApiFalsa()), "detalle")[0]["parametros"] == ["url"]
+
+
+def test_la_simulacion_dice_si_cabe_en_el_disco():
+    f = ApiFalsa()
+    r = A.lanzar_rastreo(_api(f), "Lopesan", canario=True)
+    assert r["disco"] == {"veredicto": "justo", "frase": "Cabe, pero justo.", "motivo": None}
+    pedida = [x for x in f.pedidas if x[1] == "/api/almacenamiento/prevision"]
+    assert pedida and f.escrituras() == []

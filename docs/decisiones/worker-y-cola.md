@@ -545,3 +545,43 @@
    pedirse con su `If-None-Match` y devuelve el cupo; no rescata con `lastmod`
    anterior, futuro, ilegible ni sin `ultima_peticion`; el tope y que no
    repite; sin incremental no hace nada).
+
+<a id="d225"></a>
+225. **Antes de lanzar un rastreo se mira si cabe en el disco** (#281).
+
+   **Problema.** El VPS tiene 96 GB y unos 34 libres (29-oct). Mientras se
+   rastrea y se analiza, los enlaces están en Postgres (se archivan al acabar,
+   decisiones 95 y 150), y un censo con 700 enlaces por página son cientos de
+   kB por URL: un `max_urls` alto llenaba el disco a mitad de rastreo, y sin
+   disco Postgres se para para todos.
+
+   **Decisión.** `shared/almacenamiento.prevision_de_disco` estima lo que
+   ocupará el rastreo mientras rastrea:
+   - **Por URL**, lo que ocupa el último censo completado del mismo perfil
+     (o, sin él, del cliente), con `estimar_bytes` y los bytes por fila de
+     cada tabla. Sus enlaces cuentan aunque estén archivados en Parquet
+     (`enlaces_archivados["filas"]`), porque el rastreo los volverá a
+     escribir en `links`.
+   - **Por tantas URLs** como el `max_urls` del rastreo o, sin tope, como el
+     censo de referencia.
+   - **Frente a lo libre** del disco (`shutil.disk_usage`, que en los
+     contenedores del VPS es el disco del host) menos una reserva de 5 GB o
+     el 5 %, lo que sea mayor: `no_cabe`, `justo` (más de la mitad de lo
+     útil), `cabe` o `no_se_sabe`.
+
+   Sin censo de referencia, sin Postgres o sin poder leer el disco no se
+   afirma nada: un sitio nuevo puede tener 20 enlaces por página o 700.
+
+   **Dónde.**
+   - `POST /api/jobs` con cliente devuelve **409** (`no_cabe_en_disco`, con la
+     frase y la previsión) si se sabe que no cabe; `?forzar_disco=true` lo
+     lanza igual.
+   - `GET /api/almacenamiento/prevision` la da sin lanzar nada.
+   - La simulación de `lanzar_rastreo` del MCP la enseña antes de confirmar.
+   - Los programados **no** se bloquean: saltarse un semanal en silencio es
+     peor que el problema.
+
+   Tests: `tests/test_prevision_disco.py` (el veredicto y la reserva, la
+   frase, sin Postgres no se sabe, la estimación por el censo del perfil con
+   y sin tope, los enlaces archivados cuentan igual, y el 409 que `forzar`
+   salta) y `tests/test_mcp_acciones.py` (la simulación lo enseña).

@@ -161,6 +161,7 @@ def get_progress(
 @router.post("", response_model=JobResponse, status_code=201)
 def create_job(
     payload: JobCreate,
+    forzar_disco: bool = Query(False),
     db: Session = Depends(get_session),
 ):
     from api.routers.clientes import (comprobar_segmentos, resolver_cliente_y_perfil,
@@ -188,6 +189,20 @@ def create_job(
     if not seeds:
         raise HTTPException(
             status_code=422, detail="At least one valid seed URL is required")
+
+    # Que quepa en el disco (#281, decision 225): sin disco, Postgres se para
+    # para todos. Solo se niega si se SABE que no cabe; sin censo con el que
+    # estimarlo, se lanza como siempre.
+    if cliente is not None and not forzar_disco:
+        from shared.almacenamiento import frase_de_disco, prevision_de_disco
+
+        prevision = prevision_de_disco(db, cliente_id=cliente.id,
+                                       profile_id=perfil.id if perfil else None,
+                                       max_urls=config.get("max_urls"))
+        if prevision["veredicto"] == "no_cabe":
+            raise HTTPException(status_code=409, detail={
+                "error": "no_cabe_en_disco", "mensaje": frase_de_disco(prevision),
+                "prevision": prevision})
 
     job = Job(
         id=uuid.uuid4(),
