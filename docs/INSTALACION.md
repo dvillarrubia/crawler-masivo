@@ -124,19 +124,35 @@ la interfaz con sus incidencias.
 | Arrancar (tras reiniciar el ordenador, Docker lo hace solo si está abierto) | `docker compose up -d` |
 | Parar sin perder datos | `docker compose stop` |
 | Ver logs | `docker compose logs -f api` o `docker compose logs -f crawler` |
-| Actualizar a la última versión | `git pull`, `docker compose up -d --build` y `docker compose exec api python scripts/init_db.py` |
+| Actualizar a la última versión | Abajo: son cinco pasos y el orden importa |
 | Abrir la base de datos | `docker compose exec postgres psql -U crawler -d crawler_db` |
 | Re-analizar un censo | `docker compose exec crawler python -m analysis.analyzer <job_id>` |
 | Borrarlo **todo** (también los datos) | `docker compose down -v` |
 
-- **Actualizar mata el rastreo que esté en marcha**: reconstruir recrea el
-  contenedor del worker. Espera a que acabe o cancélalo.
-- Tras actualizar, pasa `init_db.py`: la API crea las tablas que falten al
-  arrancar, pero las columnas nuevas de tablas que ya existen solo las añade
-  ese script (es lo mismo que hace el despliegue de producción).
 - `docker compose down` (sin `-v`) quita los contenedores y conserva los datos.
   Con `-v` se borran la base de datos, los enlaces archivados y las llaves
   subidas, y no hay vuelta atrás.
+
+### Actualizar a la última versión
+
+```bash
+git pull
+docker compose build
+docker compose run --rm --no-deps --entrypoint python crawler scripts/migrate_add_missing_columns.py
+docker compose up -d
+docker compose exec api python scripts/init_db.py
+```
+
+Es lo mismo que hace el despliegue de producción, en el mismo orden:
+
+- **Las columnas nuevas, antes de arrancar el código nuevo.** La API crea al
+  arrancar las tablas que falten, pero no añade columnas a las que ya existen.
+  Si el código nuevo espera una columna que tu base de datos no tiene, la API
+  da error 500. `migrate_add_missing_columns.py` añade todas las que falten
+  (nunca borra ni cambia nada) y `init_db.py` aplica el resto de migraciones.
+  Repetir cualquiera de los dos no hace nada.
+- **Actualizar mata el rastreo que esté en marcha**: `up -d` recrea el
+  contenedor del worker. Espera a que acabe o cancélalo.
 
 ## 8. Integraciones (opcionales)
 
