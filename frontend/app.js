@@ -8422,6 +8422,22 @@ const NOMBRE_BOT_LOG = {
   perplexitybot: 'PerplexityBot', 'perplexity-user': 'Perplexity-User', applebot: 'Applebot',
 };
 
+// Que limito la velocidad del rastreo (#275, decision 227), de `jobs.ritmo`.
+function fraseRitmo(job) {
+  const r = job && job.ritmo;
+  if (!r || !r.techo) return null;
+  const v = (x) => fmt.num(Math.round(x * 100) / 100);
+  let porque;
+  if (r.limita === 'pausa') {
+    porque = 'lo marca la pausa de ' + v(r.pausa_s) + ' s entre peticiones (una por pausa, haya la concurrencia que haya): quitarla o bajarla es lo que lo acelera';
+  } else if (r.limita === 'servidor') {
+    porque = 'lo marca el servidor: ' + fmt.num(r.concurrencia) + ' peticiones a la vez y ' + v(r.latencia_s) + ' s de respuesta media; más rápido solo con más concurrencia, si el sitio la aguanta';
+  } else {
+    porque = 'va por debajo de lo que permiten la pausa y el servidor: lo frena el propio rastreo (el procesado de cada página) o el reparto entre hosts';
+  }
+  return 'Ritmo: ' + v(r.urls_s) + ' URL/s; el techo era ' + v(r.techo) + ' URL/s y ' + porque + '.';
+}
+
 // Googlebot en los logs del cliente (#35, decision 213), de `jobs.logs_resumen`.
 function bloqueLogs(job) {
   const r = job && job.logs_resumen;
