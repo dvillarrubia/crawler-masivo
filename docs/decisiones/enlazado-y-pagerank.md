@@ -1400,3 +1400,47 @@
      enlaces;
    - un valor que la tabla no admite tumba el lote entero y no deja enlaces
      sueltos.
+
+<a id="d226"></a>
+226. **El análisis apunta lo que tarda cada fase, y los conteos de enlaces
+   tienen memoria para su temporal** (#281).
+
+   **Problema.** Druni (60.399 URLs, 37,5 M de enlaces) tardó 43 min en
+   analizarse, y no se sabía en qué. Para un millón de URLs, el análisis va a
+   doler antes que el rastreo, y sin medida no hay por dónde empezar.
+
+   **Decisión.**
+   - `run_all` llama a cada fase con `_fase(nombre, fn)`, que apunta sus
+     segundos aunque reviente. Quedan en `jobs.analisis_fases`
+     (`{"fases": [[nombre, s], ...], "total": s}`, en la ficha del job por la
+     API) y las cinco más caras en el log. Así se mide en los censos reales de
+     producción, no solo en el banco.
+   - `scripts/bench/analisis_por_fases.py` crea en un Postgres de pruebas un
+     censo sintético (por defecto 20.000 URLs; medido con 60.000 y 200 enlaces
+     por página, 11,6 M de enlaces, el tamaño de Druni), lo analiza con el
+     `SEOAnalyzer` real y escribe las fases de más a menos.
+   - **Medido:** el 77 % del análisis son dos fases. Los conteos de enlaces
+     (`compute_link_counts`) son ~90 s y el PageRank ~50 s, de unos 190.
+     Después va `analyze_near_duplicates` (~25 s), y el resto juntas no
+     llegan a 30.
+   - **Lo que se cambia ya:** `compute_link_counts` sube la memoria de su
+     sesión (`_memoria_para_aristas`):
+     - `SET LOCAL work_mem = '64MB'`, que dura hasta el commit;
+     - `temp_buffers` a 256 MB si la conexión aún no usó temporales.
+
+     Con los de serie (8 y 4 MB), la temporal de aristas y sus
+     `count(distinct)` iban a disco. Esta fase pasa de ~90 s a 49, y el
+     análisis entero, de 188 y 203 s a 170 y 170 (master contra la rama,
+     alternados, mismo censo ya leído una vez). Por encima de 256 / 64 MB no
+     mejora. Ningún resultado cambia: solo la memoria del plan.
+   - **Al PageRank no se le sube `work_mem`:** con 64 MB el planificador
+     cambia `pr_edges_tmp` a un merge join y pasa de 15 a 26 s.
+
+   **Lo siguiente, medido y sin hacer:**
+   - El PageRank vuelve a leer `links` entero (`pr_lk_tmp`, 18-24 s) para
+     sacar ancla, posición y sección, cuando las aristas ya están resueltas en
+     `aristas_tmp` en la fase anterior. Unificar las dos lecturas ahorraría
+     una pasada completa por los enlaces del censo.
+   - La primera lectura de los enlaces tras el rastreo cuesta más del doble
+     que las siguientes (66 frente a 16 s en `aristas_tmp`): Postgres marca
+     entonces la visibilidad de cada fila recién escrita.

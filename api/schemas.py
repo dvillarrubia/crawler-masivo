@@ -1036,6 +1036,8 @@ class JobDetailResponse(JobResponse):
     # selecciono y, tras el arrastre, cuanto se copio del censo anterior y de
     # cuando es. NULL = el perfil no tiene el incremental activo.
     incremental: dict[str, Any] | None = None
+    # Segundos por fase del ultimo analisis (decision 226).
+    analisis_fases: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------

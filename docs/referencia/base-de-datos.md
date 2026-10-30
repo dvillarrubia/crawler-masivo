@@ -8,7 +8,7 @@
 
 | Table | Relation | Key Fields |
 |-------|----------|------------|
-| `jobs` | root | id (UUID), name, status (`vaciado`: censo vaciado por la retencion, decision 223, con su fila y su `profile_runs` y sin URLs), seeds (JSON), config (JSON), segmentacion (JSON: reglas, huella, por_regla con `urls` y `sin_saber`, por_defecto, externas, recursos, segundos; decision 125) |
+| `jobs` | root | id (UUID), name, analisis_fases (JSON: segundos por fase del ultimo analisis, decision 226), status (`vaciado`: censo vaciado por la retencion, decision 223, con su fila y su `profile_runs` y sin URLs), seeds (JSON), config (JSON), segmentacion (JSON: reglas, huella, por_regla con `urls` y `sin_saber`, por_defecto, externas, recursos, segundos; decision 125) |
 | `urls` | 1:N from jobs | url, status_code, is_html, pagerank, word_count, indexability_status, html_bytes_servidos (HTML servido descomprimido, antes del render; decision 102), segmento (decision 125: nombre de la regla de `config.segmentos`, la forma de la ruta, `(externa)` o `(recurso)`; NULL = sin segmentar; sin indice propio, va con `job_id`) |
 | `html_meta` | 1:1 with urls | title, meta_description, canonical_href, og_*, twitter_*, head_cortado_por y fuera_del_head (decision 102; NULL en censos anteriores), canonical_distintos (decision 115; NULL en censos anteriores); viewport, html_lang, canonical_crudo, og_image_forma, redireccion_js, charset_* y texto_mal_codificado (decision 108; NULL = no medido); videos (JSON), amphtml y alternate_movil (decisiones 155 y 156; `videos` NULL = no medido) |
 | `headings` | 1:N from urls | tag (h1-h6), position, text |
