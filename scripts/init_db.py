@@ -13,13 +13,7 @@ import shared.semantic_models  # noqa: F401
 
 def main() -> None:
     limitar_espera_de_bloqueos()
-    # Enable pgvector extension before creating tables
-    with engine.connect() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        conn.commit()
-    print("pgvector extension enabled.")
-
-    print("Creating database tables...")
+    print("Creating database tables (and the pgvector extension)...")
     init_db()
 
     # Migrations for existing installations

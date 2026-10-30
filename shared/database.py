@@ -37,6 +37,13 @@ def init_db():
         GscAccount, SemanticAnalysis, SemanticPage,
         SemanticCannibalization, GscJobData,
     )
+    # Las tablas semanticas usan VECTOR: sin la extension, create_all revienta
+    # y en una base vacia la API se reiniciaba en bucle hasta pasar a mano
+    # scripts/init_db.py. Con ella ya creada es un no-op.
+    if engine.dialect.name == "postgresql":
+        from sqlalchemy import text
+        with engine.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     Base.metadata.create_all(bind=engine)
 
 

@@ -1,6 +1,9 @@
 # Environment
 .env
 .env.local
+# Lo propio de cada instalacion: puertos, Caddy del VPS (docs/instalacion/)
+docker-compose.override.yml
+Caddyfile
 
 # Python
 __pycache__/
