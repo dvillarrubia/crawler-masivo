@@ -2823,6 +2823,12 @@
           </div>
         </template>
 
+        <!-- Que limito la velocidad (#275, decision 227): la pausa, el
+             servidor o el propio rastreo. Solo en el resumen. -->
+        <template x-if="detailTab === 'overview' && fraseRitmo(job)">
+          <p class="text-sm text-dim mb-2" data-testid="ritmo-rastreo" x-text="fraseRitmo(job)"></p>
+        </template>
+
         <!-- Rastreo incremental (decision 220): que parte del censo es copia
              del anterior y de cuando, para que el dato no parezca mas fresco
              de lo que es. -->

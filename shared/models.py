@@ -533,6 +533,9 @@ class Job(Base):
     # Segundos por fase del ultimo analisis: {"fases": [[nombre, s], ...],
     # "total": s} (#281, decision 226). Para saber donde se va el tiempo.
     analisis_fases = Column(JSON, nullable=True)
+    # Ritmo del ultimo tramo del rastreo y su techo (pausa o servidor):
+    # `shared/ritmo.resumen` (#275, decision 227).
+    ritmo = Column(JSON, nullable=True)
     # Soft 404 (decision 105): `sondas` las escribe el spider (lo que responde
     # el sitio a una URL que no existe, por host y por plantilla) y `resumen`
     # el analisis. NULL = rastreo anterior a las sondas o con ellas apagadas.

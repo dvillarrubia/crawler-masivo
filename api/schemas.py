@@ -1038,6 +1038,8 @@ class JobDetailResponse(JobResponse):
     incremental: dict[str, Any] | None = None
     # Segundos por fase del ultimo analisis (decision 226).
     analisis_fases: dict[str, Any] | None = None
+    # Ritmo del rastreo y lo que lo limito (decision 227).
+    ritmo: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------

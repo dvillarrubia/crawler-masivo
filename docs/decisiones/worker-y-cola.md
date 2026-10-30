@@ -586,3 +586,36 @@
    frase, sin Postgres no se sabe, la estimación por el censo del perfil con
    y sin tope, los enlaces archivados cuentan igual, y el 409 que `forzar`
    salta) y `tests/test_mcp_acciones.py` (la simulación lo enseña).
+
+<a id="d227"></a>
+227. **La ficha dice qué limitó la velocidad del rastreo** (#275).
+
+   **Problema.** En producción los rastreos grandes van a 0,7 URL/s y no
+   los frena la máquina. Por host, Scrapy no pasa de dos techos: con pausa,
+   una petición por intervalo (`1 / pausa`) haya la concurrencia que haya; y
+   `concurrencia / latencia` del servidor. Sin decirlo en algún sitio, la
+   pregunta «¿por qué va tan lento?» se contesta mirando el código.
+
+   **Decisión.** Al cerrar, el spider (`_persist_ritmo`, best-effort) guarda
+   en `jobs.ritmo` el ritmo de ese tramo y su techo (`shared/ritmo.resumen`,
+   función pura):
+   - URL/s de las páginas **pedidas** en el tramo (no las arrastradas de un
+     incremental ni las de un tramo anterior) y su latencia media
+     (`response_time_ms`);
+   - el techo de la pausa (`1 / DOWNLOAD_DELAY`) y el del servidor
+     (concurrencia por dominio, o el objetivo de AutoThrottle si es menor,
+     entre la latencia), y el menor de los dos;
+   - `limita`: `pausa`, `servidor` o `proceso`. Es `proceso` si va a menos de
+     la mitad del techo: lo frena el propio rastreo (el parseo, la escritura)
+     o el reparto entre hosts, no el sitio. También se guarda si lo alcanzó
+     (80 % o más).
+
+   Con menos de 20 páginas o de un minuto no se dice nada: lo domina el
+   arranque. La ficha lo cuenta en una frase con lo que lo aceleraría (quitar
+   la pausa, o más concurrencia si el sitio la aguanta).
+
+   Comprobado con los casos medidos en #275: Lopesan (0,74 URL/s, 4 a la vez,
+   pausa 0,75 s, 1,4 s de respuesta) sale limitado por la pausa con techo
+   1,33; Penguin (3 a la vez, 3,3 s) por el servidor con techo 0,9.
+
+   Tests: `tests/test_ritmo.py`.

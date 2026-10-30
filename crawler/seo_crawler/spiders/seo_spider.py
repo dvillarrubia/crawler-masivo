@@ -723,6 +723,9 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         from shared.database import SessionLocal
         from shared.models import Job
 
+        # Desde cuando cuenta el ritmo de este tramo (decision 227).
+        self._ritmo_desde = (datetime.now(timezone.utc), time.monotonic())
+
         session = SessionLocal()
         try:
             job = session.query(Job).filter(Job.id == self.job_id).one_or_none()
@@ -1066,6 +1069,7 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         self._persist_lastmod()
         self._persist_sitemaps_leidos()
         self._persist_topes()
+        self._persist_ritmo()
         if self._sondas_activas():
             self._sr_al_cerrar(reason)
         self._wp_al_cerrar(reason)  # decision 161
@@ -1780,6 +1784,50 @@ class SeoSpider(SondaSoft404Mixin, SondaTlsMixin, ParidadMovilMixin, RenderCrudo
         except Exception:  # noqa: BLE001 -- una URL rara no tumba el rastreo
             logger.warning("Tope por carpeta: no se pudo evaluar %s", url, exc_info=True)
             return True
+
+    def _persist_ritmo(self) -> None:
+        """`jobs.ritmo` de este tramo (#275, decision 227): URL/s, latencia
+        media del servidor y el techo que marcaban la pausa y la concurrencia,
+        para que la ficha diga que lo limito. Cuenta las paginas PEDIDAS en
+        este proceso (no las arrastradas de un incremental) y su latencia, de
+        lo guardado. Best-effort: el `try` cubre la funcion entera."""
+        try:
+            desde = getattr(self, "_ritmo_desde", None)
+            if desde is None:
+                return
+            from sqlalchemy import func, or_
+
+            from shared.database import SessionLocal
+            from shared.models import Job, Url
+            from shared.ritmo import resumen
+
+            segundos = time.monotonic() - desde[1]
+            st = self.crawler.settings
+            jid = uuid.UUID(str(self.job_id))
+            sesion = SessionLocal()
+            try:
+                n, latencia_ms = sesion.query(
+                    func.count(Url.id),
+                    func.avg(Url.response_time_ms).filter(Url.response_time_ms > 0),
+                ).filter(Url.job_id == jid, Url.last_crawled_at >= desde[0],
+                         or_(Url.fetch_mode.is_(None), Url.fetch_mode != "carried")).one()
+                ritmo = resumen(
+                    respuestas=int(n or 0), segundos=segundos,
+                    latencia_s=float(latencia_ms) / 1000 if latencia_ms else None,
+                    pausa_s=st.getfloat("DOWNLOAD_DELAY", 0),
+                    concurrencia_dominio=st.getint("CONCURRENT_REQUESTS_PER_DOMAIN", 0) or None,
+                    autothrottle=st.getbool("AUTOTHROTTLE_ENABLED", False),
+                    objetivo_autothrottle=st.getfloat("AUTOTHROTTLE_TARGET_CONCURRENCY", 0) or None)
+                sesion.query(Job).filter(Job.id == jid).update(
+                    {"ritmo": ritmo}, synchronize_session=False)
+                sesion.commit()
+            finally:
+                sesion.close()
+            if ritmo:
+                logger.info("Ritmo: %.2f URL/s; techo %s URL/s, lo marca: %s", ritmo["urls_s"],
+                            ritmo["techo"], ritmo["limita"])
+        except Exception:  # noqa: BLE001 -- medir no tumba el cierre
+            logger.warning("No se pudo guardar el ritmo del rastreo", exc_info=True)
 
     def _persist_topes(self) -> None:
         """Escribe `jobs.topes_carpeta` (decision 172). Con algun tope que
