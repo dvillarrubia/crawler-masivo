@@ -124,8 +124,8 @@ Navegador ──▶ API (FastAPI, sirve también la interfaz y /mcp)
 
 ## Puesta en marcha (local)
 
-Guía completa, con requisitos y problemas frecuentes:
-[`docs/INSTALACION.md`](docs/INSTALACION.md). En corto:
+Guías paso a paso para Mac, Windows y un servidor (VPS):
+[`docs/instalacion/`](docs/instalacion/README.md). En corto:
 
 ```bash
 cp .env.example .env              # pon un API_TOKEN de 24 caracteres o más
@@ -163,7 +163,7 @@ Chromium. Cómo destaparlos:
 
 | Para… | Lee |
 |---|---|
-| Instalarlo en tu ordenador con Docker | [`docs/INSTALACION.md`](docs/INSTALACION.md) |
+| Instalarlo con Docker en Mac, Windows o un servidor | [`docs/instalacion/`](docs/instalacion/README.md) |
 | Reglas que no se pueden romper e índice de todo | [`CLAUDE.md`](CLAUDE.md) |
 | Por qué cada cosa es como es (más de 200 decisiones, por tema) | [`docs/decisiones/README.md`](docs/decisiones/README.md) |
 | API, módulos y checks del analizador | [`docs/referencia/api-y-modulos.md`](docs/referencia/api-y-modulos.md) |

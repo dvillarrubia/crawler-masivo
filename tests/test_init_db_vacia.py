@@ -2,7 +2,7 @@
 
 La API llama a `init_db()` al arrancar. Sin la extension `vector`, el
 create_all de las tablas semanticas revienta y la API se reiniciaba en bucle
-hasta que alguien pasaba `scripts/init_db.py` a mano (docs/INSTALACION.md).
+hasta que alguien pasaba `scripts/init_db.py` a mano (docs/instalacion/).
 Se ejecuta contra Postgres de verdad: crea una base de datos desechable en el
 servidor de PAGERANK_TEST_DATABASE_URL y la borra al acabar.
 """
