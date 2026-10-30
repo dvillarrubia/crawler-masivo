@@ -536,6 +536,8 @@ estructurados y recursos, con el `raw` None como JSON `null`) y
 `test_cancel_espaciado.py` (el cancel de Redis, una lectura por segundo y
 recordado). El coste del pipeline por pagina se mide con
 `scripts/bench/pipeline_por_pagina.py` (Postgres de pruebas, nunca `crawler_db`).
+Lo que tarda cada fase del analisis en un censo sintetico grande (decision 226):
+`scripts/bench/analisis_por_fases.py` (`--urls`, `--enlaces`; Postgres de pruebas).
 Los hijos en un item por tipo (decision 219): el arnes (`Recolector`) y
 `test_parse_atajos.py` despliegan los `HijosItem` con `items.desplegar()`, asi
 que los tests que buscan `LinkItem` siguen igual.

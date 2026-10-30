@@ -150,3 +150,16 @@ def test_lanzar_lo_que_no_cabe_da_409_salvo_forzando(bd, monkeypatch):
         assert len(encolados) == 1
     finally:
         app.dependency_overrides.clear()
+
+
+def test_la_referencia_es_un_censo_y_no_un_canario(bd, monkeypatch):
+    """Un canario de 300 URLs posterior al censo no es la medida del sitio."""
+    from shared.models import Job
+
+    s, cli, perfil, ref = bd
+    monkeypatch.setattr(A, "espacio_en_disco", lambda: {"total": 100 * GB, "libre": 30 * GB})
+    s.add(Job(id=uuid.uuid4(), name="CANARY - x", status="completed", seeds=["https://x.com/"],
+              config={}, cliente_id=cli.id, profile_id=perfil.id, total_urls_crawled=3))
+    s.commit()
+    p = A.prevision_de_disco(s, cliente_id=cli.id, profile_id=perfil.id)
+    assert p["referencia"]["job_id"] == str(ref.id) and p["urls_previstas"] == 50

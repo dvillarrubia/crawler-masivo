@@ -354,6 +354,8 @@ class SEOAnalyzer:
         self.session = session
         self.job_id = job_id
         self._pending_issues: list[dict[str, Any]] = []
+        # (fase, segundos) de `run_all`, para `jobs.analisis_fases` (decision 226).
+        self._fases: list[tuple[str, float]] = []
         # Sondas de respuesta (decisiones 123 y 124): lo ya avisado como enlace
         # externo o dominio muerto (para no repetirlo como recurso) y el resumen
         # que va a `jobs.sondas_resumen`.
@@ -424,79 +426,92 @@ class SEOAnalyzer:
                 f"python scripts/archivar_enlaces.py --restaurar {self.job_id}"
             )
 
-        self.actualizar_estadisticas()
-        self.clear_existing_issues()
+        self._fase("actualizar_estadisticas", self.actualizar_estadisticas)
+        self._fase("clear_existing_issues", self.clear_existing_issues)
 
-        self.analyze_status_codes()
+        self._fase("analyze_status_codes", self.analyze_status_codes)
         # robots.txt de cada host (decisiones 112 y 113): antes de la
         # indexabilidad, que lo usa para saber que puede pedir Googlebot.
-        self.analyze_robots_txt()
+        self._fase("analyze_robots_txt", self.analyze_robots_txt)
         # La indexabilidad va ANTES que los titulos, las descripciones y los
         # duplicados: los tres agrupan solo paginas indexables y necesitan
         # `Url.indexable` escrito. Estaba despues, asi que la columna era NULL y
         # el filtro no habria hecho nada.
-        self.analyze_indexability()
-        self.analyze_titles()
-        self.analyze_descriptions()
-        self.analyze_headings()
-        self.analyze_saltos_de_encabezado()  # decision 153
-        self.analyze_canonicals()
-        self.analyze_hreflang()
-        self.analyze_structured_data()
-        self.analyze_html_ignorado()
-        avisos_de_html.avisar_declaraciones_html(self)  # decision 108
-        avisos_de_medios.avisar(self)  # decisiones 154, 155 y 156
-        avisos_de_nosnippet.avisar(self)  # decision 170
-        self.analyze_robots_syntax()
-        avisos_de_nofollow.avisar_paginas_nofollow(self)  # decision 183
-        self.analyze_duplicates()
-        self.analyze_near_duplicates()
-        self.analyze_redirect_chains()
-        self.analyze_images()
-        self.analyze_security()
-        avisos_de_servidor.avisar(self)  # decisiones 109 y 110
-        self.analyze_content()
-        self.analyze_soft_404()
-        self.analyze_paridad_movil()
-        avisos_de_render.avisar(self)  # decision 140
-        avisos_de_accesibilidad.avisar(self)  # decision 174
-        self.analyze_url_issues()
+        self._fase("analyze_indexability", self.analyze_indexability)
+        self._fase("analyze_titles", self.analyze_titles)
+        self._fase("analyze_descriptions", self.analyze_descriptions)
+        self._fase("analyze_headings", self.analyze_headings)
+        self._fase("analyze_saltos_de_encabezado", self.analyze_saltos_de_encabezado)  # decision 153
+        self._fase("analyze_canonicals", self.analyze_canonicals)
+        self._fase("analyze_hreflang", self.analyze_hreflang)
+        self._fase("analyze_structured_data", self.analyze_structured_data)
+        self._fase("analyze_html_ignorado", self.analyze_html_ignorado)
+        self._fase("avisos_de_html.avisar_declaraciones_html", avisos_de_html.avisar_declaraciones_html, self)  # decision 108
+        self._fase("avisos_de_medios.avisar", avisos_de_medios.avisar, self)  # decisiones 154, 155 y 156
+        self._fase("avisos_de_nosnippet.avisar", avisos_de_nosnippet.avisar, self)  # decision 170
+        self._fase("analyze_robots_syntax", self.analyze_robots_syntax)
+        self._fase("avisos_de_nofollow.avisar_paginas_nofollow", avisos_de_nofollow.avisar_paginas_nofollow, self)  # decision 183
+        self._fase("analyze_duplicates", self.analyze_duplicates)
+        self._fase("analyze_near_duplicates", self.analyze_near_duplicates)
+        self._fase("analyze_redirect_chains", self.analyze_redirect_chains)
+        self._fase("analyze_images", self.analyze_images)
+        self._fase("analyze_security", self.analyze_security)
+        self._fase("avisos_de_servidor.avisar", avisos_de_servidor.avisar, self)  # decisiones 109 y 110
+        self._fase("analyze_content", self.analyze_content)
+        self._fase("analyze_soft_404", self.analyze_soft_404)
+        self._fase("analyze_paridad_movil", self.analyze_paridad_movil)
+        self._fase("avisos_de_render.avisar", avisos_de_render.avisar, self)  # decision 140
+        self._fase("avisos_de_accesibilidad.avisar", avisos_de_accesibilidad.avisar, self)  # decision 174
+        self._fase("analyze_url_issues", self.analyze_url_issues)
         # Despues de la indexabilidad (necesita `Url.noindex`) y antes de los
         # conteos: deja marcadas las paginas que la lectura de `links` de
         # `compute_link_counts` tiene que distinguir (decision 122).
-        avisos_de_paginacion.analizar_paginacion(self)
-        self.compute_link_counts()
-        self.compute_pagerank()
-        self.analyze_links()
-        avisos_de_enlaces.avisar_enlaces_no_rastreables(self)  # decision 106
-        avisos_de_sondas.avisar_recursos_rotos(self)  # decision 124
-        self.analyze_sitemap()
-        avisos_de_sitemaps.avisar(self)  # decision 126
+        self._fase("avisos_de_paginacion.analizar_paginacion", avisos_de_paginacion.analizar_paginacion, self)
+        self._fase("compute_link_counts", self.compute_link_counts)
+        self._fase("compute_pagerank", self.compute_pagerank)
+        self._fase("analyze_links", self.analyze_links)
+        self._fase("avisos_de_enlaces.avisar_enlaces_no_rastreables", avisos_de_enlaces.avisar_enlaces_no_rastreables, self)  # decision 106
+        self._fase("avisos_de_sondas.avisar_recursos_rotos", avisos_de_sondas.avisar_recursos_rotos, self)  # decision 124
+        self._fase("analyze_sitemap", self.analyze_sitemap)
+        self._fase("avisos_de_sitemaps.avisar", avisos_de_sitemaps.avisar, self)  # decision 126
         # WordPress por su REST API (decision 161): despues de la
         # indexabilidad, los enlaces y el sitemap, que es con lo que se cruza.
-        avisos_de_wordpress.avisar_sin_tumbar(self)
+        self._fase("avisos_de_wordpress.avisar_sin_tumbar", avisos_de_wordpress.avisar_sin_tumbar, self)
         # Search Console (decision 142): despues de la indexabilidad y de los
         # entrantes, que es con lo que se cruza.
-        avisos_de_gsc.avisar(self)
-        oportunidades_gsc.avisar_sin_tumbar(self)  # decision 157
+        self._fase("avisos_de_gsc.avisar", avisos_de_gsc.avisar, self)
+        self._fase("oportunidades_gsc.avisar_sin_tumbar", oportunidades_gsc.avisar_sin_tumbar, self)  # decision 157
         # Backlinks del cliente (decision 212): despues de Search Console, que
         # ya cambio las huerfanas con trafico por su propio aviso.
-        avisos_de_backlinks.avisar_sin_tumbar(self)
+        self._fase("avisos_de_backlinks.avisar_sin_tumbar", avisos_de_backlinks.avisar_sin_tumbar, self)
         # Logs del servidor (decision 213): despues del PageRank, que es con
         # lo que se elige que paginas importantes no visita Googlebot.
-        avisos_de_logs.avisar_sin_tumbar(self)
+        self._fase("avisos_de_logs.avisar_sin_tumbar", avisos_de_logs.avisar_sin_tumbar, self)
         # Trampas de rastreo (decision 214): sobre todas las URLs del censo.
-        avisos_de_trampas.avisar_sin_tumbar(self)
+        self._fase("avisos_de_trampas.avisar_sin_tumbar", avisos_de_trampas.avisar_sin_tumbar, self)
         # Al final: sus condiciones pueden leer lo que acaba de escribir el
         # analisis (indexable, click_depth, in_sitemap...). No emite incidencias.
-        self.segmentar()
+        self._fase("segmentar", self.segmentar)
 
         # Flush any remaining buffered issues.
-        self._flush_issues()
+        self._fase("_flush_issues", self._flush_issues)
         self._sellar_version()
         self.session.commit()
 
-        logger.info("SEO analysis completed for job %s", self.job_id)
+        caras = sorted(self._fases, key=lambda f: -f[1])[:5]
+        logger.info("SEO analysis completed for job %s en %.0f s; lo mas caro: %s", self.job_id,
+                    sum(t for _, t in self._fases), ", ".join(f"{n} {t:.1f} s" for n, t in caras))
+
+    def _fase(self, nombre: str, fn, *args):
+        """Llama a una fase del analisis y apunta lo que tarda (#281, decision
+        226): se guarda en `jobs.analisis_fases` para saber donde se va el
+        tiempo en los censos grandes de verdad. Si la fase revienta, se apunta
+        igual y la excepcion sigue."""
+        inicio = time.perf_counter()
+        try:
+            return fn(*args)
+        finally:
+            self._fases.append((nombre, round(time.perf_counter() - inicio, 2)))
 
     def segmentar(self) -> dict:
         """Materializa `urls.segmento` con las reglas de `config.segmentos`
@@ -529,6 +544,9 @@ class SEOAnalyzer:
                 analisis_version=VERSION,
                 # NULL si el censo no tiene sondas: no un resumen de ceros.
                 sondas_resumen=self.sondas_resumen or None,
+                # Segundos por fase, en el orden en que corren (decision 226).
+                analisis_fases={"fases": [[n, t] for n, t in self._fases],
+                                "total": round(sum(t for _, t in self._fases), 1)},
             )
         )
 
@@ -4142,6 +4160,31 @@ class SEOAnalyzer:
 
     # -- Link Counts --------------------------------------------------------
 
+    def _memoria_para_aristas(self) -> None:
+        """Memoria de la sesion para la temporal de aristas (#281, decision 226).
+
+        Con los valores de serie (`temp_buffers` 8 MB, `work_mem` 4 MB), la
+        temporal de un censo de 11,6 M de enlaces y sus agregados con
+        `count(distinct)` iban a disco: medido con
+        `scripts/bench/analisis_por_fases.py` (60.000 URLs), esta fase pasaba
+        de ~90 s a 49 con 256 MB y 64 MB, sin mejorar mas por encima.
+
+        `work_mem` con `SET LOCAL`: dura hasta el commit, y esta fase no hace
+        ninguno. Al PageRank NO se le sube: con 64 MB el planificador cambia a
+        un merge join y su `pr_edges_tmp` pasa de 15 a 26 s. `temp_buffers` es
+        un tope por sesion y solo se puede cambiar antes de su primera
+        temporal: si la conexion ya uso alguna, se sigue con el que tenga.
+        Nada de esto cambia un resultado; si falla, se sigue sin ello.
+        """
+        if not self.session.get_bind().dialect.name.startswith("postgres"):
+            return
+        self.session.execute(text("SET LOCAL work_mem = '64MB'"))
+        try:
+            with self.session.begin_nested():
+                self.session.execute(text("SET temp_buffers = '256MB'"))
+        except Exception:
+            logger.debug("temp_buffers no se pudo subir: la conexion ya uso temporales")
+
     def compute_link_counts(self) -> None:
         """Rellena inlinks, unique_inlinks, outlinks y external_outlinks.
 
@@ -4157,6 +4200,7 @@ class SEOAnalyzer:
         cuatro conteos salen de ahi, que es pequena y cabe en memoria.
         """
         logger.debug("Computing link counts ...")
+        self._memoria_para_aristas()
 
         # A cero antes de agregar. Los UPDATE de abajo solo tocan filas con
         # coincidencia, asi que una URL que perdio todos sus inlinks entre dos

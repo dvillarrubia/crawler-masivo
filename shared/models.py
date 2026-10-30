@@ -530,6 +530,9 @@ class Job(Base):
     # internos, nofollow internos, fichero, bytes y fecha. NULL = los enlaces
     # estan en `links`. Con valor, `links` no tiene filas de este job.
     enlaces_archivados = Column(JSON, nullable=True)
+    # Segundos por fase del ultimo analisis: {"fases": [[nombre, s], ...],
+    # "total": s} (#281, decision 226). Para saber donde se va el tiempo.
+    analisis_fases = Column(JSON, nullable=True)
     # Soft 404 (decision 105): `sondas` las escribe el spider (lo que responde
     # el sitio a una URL que no existe, por host y por plantilla) y `resumen`
     # el analisis. NULL = rastreo anterior a las sondas o con ellas apagadas.

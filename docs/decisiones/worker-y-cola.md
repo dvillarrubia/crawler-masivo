@@ -558,7 +558,8 @@
    **Decisión.** `shared/almacenamiento.prevision_de_disco` estima lo que
    ocupará el rastreo mientras rastrea:
    - **Por URL**, lo que ocupa el último censo completado del mismo perfil
-     (o, sin él, del cliente), con `estimar_bytes` y los bytes por fila de
+     (o, sin él, del cliente), y censo de verdad: un canario de 300 URLs
+     daría bien el peso por URL pero no cuántas tiene el sitio, con `estimar_bytes` y los bytes por fila de
      cada tabla. Sus enlaces cuentan aunque estén archivados en Parquet
      (`enlaces_archivados["filas"]`), porque el rastreo los volverá a
      escribir en `links`.
