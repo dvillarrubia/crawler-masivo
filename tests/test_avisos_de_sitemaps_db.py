@@ -215,7 +215,7 @@ def test_corre_dentro_del_analisis_entero():
     import inspect
 
     fuente = inspect.getsource(SEOAnalyzer.run_all)
-    assert "avisos_de_sitemaps.avisar(self)" in fuente
+    assert "avisos_de_sitemaps.avisar, self)" in fuente  # por `_fase` (decision 226)
     # Y ejecutandolo de verdad, que la linea de arriba no basta (decision 74).
     s, j = _montar([_fichero(A, declaradas=60_000)])
     _url(s, j, "/")

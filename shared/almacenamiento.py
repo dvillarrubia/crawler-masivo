@@ -403,18 +403,26 @@ def espacio_en_disco() -> dict[str, int] | None:
 
 def _censo_de_referencia(db, cliente_id, profile_id):
     """El ultimo censo completado con URLs del mismo perfil o, sin el, del
-    mismo cliente: el mismo sitio, con su numero de enlaces por pagina."""
+    mismo cliente: el mismo sitio, con su numero de enlaces por pagina.
+
+    Un censo de verdad, no un canario ni una prueba: un canario de 300 URLs
+    da bien lo que pesa cada URL pero no cuantas tiene el sitio, y sin
+    `max_urls` es esa cifra la que se usa. Solo si el sitio no tiene ningun
+    censo se acepta lo que haya.
+    """
+    from shared.clientes import tipo_de_rastreo
     from shared.models import Job
 
     for filtro in ((Job.profile_id == profile_id) if profile_id else None,
                    (Job.cliente_id == cliente_id) if cliente_id else None):
         if filtro is None:
             continue
-        job = (db.query(Job).filter(filtro, Job.status == "completed",
-                                    Job.total_urls_crawled > 0)
-               .order_by(Job.created_at.desc()).first())
-        if job is not None:
-            return job
+        recientes = (db.query(Job).filter(filtro, Job.status == "completed",
+                                          Job.total_urls_crawled > 0)
+                     .order_by(Job.created_at.desc()).limit(20).all())
+        censo = next((j for j in recientes if tipo_de_rastreo(j.name, j.tipo) == "censo"), None)
+        if censo is not None or recientes:
+            return censo or recientes[0]
     return None
 
 
