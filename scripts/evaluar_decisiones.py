@@ -11,10 +11,12 @@ Cinco ordenes, en el orden en que se usan:
               lo pasa. Sin `OPENROUTER_API_KEY` y `DECISIONS_ENABLED=1` dice que
               la capa esta desactivada y no hace nada (decisiones 84 y 85: nada
               llama a un modelo solo).
-    evaluar   <juego.jsonl> <respuestas.jsonl> [--objetivo 0.95]
+    evaluar   <juego.jsonl> <respuestas.jsonl> [--objetivo 0.95] [--informe [ruta]]
               Acierto, precision y recall por clase, ECE, curva de cobertura y
               el umbral que se pondria en el catalogo. Cuenta la etiqueta
               HUMANA; las filas sin etiquetar no cuentan y se dice cuantas son.
+              Con --informe lo guarda ademas en Markdown, por defecto junto al
+              juego: `INFORME_v<version>.md` (#8).
     repetir   <respuestas_1.jsonl> <respuestas_2.jsonl> [--acuerdo]
               Repetibilidad (la misma pregunta dos veces) o, con --acuerdo,
               acuerdo y kappa entre dos jueces o dos redacciones.
@@ -479,6 +481,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("juego")
     c.add_argument("respuestas")
     c.add_argument("--objetivo", type=float, default=None)
+    c.add_argument("--informe", nargs="?", const="", default=None)
     d = sub.add_parser("repetir")
     d.add_argument("primera")
     d.add_argument("segunda")
@@ -543,6 +546,19 @@ def main(argv: list[str] | None = None) -> int:
 
         informe = evaluar(_leer(args.juego), _leer(args.respuestas), args.objetivo or PRECISION_OBJETIVO)
         print(json.dumps(informe, ensure_ascii=False, indent=1))
+        if args.informe is not None:
+            from datetime import date
+
+            from shared.evaluacion_decisiones import informe_markdown
+
+            sufijo = "_precision" if "juego_precision" in informe else ""
+            ruta = Path(args.informe or Path(args.juego).parent
+                        / f"INFORME_v{informe['version']}{sufijo}.md")
+            ruta.parent.mkdir(parents=True, exist_ok=True)
+            ruta.write_text(informe_markdown(informe, juego=Path(args.juego).name,
+                                             respuestas=Path(args.respuestas).name,
+                                             fecha=date.today().isoformat()), encoding="utf-8")
+            print(f"Informe en {ruta}")
     elif args.orden == "reetiquetar":
         from shared.evaluacion_decisiones import para_reetiquetar
 

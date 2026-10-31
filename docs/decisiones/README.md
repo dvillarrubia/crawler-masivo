@@ -19,7 +19,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165, 188, 191, 192, 197, 230 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151, 189, 194, 196, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
-| [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 177, 178, 179, 180, 181, 182, 184, 185, 211 |
+| [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 177, 178, 179, 180, 181, 182, 184, 185, 211, 231 |
 | [`extraccion-a-medida.md`](extraccion-a-medida.md) | Extracción y búsqueda a medida por job (#34), su edición y prueba en vivo, y segmentos de negocio | 104, 125, 166 |
 
 ## Por numero
@@ -258,6 +258,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 228 | `redireccion_a_portada`: una página interna que redirige (también por meta refresh o en cadena) a la portada del sitio o de un idioma, que Google trata como soft 404; no cuentan los alias de la portada, otra portada ni la normalización, y diez o más al mismo destino son una fila en él | [`indexabilidad`](indexabilidad.md#d228) |
 | 229 | `portada_sin_entidad` (`info`, una por host): la portada no declara `Organization` ni `Person`, con todos sus subtipos sacados de la jerarquía de schema.org (190: `Hotel`, `Dentist`…) y a cualquier profundidad del bloque | [`datos-estructurados`](datos-estructurados.md#d229) |
 | 230 | El title, el H1 y la description se comparan sin espacios de más y sin lo que case con los patrones del cliente (`ignorar_en_textos` en sus reglas, hasta 20 regex): el año o un contador ya no hacen saltar `cambia_el_titulo` | [`comparacion-y-alertas`](comparacion-y-alertas.md#d230) |
+| 231 | El umbral de una pregunta a Jev exige los ejemplos con los que el objetivo es alcanzable (35 para el 90 %): la franja de 30-34, que ni acertando todo llega, hundía cualquier umbral con confianzas variadas. `evaluar --informe` guarda el informe; guía de estilo en `shared/preguntas/README.md` | [`llm-y-enriquecido`](llm-y-enriquecido.md#d231) |
 
 ## Anadir una decision
 

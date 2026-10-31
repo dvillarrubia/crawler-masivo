@@ -318,3 +318,64 @@ def test_las_fugas_se_buscan_por_huella_de_cada_fragmento_del_title(tmp_path):
     lineas = salida.read_text(encoding="utf-8").splitlines()
     assert lineas[0].startswith("#") and set(x for x in lineas if not x.startswith("#")) == h
 
+
+
+# -- El informe guardado (#8) ---------------------------------------------------
+
+def test_evaluar_con_informe_lo_guarda_junto_al_juego(tmp_path):
+    from shared.preguntas import obtener
+
+    S = _script()
+    ruta, juego = _juego(tmp_path)
+    p = obtener("es_pagina_legal")
+    respuestas = [{"id": f["id"], "pregunta": p.nombre, "version": p.version,
+                   "respuesta": "true" if i < 4 else "false", "confianza": 0.5 + i / 20,
+                   "tokens": 100, "coste": 0.0001} for i, f in enumerate(juego)]
+    rr = tmp_path / "respuestas.jsonl"
+    rr.write_text("\n".join(json.dumps(r) for r in respuestas))
+    assert S.main(["evaluar", str(ruta), str(rr), "--informe"]) == 0
+    texto = (tmp_path / f"INFORME_v{p.version}.md").read_text(encoding="utf-8")
+    assert texto.startswith(f"# es_pagina_legal v{p.version}")
+    for trozo in ("## Acierto y clases", "Matriz de confusión", "## Calibración",
+                  "## Curva de cobertura", "**Sin umbral**", "## Por respuesta", "## Coste",
+                  "`juego.jsonl`", "0.1000 USD por mil"):
+        assert trozo in texto, trozo
+    # Los numeros son los de `evaluar`, no otros
+    informe = S.evaluar(juego, respuestas, objetivo=E.PRECISION_OBJETIVO)
+    assert f"Acierto: **{100 * informe['acierto']:.1f} %**" in texto
+
+
+def test_el_informe_marca_el_umbral_y_resume_una_curva_larga():
+    curva = [{"umbral": round(0.5 + i / 400, 4), "cubiertas": 200 - i, "cobertura": 0.5,
+              "precision": 0.95, "precision_minima": 0.92} for i in range(150)]
+    umbral = curva[77]["umbral"]
+    texto = E.informe_markdown({"pregunta": "x", "version": 1, "objetivo": 0.9, "umbral": umbral,
+                                "curva": curva, "clases": {}, "ejemplos": 200, "evaluables": 200})
+    filas = [linea for linea in texto.splitlines() if linea.startswith("| 0.")]
+    assert len(filas) <= E.MAX_FILAS_CURVA + 1
+    assert any(linea.startswith(f"| {umbral} ←") for linea in filas)
+
+
+def test_el_informe_de_un_juego_de_precision_no_inventa_recall_ni_coste():
+    texto = E.informe_markdown({
+        "pregunta": "x", "version": 2, "juego_precision": {"respuesta": "si"}, "respuesta": "si",
+        "positivos": 40, "evaluables": 40, "aciertos": 38, "precision": 0.95,
+        "precision_minima": 0.83, "umbral_propio": None, "curva": [], "objetivo": 0.9,
+        "recall_no_estimable": "Solo el control lo estima.", "control": {"ejemplos": 100},
+        "avisos": ["la cota de la precision de «si» es 0.83"]})
+    assert "juego de precisión" in texto and "Recall: no se estima" in texto
+    assert "## Coste" not in texto and "## Avisos" in texto
+
+
+def test_un_modelo_perfecto_con_confianzas_distintas_tiene_umbral():
+    """Decision 231: la cola de 30-34 cubiertas no puede llegar al 0,9 ni
+    acertandolo todo (30 de 30 da 0,886), y hundia el umbral de cualquier
+    pregunta con confianzas variadas."""
+    assert E.cubiertas_alcanzables(0.9) == 35 and E.cubiertas_alcanzables(0.95) == 73
+    con_conf = [(0.5 + i / 400, True) for i in range(200)]
+    assert E.elegir_umbral(E.curva_cobertura(con_conf, 200), objetivo=0.9) == 0.5
+    # Un fallo en la cola alta sigue impidiendo el umbral si la hunde
+    con_conf = [(0.5 + i / 400, True) for i in range(160)] + [(0.95 + i / 1000, i % 4 != 0)
+                                                              for i in range(40)]
+    curva = E.curva_cobertura(con_conf, 200)
+    assert E.elegir_umbral(curva, objetivo=0.9) is None

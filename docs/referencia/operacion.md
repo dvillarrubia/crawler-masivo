@@ -113,8 +113,11 @@ python scripts/evaluar_decisiones.py extraer <pregunta> --job <id> --job <id> --
 #   etiquetar a ciegas (campo `etiqueta` y `etiquetado_por`)
 python scripts/evaluar_decisiones.py responder tests/decisiones/<pregunta>/v<N>.jsonl --salida r.jsonl             # estima
 python scripts/evaluar_decisiones.py responder tests/decisiones/<pregunta>/v<N>.jsonl --salida r.jsonl --confirmar # gasta
-python scripts/evaluar_decisiones.py evaluar tests/decisiones/<pregunta>/v<N>.jsonl r.jsonl
+python scripts/evaluar_decisiones.py evaluar tests/decisiones/<pregunta>/v<N>.jsonl r.jsonl --informe
 ```
+
+`--informe` guarda además `INFORME_v<N>.md` junto al juego (decisión 231). Cómo
+redactar la pregunta: `shared/preguntas/README.md`.
 
 **Juego de precisión de una respuesta rara** (179): cuando la respuesta que
 importa sale pocas veces (9 «sí» de 200) y `avisos` dice que su cota no llega.
