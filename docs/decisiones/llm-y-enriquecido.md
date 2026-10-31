@@ -1786,8 +1786,14 @@
      lo que calcula `metricas`: ningún número sale del informe.
    - La guía de estilo del catálogo, en `shared/preguntas/README.md` (#9).
 
-   **Consecuencia.** Las medidas de 169-185 que acabaron «sin umbral» hay que
-   repetirlas con `evaluar`, sobre los mismos juegos y respuestas (no llama a
-   Jev): alguna puede tenerlo.
+   **Medido el 31-oct-2026** sobre los juegos etiquetados de producción
+   (`/data/archivo/jev/`, con `evaluar` dentro del worker, sin llamar a Jev ni
+   escribir nada), regla vieja contra nueva. De las 10 evaluaciones con
+   etiquetas solo cambia una: `title_es_generico` v2 en los censos nuevos pasa
+   de sin umbral a 0,52, sostenido por los «false»; los «true» siguen sin
+   umbral propio. Las confianzas reales de Jev se repiten lo bastante (0,51,
+   0,69, 0,81…) como para que la curva casi siempre saltara la franja de 30-34.
+   El arreglo es correcto, pero **no desbloquea ninguna pregunta**: lo que
+   falta sigue siendo etiquetar más positivos (#8). El catálogo no cambia.
 
    Tests en `tests/test_evaluacion_decisiones.py`.
