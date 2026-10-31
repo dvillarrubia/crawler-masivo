@@ -12,11 +12,11 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76, 193, 209, 220, 223, 224, 225, 227 |
 | [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga, robots.txt y sitemaps en la cola | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140, 172, 173, 174, 186, 216, 218, 219 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124, 153, 154, 155, 187, 198, 215 |
-| [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137, 156, 160, 164, 167, 170, 171 |
+| [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137, 156, 160, 164, 167, 170, 171, 228 |
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152, 183, 195, 212, 217, 226 |
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157, 161, 168, 190, 210, 213, 214 |
-| [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
-| [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165, 188, 191, 192, 197 |
+| [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146, 229 |
+| [`comparacion-y-alertas.md`](comparacion-y-alertas.md) | Comparación de censos, alertas y avisos | 67, 68, 70, 71, 77, 78, 86, 88, 89, 91, 93, 127, 128, 130, 131, 133, 135, 139, 149, 158, 165, 188, 191, 192, 197, 230 |
 | [`api-clientes-y-frontend.md`](api-clientes-y-frontend.md) | API, clientes, CSV, backup y frontend | 5, 33, 65, 83, 87, 96, 134, 138, 141, 143, 145, 148, 151, 189, 194, 196, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208 |
 | [`calidad-y-versionado.md`](calidad-y-versionado.md) | Herramientas de control, tests y versionado de censos | 55, 62, 66, 69, 72, 74, 82 |
 | [`llm-y-enriquecido.md`](llm-y-enriquecido.md) | Capa de decisiones (LLM) y análisis enriquecido | 84, 85, 159, 162, 163, 169, 175, 176, 177, 178, 179, 180, 181, 182, 184, 185, 211 |
@@ -255,6 +255,9 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 225 | Antes de lanzar se mira si el rastreo cabe en el disco: por URL lo que ocupa el último censo del perfil (enlaces archivados incluidos), por el `max_urls`, frente a lo libre menos una reserva; `POST /api/jobs` da 409 si no cabe salvo `forzar_disco`, el MCP lo enseña al simular y los programados no se bloquean | [`worker-y-cola`](worker-y-cola.md#d225) |
 | 226 | El análisis apunta los segundos de cada fase en `jobs.analisis_fases`; banco `scripts/bench/analisis_por_fases.py` (60.000 URLs, 11,6 M enlaces: conteos de enlaces y PageRank son el 77 %); los conteos de enlaces con `work_mem` 64 MB y `temp_buffers` 256 MB: de ~90 a 49 s, el análisis un 13 % menos | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d226) |
 | 227 | La ficha dice qué limitó la velocidad: `jobs.ritmo` con URL/s, latencia, el techo de la pausa (`1/pausa`) y el del servidor (`concurrencia/latencia`), y si limitó la pausa, el servidor o el propio proceso | [`worker-y-cola`](worker-y-cola.md#d227) |
+| 228 | `redireccion_a_portada`: una página interna que redirige (también por meta refresh o en cadena) a la portada del sitio o de un idioma, que Google trata como soft 404; no cuentan los alias de la portada, otra portada ni la normalización, y diez o más al mismo destino son una fila en él | [`indexabilidad`](indexabilidad.md#d228) |
+| 229 | `portada_sin_entidad` (`info`, una por host): la portada no declara `Organization` ni `Person`, con todos sus subtipos sacados de la jerarquía de schema.org (190: `Hotel`, `Dentist`…) y a cualquier profundidad del bloque | [`datos-estructurados`](datos-estructurados.md#d229) |
+| 230 | El title, el H1 y la description se comparan sin espacios de más y sin lo que case con los patrones del cliente (`ignorar_en_textos` en sus reglas, hasta 20 regex): el año o un contador ya no hacen saltar `cambia_el_titulo` | [`comparacion-y-alertas`](comparacion-y-alertas.md#d230) |
 
 ## Anadir una decision
 

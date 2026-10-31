@@ -40,17 +40,17 @@ from typing import Mapping, Sequence
 import numpy as np
 
 # Peso por posicion del enlace. La tabla cubre TODO el vocabulario que emite
-# extract_links. Antes solo declaraba cuatro valores y `nav` --el 59,9% de
-# los enlaces de un sitio real-- caia en un 0.5 por defecto, mas que header y
-# footer.
+# extract_links, y SOLO ese (lo comprueba un test). Antes solo declaraba
+# cuatro valores y `nav` --el 59,9% de los enlaces de un sitio real-- caia en
+# un 0.5 por defecto, mas que header y footer. `aside` y `form` estuvieron
+# aqui sin que el extractor los emitiera nunca (un `<aside>` es `sidebar`):
+# pesos que no aplicaban a ningun enlace (#13).
 PESO_POSICION: dict[str | None, float] = {
     "content": 1.0,
     "sidebar": 0.4,
-    "aside": 0.35,
     "nav": 0.25,
     "header": 0.25,
     "footer": 0.15,
-    "form": 0.1,
     None: 0.3,
 }
 

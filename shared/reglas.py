@@ -107,7 +107,31 @@ def de_serie() -> dict[str, Any]:
     return {"comparacion": _comparacion_de_serie(),
             "propias": copy.deepcopy(PROPIAS_DE_SERIE),
             "silenciado_hasta": None,
-            "resumen_semanal": dict(RESUMEN_DE_SERIE)}
+            "resumen_semanal": dict(RESUMEN_DE_SERIE),
+            "ignorar_en_textos": []}
+
+
+# Patrones que se quitan del title y la description antes de compararlos
+# (#36, decision 230): el año, un contador de productos, un token de sesion.
+# Un tope: son regex del usuario sobre cada pagina comun de dos censos.
+MAX_PATRONES = 20
+MAX_LARGO_PATRON = 200
+
+
+def validar_patrones(raw) -> list[str]:
+    if not isinstance(raw, list) or len(raw) > MAX_PATRONES:
+        raise ReglaInvalida(f"ignorar_en_textos: una lista de hasta {MAX_PATRONES} patrones")
+    patrones = []
+    for p in raw:
+        if not isinstance(p, str) or not p.strip() or len(p) > MAX_LARGO_PATRON:
+            raise ReglaInvalida(
+                f"ignorar_en_textos: cada patrón es un texto de 1 a {MAX_LARGO_PATRON} caracteres")
+        try:
+            re.compile(p)
+        except re.error as exc:
+            raise ReglaInvalida(f"ignorar_en_textos: «{p}» no es una expresión regular válida ({exc})") from exc
+        patrones.append(p)
+    return patrones
 
 
 # --- Validar y fusionar -------------------------------------------------------
@@ -178,7 +202,8 @@ def validar(raw: dict[str, Any] | None) -> dict[str, Any] | None:
         return None
     if not isinstance(raw, dict):
         raise ReglaInvalida("las reglas son un objeto")
-    desconocidas = set(raw) - {"comparacion", "propias", "silenciado_hasta", "resumen_semanal"}
+    desconocidas = set(raw) - {"comparacion", "propias", "silenciado_hasta", "resumen_semanal",
+                               "ignorar_en_textos"}
     if desconocidas:
         raise ReglaInvalida(f"claves desconocidas: {sorted(desconocidas)}")
     salida: dict[str, Any] = {}
@@ -232,6 +257,8 @@ def validar(raw: dict[str, Any] | None) -> dict[str, Any] | None:
         if "hora" in rs:
             r2["hora"] = int(_numero(rs["hora"], "resumen_semanal.hora", 0, 23))
         salida["resumen_semanal"] = r2
+    if raw.get("ignorar_en_textos") is not None:
+        salida["ignorar_en_textos"] = validar_patrones(raw["ignorar_en_textos"])
     return salida
 
 
@@ -269,6 +296,11 @@ def efectivas(raw: dict[str, Any] | None) -> dict[str, Any]:
             e["resumen_semanal"].update(
                 validar({"resumen_semanal": raw["resumen_semanal"]})["resumen_semanal"])
         except (ReglaInvalida, TypeError, ValueError):
+            pass
+    if raw.get("ignorar_en_textos") is not None:
+        try:
+            e["ignorar_en_textos"] = validar_patrones(raw["ignorar_en_textos"])
+        except ReglaInvalida:
             pass
     return e
 

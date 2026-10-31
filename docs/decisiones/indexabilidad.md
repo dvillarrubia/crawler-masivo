@@ -1243,3 +1243,36 @@
    con varios `User-agent` y repetidos, `Allow` frente a `Disallow` por longitud
    y en empate, `Googlebot-Image` y `Google` frente a `Googlebot`— y el veredicto
    contra Protego en los dos modos) y `tests/test_robots_prueba_api.py`.
+
+<a id="d228"></a>
+228. **Una redirección a la portada avisa: `redireccion_a_portada`** (#11, la
+   parte sin modelo).
+
+   **Problema.** «Todo lo que se borra, 301 a la home» es de los errores más
+   comunes en tiendas y medios. Google lo trata como un soft 404: lo que tenía
+   la URL vieja no pasa a la portada. No avisaba nada: una 301 de un salto a
+   una página 200 indexable es una redirección «bien hecha» para todas las
+   reglas anteriores.
+
+   **Decisión.**
+   - **`redireccion_a_portada`** (warning), en `analyze_redirect_chains`, con
+     el mismo recorrido y filtros que `redireccion_a_noindex` (120): origen
+     interno, sin bucle, sin pasar de 10 saltos (117), final 200 (un muro, un
+     error o un destino sin rastrear no dicen nada). El final es una portada:
+     la raíz del host o la de un idioma (`shared.soft404.es_portada`).
+   - **No cuenta lo que ya es la portada** (`_redirige_a_portada`): otra
+     portada (`/es/` → `/`, el idioma del navegador), un alias en la raíz
+     (`/index.html`, `/index.php`, `/inicio`, `/home`…), la propia con
+     parámetros (`/?utm_source=x`), ni un http → https o un www
+     (`_solo_normaliza`).
+   - Sustituye a `redirect_chain` y a `meta_refresh_redireccion` en ese origen
+     (36): redirigir a una sustituta, desde el servidor, arregla todo.
+   - Con `enlaces_plantilla_min_paginas` o más al mismo destino es UNA fila en
+     la portada, con `redirecciones_que_llegan`, `paginas_afectadas` y
+     ejemplos: es una regla del servidor (36, 64).
+
+   **Fuera, de momento.** La redirección a la categoría raíz o a otra página
+   que no sustituye a la vieja necesita juzgar el contenido de las dos: es la
+   pregunta `redirect_irrelevante` de #11, con Jev y con umbral (#8).
+
+   Tests en `tests/test_senales_contradictorias_db.py` (SQLite, decisión 74).

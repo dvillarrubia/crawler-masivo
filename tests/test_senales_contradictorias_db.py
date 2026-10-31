@@ -492,3 +492,67 @@ def test_run_all_dos_veces_da_lo_mismo(tmp_path, monkeypatch, motor):
             s.commit()
         s.close()
         engine.dispose()
+
+
+# -- Redireccion a la portada (#11, decision 228) ------------------------------
+
+def test_una_pagina_que_redirige_a_la_portada_avisa_en_el_origen():
+    s, j = _montar()
+    _url(s, j, "/")
+    v = _salto(s, j, "/producto-borrado", "/")
+    _cadenas(s, j)
+    [fila] = _issues(s, j, "redireccion_a_portada")
+    assert fila.url_id == v.id and fila.severity == "warning"
+    assert fila.details["alcance"] == "origen"
+    assert fila.details["final"] == "https://x.com/"
+
+
+def test_a_la_portada_de_un_idioma_tambien_y_en_dos_saltos_no_es_ademas_cadena():
+    s, j = _montar()
+    _url(s, j, "/es/")
+    v = _salto(s, j, "/a", "/b")
+    _salto(s, j, "/b", "/es/")
+    _cadenas(s, j)
+    assert _tipos(s, j, v.id) == ["redireccion_a_portada"]
+    assert _issues(s, j, "redirect_chain") == []
+
+
+def test_lo_que_ya_es_la_portada_no_avisa():
+    s, j = _montar()
+    _url(s, j, "/")
+    for origen in ("http://x.com/", "https://www.x.com/", "/es/", "/index.html",
+                   "/es/inicio", "/?utm_source=x", "/index.php?x=1"):
+        _salto(s, j, origen, "/")
+    _cadenas(s, j)
+    assert _issues(s, j, "redireccion_a_portada") == []
+
+
+def test_portada_que_da_error_o_sin_rastrear_no_es_redireccion_a_portada():
+    s, j = _montar()
+    _url(s, j, "/es/", status=500)
+    _salto(s, j, "/a", "/es/")
+    _salto(s, j, "/b", "/de/")
+    _cadenas(s, j)
+    assert _issues(s, j, "redireccion_a_portada") == []
+    assert len(_issues(s, j, "redireccion_a_error")) == 1
+
+
+def test_meta_refresh_a_la_portada_es_un_solo_aviso():
+    s, j = _montar()
+    _url(s, j, "/")
+    mr = _refresh(s, j, "/mr", "/")
+    _cadenas(s, j)
+    assert _tipos(s, j, mr.id) == ["redireccion_a_portada"]
+
+
+def test_diez_redirecciones_a_la_portada_son_una_fila_en_ella():
+    s, j = _montar()
+    home = _url(s, j, "/")
+    for i in range(12):
+        _salto(s, j, f"/borrado-{i}", "/")
+    _cadenas(s, j)
+    [fila] = _issues(s, j, "redireccion_a_portada")
+    assert fila.url_id == home.id
+    assert fila.details["alcance"] == "destino"
+    assert fila.details["redirecciones_que_llegan"] == 12
+    assert len(fila.details["ejemplos"]) == 5

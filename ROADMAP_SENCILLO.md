@@ -4,7 +4,7 @@ Para seguir el proyecto sin saber programar. Cuenta qué hace la herramienta,
 qué está a punto de llegar y qué viene después, sin tecnicismos. El detalle
 técnico está en [`ROADMAP.md`](ROADMAP.md) y en cada issue enlazada.
 
-**Última actualización: 28 de octubre de 2026.**
+**Última actualización: 31 de octubre de 2026.**
 
 Cómo leer cada punto:
 
@@ -21,8 +21,9 @@ La herramienta rastrea y audita sitios grandes como Screaming Frog, vigila la
 cartera de clientes y avisa sola cuando algo se rompe. Además cruza cada
 rastreo con lo que dice Google: Search Console, la inspección de URLs, los
 backlinks y los logs del servidor. Lo que queda es sobre todo probar con
-clientes lo último que ha entrado, el rastreo incremental y la parte de
-inteligencia artificial, que espera a que una persona revise sus respuestas.
+clientes lo último que ha entrado (entre ello, el rastreo incremental) y la
+parte de inteligencia artificial, que espera a que una persona revise sus
+respuestas.
 
 ---
 
@@ -44,6 +45,12 @@ inteligencia artificial, que espera a que una persona revise sus respuestas.
 - Extracción a medida: el precio, el SKU, el stock o si tiene el código de
   Google Tag Manager, con una pantalla para crear las reglas y probarlas contra
   una URL.
+- Más rápido que hace una semana: reutiliza las conexiones con cada servidor
+  como un navegador y gasta menos máquina por página (Lopesan, de 0,7 a 1,7
+  páginas por segundo). La ficha de cada rastreo dice qué lo frenó: la pausa
+  entre peticiones, lo que tarda el servidor o el propio rastreo.
+- Antes de lanzar un rastreo mira si cabe en el disco, y no lo lanza si no
+  cabe (salvo que se fuerce).
 
 **Auditoría SEO**
 
@@ -99,6 +106,15 @@ inteligencia artificial, que espera a que una persona revise sus respuestas.
 - Rastreos programados (cada día, semana o mes) y «Lanzar ahora». Nunca dos
   rastreos del mismo sitio a la vez, y lo programado espera a lo que se lanza
   a mano.
+- 🟡 **Rastreo incremental**
+  ([#36](https://github.com/dvillarrubia/crawler-masivo/issues/36)): el
+  semanal solo vuelve a pedir lo que toca (lo que cambia a menudo, lo que el
+  sitemap da por cambiado y una muestra de control), y lo demás lo copia del
+  rastreo anterior. Activo en workoholics; falta compararlo con un rastreo
+  completo del mismo día.
+- Limpieza automática por perfil, si se activa: guarda los últimos rastreos
+  completos y vacía los más viejos, sin perder su punto en las gráficas de
+  evolución.
 - Cada rastreo se compara con el anterior: qué incidencias se arreglaron,
   cuáles son nuevas y cuáles siguen.
 - Alertas que se abren y se cierran solas, con reglas propias por cliente, en
@@ -147,11 +163,12 @@ antes de lanzarlo, con un tope de gasto. Nada de pago se lanza solo.
 ## ⏳ Lo siguiente
 
 - ⏳ **Probar con clientes lo último que ha entrado**: los backlinks, los logs
-  del servidor, las oportunidades de Search Console y el WordPress, con datos
-  reales y revisado a mano.
-- ⏳ **Rastreo incremental**
-  ([#36](https://github.com/dvillarrubia/crawler-masivo/issues/36)): que el
-  rastreo semanal solo vuelva a pedir lo que cambió.
+  del servidor, las oportunidades de Search Console, el WordPress y el rastreo
+  incremental, con datos reales y revisado a mano.
+- ⏳ **Un millón de páginas**
+  ([#281](https://github.com/dvillarrubia/crawler-masivo/issues/281)): que los
+  enlaces no ocupen la base de datos mientras se rastrea y que el análisis de
+  un sitio así acabe en un tiempo razonable.
 - ⏳ **Rastreo más listo**
   ([#14](https://github.com/dvillarrubia/crawler-masivo/issues/14)): frenar las
   trampas mientras se rastrea (hoy se detectan después) y pedir antes lo que

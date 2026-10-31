@@ -2320,8 +2320,7 @@ function app() {
           api(`/clients/${this.cliente.id}/resumenes`).catch(() => []),
         ]);
         this.reglasCliente = r;
-        this.reglasForm = JSON.parse(JSON.stringify(r.efectivas));
-        this.reglasForm.propias.forEach(x => { x.segmento = x.segmento || ''; });
+        this.reglasForm = _formReglas(r.efectivas);
         this._reglasFoto = _fotoReglas(this.reglasForm);
         this.resumenes = res || [];
         this._reglasDe = this.cliente && this.cliente.id;
@@ -2371,6 +2370,8 @@ function app() {
         if (v !== drs[k]) rs[k] = v;
       }
       if (Object.keys(rs).length) cuerpo.resumen_semanal = rs;
+      const ignorar = (f.ignorar_texto || '').split('\n').map(x => x.trim()).filter(Boolean);
+      if (JSON.stringify(ignorar) !== JSON.stringify(serie.ignorar_en_textos || [])) cuerpo.ignorar_en_textos = ignorar;
       return cuerpo;
     },
 
@@ -2380,8 +2381,7 @@ function app() {
         const r = await api(`/clients/${this.cliente.id}/reglas`,
                             { method: 'PUT', body: JSON.stringify(this._cuerpoReglas()) });
         this.reglasCliente = r;
-        this.reglasForm = JSON.parse(JSON.stringify(r.efectivas));
-        this.reglasForm.propias.forEach(x => { x.segmento = x.segmento || ''; });
+        this.reglasForm = _formReglas(r.efectivas);
         this._reglasFoto = _fotoReglas(this.reglasForm);
         this.showToast('Reglas guardadas: valen para los rastreos que terminen desde ahora');
         return true;
@@ -2399,8 +2399,7 @@ function app() {
       try {
         const r = await api(`/clients/${this.cliente.id}/reglas`, { method: 'PUT', body: 'null' });
         this.reglasCliente = r;
-        this.reglasForm = JSON.parse(JSON.stringify(r.efectivas));
-        this.reglasForm.propias.forEach(x => { x.segmento = x.segmento || ''; });
+        this.reglasForm = _formReglas(r.efectivas);
         this._reglasFoto = _fotoReglas(this.reglasForm);
         this.showToast('Reglas de serie restablecidas');
       } catch (e) { this.reglasError = e.message; }
@@ -7428,7 +7427,7 @@ const EXP_TABS = [
   { key: 'a_canon',    label: 'Canonicals',    icon: 'link-2',       filter: HTML_INTERNO, ambito: ['canonical_missing','canonical_cross_domain','canonical_a_error','canonical_a_redireccion','canonical_a_no_indexable','canonical_encadenado','canonical_sin_enlazar','canonical_broken','canonical_multiple','canonical_in_body','canonical_a_http','canonical_html_y_cabecera_distintos','noindex_y_canonical_a_otra','canonical_relativo','canonical_con_fragmento','google_elige_otro_canonical','google_tiene_canonical_antiguo'],
     columns: ['url','status_code','canonical_href','canonical_header','indexable','indexability_status'] },
   // Las redirecciones no son HTML: el ambito va sobre las internas.
-  { key: 'a_redir',    label: 'Redirecciones', icon: 'corner-down-right', filter: { is_internal: true }, ambito: ['redireccion_a_error','redireccion_a_noindex','meta_refresh_redireccion','redirect_chain','redirect_loop','redireccion_por_javascript'],
+  { key: 'a_redir',    label: 'Redirecciones', icon: 'corner-down-right', filter: { is_internal: true }, ambito: ['redireccion_a_error','redireccion_a_noindex','redireccion_a_portada','meta_refresh_redireccion','redirect_chain','redirect_loop','redireccion_por_javascript'],
     columns: ['url','status_code','redirect_url','redirect_type','inlinks_count','origenes','click_depth'] },
   { key: 'a_robots',   label: 'Directivas',    icon: 'shield',       filter: HTML_INTERNO, ambito: ['noindex_page','noindex_y_canonical_a_otra','robots_invalid_syntax','pagina_nofollow','robots_txt_inaccesible','robots_difiere_para_googlebot','bot_busqueda_ia_bloqueado'],
     columns: ['url','status_code','indexable','indexability_status','bloqueada_googlebot','meta_robots','x_robots_tag','in_sitemap'] },
@@ -7453,7 +7452,7 @@ const EXP_TABS = [
   // o de servidor (una fila por grupo), y nada saca una pagina del indice.
   { key: 'a_declara',  label: 'Móvil, charset y OG', icon: 'smartphone', filter: HTML_INTERNO, ambito: ['viewport_ausente','viewport_incorrecto','html_lang_ausente','texto_mal_codificado','charset_incoherente','charset_ausente','og_ausente','og_image_relativa','og_image_pequena','og_image_rota','twitter_card_invalida','amphtml_incorrecto','alternate_movil_incorrecto'],
     columns: ['url','status_code','viewport','html_lang','og_title','og_image','indexable'] },
-  { key: 'a_sd',       label: 'Datos estructurados', icon: 'braces', filter: HTML_INTERNO, ambito: ['structured_data_error','structured_data_warning','structured_data_info'],
+  { key: 'a_sd',       label: 'Datos estructurados', icon: 'braces', filter: HTML_INTERNO, ambito: ['structured_data_error','structured_data_warning','structured_data_info','portada_sin_entidad'],
     columns: ['url','status_code','title','indexable','pagerank_score'] },
   { key: 'a_enlazado', label: 'Enlazado',      icon: 'share-2',      filter: HTML_INTERNO, ambito: ['orphan_page','sitemap_orphan','solo_enlazada_por_redireccion','not_reachable_from_home','high_outlink_count','not_in_sitemap','enlace_no_rastreable','enlace_interno_a_error','enlace_interno_a_redireccion','utm_en_enlace_interno','enlace_sin_ancla','ancla_generica','solo_enlazada_con_nofollow','enlace_interno_nofollow','pagina_nofollow','solo_enlazada_desde_paginacion_excluida','enlace_externo_roto','dominio_externo_muerto'],
     columns: ['url','status_code','inlinks_count','origenes','click_depth','pagerank_score','in_sitemap','indexable'] },
@@ -9142,6 +9141,15 @@ function fraseReglaPropia(r, catalogo) {
 }
 // Lo que se compara para saber si las reglas tienen cambios sin guardar: los
 // numeros de un campo editado llegan como texto («20» frente a 20).
+// Las reglas efectivas como formulario: el segmento vacio como '' y los
+// patrones a ignorar (decision 230) como un texto, uno por linea.
+function _formReglas(efectivas) {
+  const f = JSON.parse(JSON.stringify(efectivas));
+  f.propias.forEach(x => { x.segmento = x.segmento || ''; });
+  f.ignorar_texto = (f.ignorar_en_textos || []).join('\n');
+  delete f.ignorar_en_textos;
+  return f;
+}
 function _fotoReglas(f) {
   return JSON.stringify(f, (k, v) => (typeof v === 'string' && v.trim() !== '' && !isNaN(v) ? Number(v) : v));
 }

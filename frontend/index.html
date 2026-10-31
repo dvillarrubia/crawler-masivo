@@ -2160,6 +2160,16 @@
                       </div>
                     </div>
 
+                    <!-- Lo que no es un cambio (decision 230) -->
+                    <div class="card mb-2">
+                      <div class="form-group m-0">
+                        <label>Ignorar al comparar títulos y descriptions</label>
+                        <textarea rows="3" class="mono fs-sm" x-model="reglasForm.ignorar_texto" data-testid="reglas-ignorar"
+                                  placeholder="\b20\d\d\b&#10;\(\d+ productos\)"></textarea>
+                        <div class="form-hint">Una expresión regular por línea (hasta 20). Lo que casa se quita del title, el H1 y la description de los dos rastreos antes de compararlos: así el año o un contador que cambia solo no salen como «cambia el título». Los espacios de más ya no cuentan nunca.</div>
+                      </div>
+                    </div>
+
                     <!-- Guardar y descartar, en la barra fija (revision de UX del 25-oct, 3.5) -->
                     <div class="flex items-center gap-1 mb-2 flex-wrap">
                       <button class="btn" @click="probarReglas()" data-tip="Evalúa las reglas del cliente, tal como están en pantalla, contra su último rastreo completado. No guarda nada">Probar contra el último rastreo</button>

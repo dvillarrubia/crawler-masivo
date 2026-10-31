@@ -54,6 +54,10 @@ def test_lo_guardado_es_parcial_y_lo_demas_sigue_siendo_de_serie():
     ({"propias": [{"id": "A B", "nombre": "x", "medida": "urls", "umbral": 1}]}, "id"),
     ({"silenciado_hasta": "mañana"}, "fecha"),
     ({"resumen_semanal": {"dia": 8}}, "fuera de rango"),
+    ({"ignorar_en_textos": ["(sin cerrar"]}, "expresión regular"),
+    ({"ignorar_en_textos": "\\d+"}, "lista"),
+    ({"ignorar_en_textos": ["x"] * 21}, "hasta 20"),
+    ({"ignorar_en_textos": [""]}, "1 a 200"),
 ])
 def test_lo_que_no_vale_se_rechaza_con_el_motivo(malo, trozo):
     with pytest.raises(R.ReglaInvalida, match=trozo):
@@ -543,3 +547,13 @@ def test_un_perfil_a_mano_solo_sale_si_se_lanzo(s):
     fila = next(p for p in r["contenido"]["perfiles"] if p["nombre"] == "lista")
     assert (fila["rastreos"], fila["programado"]) == (1, False)
     assert any(t.startswith("lista: 3 de 52") for t in r["contenido"]["destacado"])
+
+
+def test_los_patrones_a_ignorar_se_guardan_y_son_efectivos():
+    guardado = R.validar({"ignorar_en_textos": [r"\b20\d\d\b"]})
+    assert guardado == {"ignorar_en_textos": [r"\b20\d\d\b"]}
+    assert R.efectivas(guardado)["ignorar_en_textos"] == [r"\b20\d\d\b"]
+    assert R.de_serie()["ignorar_en_textos"] == []
+    # Escrito a mano en la BD y roto: se ignora, las demas reglas siguen
+    e = R.efectivas({"ignorar_en_textos": ["(roto"], "silenciado_hasta": "2026-12-01"})
+    assert e["ignorar_en_textos"] == [] and e["silenciado_hasta"] == "2026-12-01"

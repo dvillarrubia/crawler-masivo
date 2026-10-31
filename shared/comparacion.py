@@ -332,6 +332,7 @@ def comparar_censos(
     umbral_palabras: float = UMBRAL_PALABRAS,
     umbral_absoluto: int | None = None,
     umbrales: dict[str, dict[str, Any]] | None = None,
+    ignorar: list[str] | None = None,
 ) -> dict[str, Any]:
     """Compara dos listas de páginas ya cargadas. Función pura, sin BD.
 
@@ -345,8 +346,12 @@ def comparar_censos(
     `mapa_rutas` (decision 131): pares `(patron, reemplazo)` que reescriben la
     RUTA de las URLs del censo anterior antes de emparejar (una migracion).
     Lanza ValueError si una regex no compila; la API lo convierte en un 422.
+
+    `ignorar` (decision 230): regex del cliente que se quitan del title y la
+    description antes de decir que cambiaron (el año, un contador).
     """
     mapa_hosts = mapa_hosts or {}
+    textos = _comparador_de_textos(ignorar)
     reglas_rutas = compilar_mapa_rutas(mapa_rutas)
 
     # El orden lo pone la FECHA. Si no, "antes" y "ahora" los decide el
@@ -598,7 +603,8 @@ def comparar_censos(
             if campo == "canonical_href" and "_canonical_cmp" in pa:
                 if pa["_canonical_cmp"] == _norm(vb or ""):
                     continue
-            if va != vb:
+            distinto = textos(va, vb) if campo in ("title", "h1") else va != vb
+            if distinto:
                 cambios[campo].append({"url": pb.get("url"), "antes": va, "ahora": vb})
         wa, wb = pa.get("word_count") or 0, pb.get("word_count") or 0
         # El denominador es el MAYOR de los dos, no el "antes": si no,
@@ -611,7 +617,7 @@ def comparar_censos(
             cambios["word_count"].append({"url": pb.get("url"), "antes": wa, "ahora": wb})
         _cambios_131(pa, pb, cambios, medidas)
 
-        _clasificar(pa, pb, afectadas, bases, umbral_palabras, medidas)
+        _clasificar(pa, pb, afectadas, bases, umbral_palabras, medidas, textos)
 
     # Lo que extraen las reglas a medida, sobre las mismas paginas comunes y
     # sin los muros (decision 127).
@@ -1126,7 +1132,8 @@ def _pierde_inlinks(ia, ib) -> bool:
     return ia > 0 and (ia - ib) >= MINIMO_INLINKS_PERDIDOS and (ia - ib) / ia >= UMBRAL_INLINKS
 
 
-def _clasificar(pa, pb, afectadas, bases, umbral_palabras, medidas=None) -> None:
+def _clasificar(pa, pb, afectadas, bases, umbral_palabras, medidas=None,
+                textos=None) -> None:
     """Pone una página en la regla que nombra su CAUSA, y solo en una.
 
     Un aviso por hallazgo (decisión 36): una página que pierde el índice porque
@@ -1176,14 +1183,15 @@ def _clasificar(pa, pb, afectadas, bases, umbral_palabras, medidas=None) -> None
         if wa and (wa - wb) / wa >= umbral_palabras:
             afectadas["pierden_contenido"].append(
                 {"url": url, "antes": wa, "ahora": wb, "_g": g})
-        if pa.get("title") != pb.get("title"):
+        textos = textos or _comparador_de_textos(None)
+        if textos(pa.get("title"), pb.get("title")):
             afectadas["cambia_el_titulo"].append(
                 {"url": url, "antes": pa.get("title"), "ahora": pb.get("title"), "_g": g})
         if medidas:
-            _clasificar_131(pa, pb, afectadas, bases, medidas, url, g)
+            _clasificar_131(pa, pb, afectadas, bases, medidas, url, g, textos)
 
 
-def _clasificar_131(pa, pb, afectadas, bases, medidas, url, g) -> None:
+def _clasificar_131(pa, pb, afectadas, bases, medidas, url, g, textos=None) -> None:
     """Los cambios de grado de la decision 131, en una pagina que sigue indexable."""
     # Enlazado: una familia, un hallazgo por pagina (decision 36).
     ca, cb = pa.get("click_depth"), pb.get("click_depth")
@@ -1216,11 +1224,46 @@ def _clasificar_131(pa, pb, afectadas, bases, medidas, url, g) -> None:
                 {"url": url, "antes": ", ".join(sorted(_idiomas(pa))),
                  "ahora": ", ".join(sorted(_idiomas(pb))) or None,
                  "pierde": sorted(perdidos), "_g": g})
+    textos = textos or _comparador_de_textos(None)
     if (medidas["meta_description"]
-            and (pa.get("meta_description") or None) != (pb.get("meta_description") or None)):
+            and textos(pa.get("meta_description"), pb.get("meta_description"))):
         afectadas["cambia_la_description"].append(
             {"url": url, "antes": pa.get("meta_description"),
              "ahora": pb.get("meta_description"), "_g": g})
+
+
+def _comparador_de_textos(ignorar: list[str] | None):
+    """`distintos(a, b)` para el title, el h1 y la description (decision 230).
+
+    Siempre se pliegan los espacios —Google tambien lo hace al mostrar un
+    title—: `Hoteles  en Gran Canaria` y `Hoteles en Gran Canaria` no son un
+    cambio. Con `ignorar`, ademas, se quita lo que case con cada patron del
+    cliente (un año, `(123 productos)`) antes de comparar. Un patron que
+    no compila se salta: en la BD a mano puede haber cualquier cosa, y una
+    regex rota no puede tumbar la comparacion entera (ni su alerta critica).
+    Vacio o None, igual que antes salvo los espacios: None es None.
+    """
+    patrones = []
+    for p in ignorar or ():
+        try:
+            patrones.append(re.compile(p))
+        except (re.error, TypeError):
+            logger.warning("ignorar_en_textos: patron no valido, se salta: %r", p)
+
+    def limpio(t):
+        if t is None:
+            return None
+        t = str(t)[:2000]
+        for p in patrones:
+            t = p.sub(" ", t)
+        return " ".join(t.split()) or None
+
+    def distintos(a, b) -> bool:
+        if a == b:
+            return False
+        return limpio(a) != limpio(b)
+
+    return distintos
 
 
 def _sin_grupo(fila: dict[str, Any]) -> dict[str, Any]:
@@ -1989,13 +2032,15 @@ def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
     from shared.reglas import reglas_de_job, umbrales_de_comparacion
 
     try:
-        umbrales = umbrales_de_comparacion(reglas_de_job(db, job) or {}) or None
+        reglas = reglas_de_job(db, job) or {}
+        umbrales = umbrales_de_comparacion(reglas) or None
+        ignorar = reglas.get("ignorar_en_textos") or None  # decision 230
     except Exception:
         # Unas reglas ilegibles no pueden llevarse por delante la comparacion
         # ni su alerta critica: se compara con lo de serie.
         logger.exception("Reglas del cliente ilegibles en el job %s; se usan las de serie",
                          job.id)
-        umbrales = None
+        umbrales = ignorar = None
     r = comparar_censos(
         paginas_ant,
         paginas_nuevas,
@@ -2003,6 +2048,7 @@ def comparar_con_el_anterior(db, job, reanalizar=None) -> dict[str, Any] | None:
         job_b=resumen_de_job(job),
         umbral_absoluto=umbral_absoluto(job.config),
         umbrales=umbrales,
+        ignorar=ignorar,
     )
     incidencias = None
     if r.get("comparable"):

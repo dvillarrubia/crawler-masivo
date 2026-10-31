@@ -182,10 +182,11 @@ def test_run_all_los_emite():
     """Enchufado al analisis completo, ejecutandolo (decision 74)."""
     s, j = _montar([_fichero(A, declaradas=60_000)])
     _url(s, j, "/")
-    from shared.models import HtmlMeta, Hreflang
+    from shared.models import HtmlMeta, Hreflang, StructuredData
 
     HtmlMeta.__table__.create(s.get_bind(), checkfirst=True)
     Hreflang.__table__.create(s.get_bind(), checkfirst=True)
+    StructuredData.__table__.create(s.get_bind(), checkfirst=True)  # decision 229
     az = SEOAnalyzer(s, j.id)
     for nombre in dir(az):
         if nombre.startswith(("analyze_", "compute_")) and nombre != "analyze_indexability":

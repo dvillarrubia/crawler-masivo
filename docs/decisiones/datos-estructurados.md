@@ -158,3 +158,34 @@
    uno): **0** en CST, Saunier, Lopesan y Salle; en penguin, **55 reseñas con
    `datePublished` «28/08/2020»**, que Google no puede leer (¿día/mes o
    mes/día?). Basta con re-analizar.
+
+<a id="d229"></a>
+229. **La portada sin `Organization` ni `Person` avisa: `portada_sin_entidad`**
+   (#199, parte sin modelo).
+
+   **Problema.** La portada es donde Google (panel de conocimiento: nombre,
+   logo, `sameAs`) y los buscadores de IA buscan quién está detrás de un sitio.
+   No se miraba: un sitio sin ese bloque no tenía ningún aviso.
+
+   **Decisión.**
+   - `analysis/avisos_de_entidad.py`, tras `analyze_structured_data`. Una fila
+     `info` por host, anclada en su portada: la raíz si es 200 HTML indexable
+     con respuesta válida (103); si no, la de idioma menor (88). Basta con que
+     una portada del host declare la entidad.
+   - Cuenta cualquier bloque, a cualquier profundidad (el `publisher` de un
+     `WebSite`, un `@graph`), en JSON-LD, microdata o RDFa
+     (`shared/schema_entidades.tipos_de`).
+   - **Los tipos salen de la jerarquía oficial de schema.org**, no de una lista
+     a mano: `Organization` y `Person` con todos sus subtipos (190, del CSV
+     `schemaorg-current-https-types` del 31-oct-2026). Un `Hotel`, un `Dentist`
+     o una `CollegeOrUniversity` son una `Organization`; escrita a mano, cada
+     subtipo olvidado era un aviso falso (Lopesan declara `Hotel`).
+   - **`info` y no `warning`:** Google no lo exige, y un bloque que inyecta
+     JavaScript (Tag Manager) no se ve en un rastreo sin render. Lo dice la
+     ficha.
+
+   **Fuera, de momento.** `llms.txt` (otra sonda por host, solo informativa) y
+   las preguntas a Jev de #199 (`entidad_clara`, `citable`, `va_al_grano`), que
+   necesitan juego de evaluación y umbral (#8).
+
+   Tests en `tests/test_portada_sin_entidad.py` (SQLite, decisión 74).

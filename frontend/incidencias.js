@@ -47,6 +47,11 @@ const ISSUE_INFO = {
     google: 'Sigue la redirección y encuentra un noindex: lo que tenía la URL vieja no pasa a ninguna página del índice.',
     arreglo: 'Redirigir a la página indexable que sustituye a la vieja; si el destino es correcto, decidir si debe seguir en noindex.',
   },
+  'redireccion_a_portada': {
+    que: 'La página redirige a la portada (la del sitio o la de un idioma) en vez de a una página que la sustituya. Si diez o más redirecciones llegan a la misma portada, sale una sola vez, en ella: es la regla «todo lo borrado, a la home». No salen la propia portada con otro nombre (/index.html, /inicio), la de otro idioma ni las que solo cambian http/https o www.',
+    google: 'Trata una redirección a la portada como un soft 404: lo que tenía la URL vieja (enlaces, posiciones) no pasa a la home, y Search Console puede marcarla como «Soft 404».',
+    arreglo: 'Redirigir cada URL a la página más parecida que exista (el producto que la sustituye, su categoría). Si no hay ninguna, dejar que responda 404 o 410.',
+  },
   'meta_refresh_redireccion': {
     que: 'La página redirige con <meta http-equiv="refresh"> en vez de con una redirección del servidor. Con retardo, el usuario la ve unos segundos antes de saltar. Una refresh sin URL (recargar) o dentro de <noscript> no cuenta. Con render JS, una refresh inmediata puede aparecer como redirección por JavaScript, y el retardo de un salto visto por el navegador no se conoce.',
     google: 'La inmediata la trata como permanente; la de varios segundos, como temporal, y puede quedarse con la URL de origen. Recomienda la redirección del servidor.',
@@ -655,6 +660,11 @@ const ISSUE_INFO = {
     google: 'Lo acepta, pero el resultado enriquecido puede ser más pobre.',
     arreglo: 'Completar la propiedad en la plantilla si el dato existe.',
   },
+  'portada_sin_entidad': {
+    que: 'La portada no lleva datos estructurados que digan quién está detrás del sitio: ni Organization (o un subtipo: LocalBusiness, Hotel, Store…) ni Person en un sitio personal. Cuenta cualquier bloque de la portada, también el publisher de un WebSite. Una vez por host. Si el bloque lo añade JavaScript (Tag Manager) y el rastreo no renderizó, puede estar y no verse aquí.',
+    google: 'No lo exige, pero es de donde saca el nombre, el logo y los perfiles (sameAs) de la empresa para el panel de conocimiento; los buscadores de IA también lo usan para saber de quién es el sitio. Sin él, lo deduce del texto, o no lo deduce.',
+    arreglo: 'Añadir en la portada un bloque Organization (o el subtipo que corresponda) con name, url, logo y sameAs con los perfiles oficiales.',
+  },
   'structured_data_info': {
     que: 'El bloque es de un tipo cuyo resultado enriquecido Google ha retirado (FAQPage desde mayo de 2026, HowTo desde septiembre de 2023).',
     google: 'Lo lee, pero ya no lo muestra como resultado enriquecido: no da preguntas desplegables ni pasos en la búsqueda.',
@@ -1038,6 +1048,8 @@ const ISSUE_LABEL_EXTRA = {
   enlace_sin_ancla: 'Enlace interno sin texto ancla',
   // Decisiones 120 y 121
   redireccion_a_noindex: 'Redirección a una noindex',
+  redireccion_a_portada: 'Redirección a la portada',
+  portada_sin_entidad: 'Portada sin Organization',
   meta_refresh_redireccion: 'Redirección por meta refresh',
   noindex_y_canonical_a_otra: 'Noindex con canonical a otra',
   canonical_html_y_cabecera_distintos: 'Canonical del HTML ≠ cabecera',
