@@ -246,13 +246,29 @@ def curva_cobertura(con_conf: list[tuple[float, bool]], total: int) -> list[dict
     return curva
 
 
+def cubiertas_alcanzables(objetivo: float, z: float = Z_WILSON, tope: int = 100_000) -> int:
+    """Los ejemplos que hacen falta para que la cota de Wilson de un 100 % de
+    aciertos llegue a `objetivo`: 35 para 0,9 y 73 para 0,95 (z = 1,96). Con
+    menos, ninguna precision demuestra el objetivo."""
+    n = 1
+    while n < tope and (wilson_inferior(n, n, z) or 0.0) < objetivo:
+        n += 1
+    return n
+
+
 def elegir_umbral(curva: list[dict], *, objetivo: float = PRECISION_OBJETIVO,
                   min_cubiertas: int = MIN_CUBIERTAS) -> float | None:
     """El umbral MAS BAJO (mas cobertura) con el que lo que queda encima llega a
     la precision objetivo —su cota inferior de Wilson— y cubre al menos
     `min_cubiertas` ejemplos. Y que siga llegando con cualquier umbral mas
     alto que cubra el minimo: un pico suelto no es un umbral, es suerte."""
-    validos = [p for p in curva if p["cubiertas"] >= min_cubiertas and p.get("precision_minima") is not None]
+    # Y por encima de los que ni acertando todos llegan a la cota (decision
+    # 231): con 30 ejemplos, 30 de 30 da 0,886, por debajo de un objetivo de
+    # 0,9. Con confianzas casi todas distintas la curva pasa siempre por 30-34
+    # cubiertas, y esa cola hundia cualquier umbral: un modelo que acertaba el
+    # 100 % salia sin umbral.
+    minimo = max(min_cubiertas, cubiertas_alcanzables(objetivo))
+    validos = [p for p in curva if p["cubiertas"] >= minimo and p.get("precision_minima") is not None]
     for i, p in enumerate(validos):
         if all(q["precision_minima"] >= objetivo for q in validos[i:]):
             return p["umbral"]
@@ -549,3 +565,128 @@ def fugas(texto: str, huellas: set[str]) -> list[tuple[str, str]]:
     return [(e, f) for e in ejemplos_de_instrucciones(texto)
             for f in sorted(fragmentos_de_title(e))
             if huella(f) in huellas or huella(unicodedata.normalize("NFD", f)) in huellas]
+
+
+# --- informe guardado (#8) ---------------------------------------------------------
+
+MAX_FILAS_CURVA = 15
+
+
+def _pct(v) -> str:
+    return "—" if v is None else f"{100 * v:.1f} %"
+
+
+def _num(v) -> str:
+    return "—" if v is None else str(v)
+
+
+def _curva_resumida(curva: list[dict], umbral: float | None) -> list[dict]:
+    """Hasta `MAX_FILAS_CURVA` puntos repartidos de la curva, siempre con el
+    del umbral elegido: una pregunta con 300 confianzas distintas daba 300
+    filas que nadie lee."""
+    if len(curva) <= MAX_FILAS_CURVA:
+        return curva
+    paso = (len(curva) - 1) / (MAX_FILAS_CURVA - 1)
+    indices = {round(i * paso) for i in range(MAX_FILAS_CURVA)}
+    indices |= {i for i, p in enumerate(curva) if p["umbral"] == umbral}
+    return [curva[i] for i in sorted(indices)]
+
+
+def informe_markdown(informe: dict[str, Any], *, juego: str = "", respuestas: str = "",
+                     fecha: str = "") -> str:
+    """El informe de `evaluar` como Markdown, para guardarlo junto al juego
+    (#8: «informe por pregunta con precision, ECE, curva de cobertura, umbral
+    elegido y coste»). Solo presenta lo que ya calculo `metricas` o
+    `metricas_precision`: ningun numero sale de aqui."""
+    p, v = informe.get("pregunta", "?"), informe.get("version", "?")
+    precision = "juego_precision" in informe
+    lineas = [f"# {p} v{v}: {'juego de precisión' if precision else 'evaluación'}", ""]
+    meta = [("Fecha", fecha), ("Juego", f"`{juego}`" if juego else ""),
+            ("Respuestas", f"`{respuestas}`" if respuestas else "")]
+    lineas += [f"- **{k}:** {val}" for k, val in meta if val]
+    lineas += [f"- **Umbral en el catálogo:** {_num(informe.get('umbral_actual'))}",
+               f"- **Objetivo de precisión (cota de Wilson):** {_pct(informe.get('objetivo'))}", ""]
+
+    lineas += ["## Muestra", "",
+               f"- Ejemplos: {_num(informe.get('ejemplos', informe.get('positivos')))}; "
+               f"evaluables: {_num(informe.get('evaluables'))}; sin etiqueta: "
+               f"{_num(informe.get('sin_etiqueta'))}; sin respuesta: {_num(informe.get('sin_respuesta'))}."]
+    extra = [(informe.get("estados_repetidos_quitados"), "estados repetidos quitados"),
+             (informe.get("repetidos_con_otra_etiqueta"), "repetidos con otra etiqueta"),
+             (informe.get("etiquetas_invalidas"), "etiquetas no válidas"),
+             (informe.get("respuestas_de_otra_version"), "respuestas de otra versión"),
+             (informe.get("respuestas_fuera_del_juego"), "respuestas fuera del juego")]
+    otras = [f"{n} {texto}" for n, texto in extra if n]
+    if otras:
+        lineas.append("- " + "; ".join(otras) + ".")
+    lineas.append("")
+
+    if precision:
+        lineas += [f"## Precisión de «{informe.get('respuesta')}»", "",
+                   f"- Aciertos: {_num(informe.get('aciertos'))} de {_num(informe.get('evaluables'))}: "
+                   f"precisión {_pct(informe.get('precision'))}, cota {_pct(informe.get('precision_minima'))}.",
+                   f"- Umbral propio: {_num(informe.get('umbral_propio'))}.",
+                   f"- Recall: no se estima con este juego. {informe.get('recall_no_estimable', '')}", ""]
+        c = informe.get("control") or {}
+        if c:
+            lineas += ["### Control", "",
+                       f"- {_num(c.get('ejemplos'))} ejemplos, acierto {_pct(c.get('acierto'))}, "
+                       f"«{informe.get('respuesta')}» reales {_num(c.get('reales_x'))}, recall "
+                       f"{_pct(c.get('recall_x'))} (cota {_pct(c.get('recall_x_minimo'))}).",
+                       f"- {c.get('nota', '')}", ""]
+    else:
+        lineas += ["## Acierto y clases", "", f"Acierto: **{_pct(informe.get('acierto'))}**.", "",
+                   "| Clase | Precisión | Recall | F1 | Reales | Predichas |",
+                   "|---|---:|---:|---:|---:|---:|"]
+        for clase, d in (informe.get("clases") or {}).items():
+            lineas.append(f"| {clase} | {_pct(d.get('precision'))} | {_pct(d.get('recall'))} | "
+                          f"{_pct(d.get('f1'))} | {d.get('reales')} | {d.get('predichas')} |")
+        matriz = informe.get("matriz") or {}
+        if matriz:
+            columnas = sorted({r for fila in matriz.values() for r in fila})
+            lineas += ["", "Matriz de confusión (filas: etiqueta humana; columnas: Jev):", "",
+                       "| | " + " | ".join(columnas) + " |", "|---|" + "---:|" * len(columnas)]
+            for e, fila in matriz.items():
+                lineas.append(f"| {e} | " + " | ".join(str(fila.get(c, 0)) for c in columnas) + " |")
+        lineas += ["", "## Calibración", "", f"ECE: **{_num(informe.get('ece'))}**.", ""]
+        if informe.get("fiabilidad"):
+            lineas += ["| Confianza | Ejemplos | Confianza media | Acierto |", "|---|---:|---:|---:|"]
+            for f in informe["fiabilidad"]:
+                lineas.append(f"| {f['desde']:.1f}–{f['hasta']:.1f} | {f['ejemplos']} | "
+                              f"{f['confianza_media']:.2f} | {_pct(f['acierto'])} |")
+            lineas.append("")
+
+    umbral = informe.get("umbral_propio") if precision else informe.get("umbral")
+    lineas += ["## Curva de cobertura", "",
+               f"Umbral elegido: **{_num(umbral)}** (el más bajo cuya cota llega al objetivo "
+               "y se mantiene por encima)." if umbral is not None else
+               "**Sin umbral**: ninguna confianza deja bastantes ejemplos por encima con la cota "
+               "sobre el objetivo. Hasta tenerlo, todo sale `incierto`.", ""]
+    curva = informe.get("curva") or []
+    if curva:
+        lineas += ["| Umbral | Cubiertas | Cobertura | Precisión | Cota |", "|---:|---:|---:|---:|---:|"]
+        for q in _curva_resumida(curva, umbral):
+            marca = " ←" if q["umbral"] == umbral else ""
+            lineas.append(f"| {q['umbral']}{marca} | {q['cubiertas']} | {_pct(q.get('cobertura'))} | "
+                          f"{_pct(q.get('precision'))} | {_pct(q.get('precision_minima'))} |")
+        lineas.append("")
+
+    if not precision and informe.get("por_respuesta"):
+        lineas += ["## Por respuesta", "",
+                   "| Respuesta | Respuestas | Reales | Umbral propio | Decididas | Cota | Recuperadas |",
+                   "|---|---:|---:|---:|---:|---:|---:|"]
+        for r, d in informe["por_respuesta"].items():
+            lineas.append(f"| {r} | {d.get('respuestas')} | {d.get('reales')} | "
+                          f"{_num(d.get('umbral_propio'))} | {_num(d.get('decididas'))} | "
+                          f"{_pct(d.get('precision_minima'))} | {_pct(d.get('recuperadas'))} |")
+        lineas.append("")
+
+    if not precision:
+        lineas += ["## Coste", "", f"- Tokens medios por ejemplo: {_num(informe.get('tokens_medios'))}.",
+                   f"- Coste medio por ejemplo: {_num(informe.get('coste_medio_usd'))} USD"
+                   + (f" ({informe['coste_medio_usd'] * 1000:.4f} USD por mil)."
+                      if isinstance(informe.get("coste_medio_usd"), (int, float)) else "."), ""]
+
+    if informe.get("avisos"):
+        lineas += ["## Avisos", ""] + [f"- {a}" for a in informe["avisos"]] + [""]
+    return "\n".join(lineas)

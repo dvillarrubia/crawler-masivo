@@ -1758,3 +1758,42 @@
      - un solo PUT por doble pulsación, y los modificadores y los diálogos
        no etiquetan.
    - `tests/test_decisiones_no_se_disparan.py`: lo que importa el módulo.
+
+<a id="d231"></a>
+231. **El umbral de una pregunta exige los ejemplos con los que el objetivo es
+   alcanzable (35 para el 90 %), y `evaluar --informe` lo guarda** (#8, #9).
+
+   **Problema.** `elegir_umbral` pide que el umbral se sostenga en todos los
+   umbrales más altos que cubran `MIN_CUBIERTAS` (30) ejemplos: un pico suelto
+   no es un umbral. Pero con 30 a 34 ejemplos, ni acertándolos todos llega la
+   cota de Wilson al 0,9 (30 de 30 da 0,886). Las confianzas de Jev son casi
+   todas distintas (0,52, 0,87…), así que la curva pasa siempre por esa franja
+   y **hundía cualquier umbral**. Comprobado: un modelo que acierta el 100 % de
+   200 ejemplos con confianzas distintas salía «sin umbral». Solo salía umbral
+   cuando las confianzas se repetían tanto que la curva saltaba esa franja.
+
+   **Decisión.**
+   - El mínimo de ejemplos por encima del umbral pasa a ser
+     `max(MIN_CUBIERTAS, cubiertas_alcanzables(objetivo))`: el primer n con
+     el que n de n llega al objetivo (35 para 0,9; 73 para 0,95). Por debajo,
+     ninguna precisión puede demostrar el objetivo, así que esos puntos no
+     dicen nada y no cuentan ni a favor ni en contra. Un fallo en la cola alta
+     sigue hundiendo el umbral si baja la cota con 35 o más ejemplos.
+   - `evaluar --informe [ruta]` guarda el informe en Markdown junto al juego
+     (`INFORME_v<versión>.md`, `_precision` si es un juego de precisión):
+     muestra, acierto y matriz, calibración, curva de cobertura (hasta 15
+     puntos, siempre con el del umbral), por respuesta y coste. Solo presenta
+     lo que calcula `metricas`: ningún número sale del informe.
+   - La guía de estilo del catálogo, en `shared/preguntas/README.md` (#9).
+
+   **Medido el 31-oct-2026** sobre los juegos etiquetados de producción
+   (`/data/archivo/jev/`, con `evaluar` dentro del worker, sin llamar a Jev ni
+   escribir nada), regla vieja contra nueva. De las 10 evaluaciones con
+   etiquetas solo cambia una: `title_es_generico` v2 en los censos nuevos pasa
+   de sin umbral a 0,52, sostenido por los «false»; los «true» siguen sin
+   umbral propio. Las confianzas reales de Jev se repiten lo bastante (0,51,
+   0,69, 0,81…) como para que la curva casi siempre saltara la franja de 30-34.
+   El arreglo es correcto, pero **no desbloquea ninguna pregunta**: lo que
+   falta sigue siendo etiquetar más positivos (#8). El catálogo no cambia.
+
+   Tests en `tests/test_evaluacion_decisiones.py`.
