@@ -897,3 +897,41 @@ def test_dos_canonicals_distintos_no_disparan_la_alerta_de_otro_host():
                         canonical_distintos=distintos) for i in range(40)]
         r = comparar_censos(antes, despues, job_a=JOB_OK, job_b=JOB_LUEGO)
         assert _alertas_de(r, "canonical_a_otro_host") is not None
+
+
+# -- Lo que no es un cambio (#36, decision 230) ---------------------------------
+
+def test_los_espacios_de_mas_no_son_un_cambio_de_titulo():
+    r = comparar_censos([_pag("/a", title="Hoteles  en Gran Canaria ")],
+                        [_pag("/a", title="Hoteles en Gran Canaria")],
+                        job_a=JOB_OK, job_b=JOB_LUEGO)
+    assert r["cambios"]["title"]["total"] == 0
+
+
+def test_lo_que_casa_con_un_patron_del_cliente_se_ignora():
+    antes = [_pag(f"/p{i}", title=f"Ofertas 2026 ({i} productos)",
+                  meta_description="Rebajas 2026") for i in range(300)]
+    ahora = [_pag(f"/p{i}", title=f"Ofertas 2027 ({i + 3} productos)",
+                  meta_description="Rebajas 2027") for i in range(300)]
+    sin = comparar_censos(antes, ahora, job_a=JOB_OK, job_b=JOB_LUEGO)
+    assert sin["cambios"]["title"]["total"] == 300
+    assert any(a["regla"] == "cambia_el_titulo" for a in sin["alertas"])
+
+    con = comparar_censos(antes, ahora, job_a=JOB_OK, job_b=JOB_LUEGO,
+                          ignorar=[r"\b20\d\d\b", r"\(\d+ productos\)"])
+    assert con["cambios"]["title"]["total"] == 0
+    assert not any(a["regla"] in ("cambia_el_titulo", "cambia_la_description")
+                   for a in con["alertas"])
+
+
+def test_un_cambio_de_verdad_sigue_saliendo_con_patrones():
+    r = comparar_censos([_pag("/a", title="Ofertas 2026")], [_pag("/a", title="Liquidación 2027")],
+                        job_a=JOB_OK, job_b=JOB_LUEGO, ignorar=[r"\b20\d\d\b"])
+    assert r["cambios"]["title"]["total"] == 1
+    assert r["cambios"]["title"]["ejemplos"][0]["antes"] == "Ofertas 2026"
+
+
+def test_un_patron_roto_en_la_bd_no_tumba_la_comparacion():
+    r = comparar_censos([_pag("/a")], [_pag("/a", title="Otro")],
+                        job_a=JOB_OK, job_b=JOB_LUEGO, ignorar=["(sin cerrar"])
+    assert r["cambios"]["title"]["total"] == 1

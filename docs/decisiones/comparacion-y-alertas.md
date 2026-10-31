@@ -1145,3 +1145,35 @@
    juntan sin saber que son las mismas, y la ficha del rastreo con las frases
    redactadas al servirla) y `tests/test_google_limpieza_frontend.py` (cifras,
    ventanas, frases y páginas en Chromium).
+
+<a id="d230"></a>
+230. **Lo que no es un cambio: espacios y patrones del cliente fuera del title,
+   el H1 y la description antes de comparar** (#36, `ignore_patterns`).
+
+   **Problema.** `cambia_el_titulo` y `cambia_la_description` comparaban el
+   texto tal cual. Un sitio que pone el año («Ofertas 2026») o un contador
+   («(123 productos)») en los títulos cambia en cada rastreo sin que nadie haya
+   tocado nada, y la alerta salta por la plantilla entera. #36 pedía
+   normalizar antes de comparar, con `ignore_patterns` por perfil.
+
+   **Decisión.**
+   - `comparar_censos(..., ignorar=[regex])` compara el title, el H1 (la lista
+     de cambios) y la description con `_comparador_de_textos`: **siempre**
+     pliega los espacios (Google también lo hace al mostrar un title), y quita
+     lo que case con cada patrón del cliente. Lo que se enseña como «antes» y
+     «ahora» sigue siendo el texto real.
+   - Los patrones viven en las **reglas del cliente** (`ignorar_en_textos`,
+     decisión 135), no en el perfil: es donde ya están los umbrales de esas
+     mismas alertas, y se editan en su panel (un patrón por línea). Hasta 20,
+     de hasta 200 caracteres, y tienen que compilar al guardar (422 con el
+     motivo). La comparación automática al cerrar el rastreo los aplica; la
+     manual entre dos censos elegidos, no (no tiene cliente).
+   - **Un patrón roto escrito a mano en la BD se salta** con un warning: no
+     puede tumbar la comparación ni su alerta crítica (el mismo criterio que
+     `efectivas`).
+
+   **Fuera.** Fechas y contadores no se quitan por defecto: un precio en el
+   title también es un número, y que cambie sí es un cambio. Lo decide cada
+   cliente.
+
+   Tests en `tests/test_comparacion.py` y `tests/test_reglas.py`.

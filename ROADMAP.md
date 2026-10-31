@@ -87,6 +87,10 @@ milestone.
   información) si la portada no declara `Organization` o `Person` en sus datos
   estructurados, con todos sus subtipos (un hotel, una clínica). Es lo que usan
   el panel de conocimiento de Google y los buscadores de IA (#199).
+- **Lo que no es un cambio** (31 de octubre, decisión 230): en las reglas de
+  cada cliente, patrones que se quitan del title, el H1 y la description antes
+  de comparar dos rastreos (el año, un contador de productos), y los espacios
+  de más ya no cuentan nunca (#36).
 - PageRank interno:
   - las redirecciones y los canonicals pasan la autoridad a la página correcta;
   - los menús y enlaces repetidos no cuentan como contenido;

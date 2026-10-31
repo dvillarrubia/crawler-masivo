@@ -2320,8 +2320,7 @@ function app() {
           api(`/clients/${this.cliente.id}/resumenes`).catch(() => []),
         ]);
         this.reglasCliente = r;
-        this.reglasForm = JSON.parse(JSON.stringify(r.efectivas));
-        this.reglasForm.propias.forEach(x => { x.segmento = x.segmento || ''; });
+        this.reglasForm = _formReglas(r.efectivas);
         this._reglasFoto = _fotoReglas(this.reglasForm);
         this.resumenes = res || [];
         this._reglasDe = this.cliente && this.cliente.id;
@@ -2371,6 +2370,8 @@ function app() {
         if (v !== drs[k]) rs[k] = v;
       }
       if (Object.keys(rs).length) cuerpo.resumen_semanal = rs;
+      const ignorar = (f.ignorar_texto || '').split('\n').map(x => x.trim()).filter(Boolean);
+      if (JSON.stringify(ignorar) !== JSON.stringify(serie.ignorar_en_textos || [])) cuerpo.ignorar_en_textos = ignorar;
       return cuerpo;
     },
 
@@ -2380,8 +2381,7 @@ function app() {
         const r = await api(`/clients/${this.cliente.id}/reglas`,
                             { method: 'PUT', body: JSON.stringify(this._cuerpoReglas()) });
         this.reglasCliente = r;
-        this.reglasForm = JSON.parse(JSON.stringify(r.efectivas));
-        this.reglasForm.propias.forEach(x => { x.segmento = x.segmento || ''; });
+        this.reglasForm = _formReglas(r.efectivas);
         this._reglasFoto = _fotoReglas(this.reglasForm);
         this.showToast('Reglas guardadas: valen para los rastreos que terminen desde ahora');
         return true;
@@ -2399,8 +2399,7 @@ function app() {
       try {
         const r = await api(`/clients/${this.cliente.id}/reglas`, { method: 'PUT', body: 'null' });
         this.reglasCliente = r;
-        this.reglasForm = JSON.parse(JSON.stringify(r.efectivas));
-        this.reglasForm.propias.forEach(x => { x.segmento = x.segmento || ''; });
+        this.reglasForm = _formReglas(r.efectivas);
         this._reglasFoto = _fotoReglas(this.reglasForm);
         this.showToast('Reglas de serie restablecidas');
       } catch (e) { this.reglasError = e.message; }
@@ -9142,6 +9141,15 @@ function fraseReglaPropia(r, catalogo) {
 }
 // Lo que se compara para saber si las reglas tienen cambios sin guardar: los
 // numeros de un campo editado llegan como texto («20» frente a 20).
+// Las reglas efectivas como formulario: el segmento vacio como '' y los
+// patrones a ignorar (decision 230) como un texto, uno por linea.
+function _formReglas(efectivas) {
+  const f = JSON.parse(JSON.stringify(efectivas));
+  f.propias.forEach(x => { x.segmento = x.segmento || ''; });
+  f.ignorar_texto = (f.ignorar_en_textos || []).join('\n');
+  delete f.ignorar_en_textos;
+  return f;
+}
 function _fotoReglas(f) {
   return JSON.stringify(f, (k, v) => (typeof v === 'string' && v.trim() !== '' && !isNaN(v) ? Number(v) : v));
 }
