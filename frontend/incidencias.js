@@ -47,6 +47,11 @@ const ISSUE_INFO = {
     google: 'Sigue la redirección y encuentra un noindex: lo que tenía la URL vieja no pasa a ninguna página del índice.',
     arreglo: 'Redirigir a la página indexable que sustituye a la vieja; si el destino es correcto, decidir si debe seguir en noindex.',
   },
+  'redireccion_a_portada': {
+    que: 'La página redirige a la portada (la del sitio o la de un idioma) en vez de a una página que la sustituya. Si diez o más redirecciones llegan a la misma portada, sale una sola vez, en ella: es la regla «todo lo borrado, a la home». No salen la propia portada con otro nombre (/index.html, /inicio), la de otro idioma ni las que solo cambian http/https o www.',
+    google: 'Trata una redirección a la portada como un soft 404: lo que tenía la URL vieja (enlaces, posiciones) no pasa a la home, y Search Console puede marcarla como «Soft 404».',
+    arreglo: 'Redirigir cada URL a la página más parecida que exista (el producto que la sustituye, su categoría). Si no hay ninguna, dejar que responda 404 o 410.',
+  },
   'meta_refresh_redireccion': {
     que: 'La página redirige con <meta http-equiv="refresh"> en vez de con una redirección del servidor. Con retardo, el usuario la ve unos segundos antes de saltar. Una refresh sin URL (recargar) o dentro de <noscript> no cuenta. Con render JS, una refresh inmediata puede aparecer como redirección por JavaScript, y el retardo de un salto visto por el navegador no se conoce.',
     google: 'La inmediata la trata como permanente; la de varios segundos, como temporal, y puede quedarse con la URL de origen. Recomienda la redirección del servidor.',
@@ -1038,6 +1043,7 @@ const ISSUE_LABEL_EXTRA = {
   enlace_sin_ancla: 'Enlace interno sin texto ancla',
   // Decisiones 120 y 121
   redireccion_a_noindex: 'Redirección a una noindex',
+  redireccion_a_portada: 'Redirección a la portada',
   meta_refresh_redireccion: 'Redirección por meta refresh',
   noindex_y_canonical_a_otra: 'Noindex con canonical a otra',
   canonical_html_y_cabecera_distintos: 'Canonical del HTML ≠ cabecera',

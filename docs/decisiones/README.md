@@ -12,7 +12,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | [`worker-y-cola.md`](worker-y-cola.md) | Worker, cola, subprocesos y programaciones | 1, 2, 3, 4, 15, 16, 21, 28, 31, 32, 40, 75, 76, 193, 209, 220, 223, 224, 225, 227 |
 | [`render-y-descarga.md`](render-y-descarga.md) | Render con Playwright, descarga, robots.txt y sitemaps en la cola | 8, 11, 12, 12b, 13, 14, 17, 18, 19, 49, 50, 59, 81, 98, 103, 109, 110, 111, 112, 114, 119, 132, 140, 172, 173, 174, 186, 216, 218, 219 |
 | [`contenido.md`](contenido.md) | Extracción de contenido, titulares, imágenes y anclas | 6, 9, 10, 10b, 44, 45, 46, 52, 61, 79, 121, 124, 153, 154, 155, 187, 198, 215 |
-| [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137, 156, 160, 164, 167, 170, 171 |
+| [`indexabilidad.md`](indexabilidad.md) | Indexabilidad, robots, canonical y hreflang | 20, 22, 23, 39, 48, 56, 99, 101, 107, 113, 115, 116, 120, 129, 137, 156, 160, 164, 167, 170, 171, 228 |
 | [`enlazado-y-pagerank.md`](enlazado-y-pagerank.md) | Enlazado interno, PageRank y profundidad | 27, 29, 34, 35, 36, 37, 38, 41, 57, 58, 60, 63, 90, 94, 95, 106, 122, 123, 147, 150, 152, 183, 195, 212, 217, 226 |
 | [`incidencias.md`](incidencias.md) | Incidencias del análisis: criterios, severidad y duplicados | 7, 24, 25, 26, 30, 42, 43, 47, 53, 54, 64, 92, 100, 102, 105, 108, 117, 118, 126, 136, 142, 144, 157, 161, 168, 190, 210, 213, 214 |
 | [`datos-estructurados.md`](datos-estructurados.md) | Datos estructurados | 51, 73, 80, 97, 146 |
@@ -255,6 +255,7 @@ muchas existen porque la version «obvia» ya se probo y rompio un censo.
 | 225 | Antes de lanzar se mira si el rastreo cabe en el disco: por URL lo que ocupa el último censo del perfil (enlaces archivados incluidos), por el `max_urls`, frente a lo libre menos una reserva; `POST /api/jobs` da 409 si no cabe salvo `forzar_disco`, el MCP lo enseña al simular y los programados no se bloquean | [`worker-y-cola`](worker-y-cola.md#d225) |
 | 226 | El análisis apunta los segundos de cada fase en `jobs.analisis_fases`; banco `scripts/bench/analisis_por_fases.py` (60.000 URLs, 11,6 M enlaces: conteos de enlaces y PageRank son el 77 %); los conteos de enlaces con `work_mem` 64 MB y `temp_buffers` 256 MB: de ~90 a 49 s, el análisis un 13 % menos | [`enlazado-y-pagerank`](enlazado-y-pagerank.md#d226) |
 | 227 | La ficha dice qué limitó la velocidad: `jobs.ritmo` con URL/s, latencia, el techo de la pausa (`1/pausa`) y el del servidor (`concurrencia/latencia`), y si limitó la pausa, el servidor o el propio proceso | [`worker-y-cola`](worker-y-cola.md#d227) |
+| 228 | `redireccion_a_portada`: una página interna que redirige (también por meta refresh o en cadena) a la portada del sitio o de un idioma, que Google trata como soft 404; no cuentan los alias de la portada, otra portada ni la normalización, y diez o más al mismo destino son una fila en él | [`indexabilidad`](indexabilidad.md#d228) |
 
 ## Anadir una decision
 

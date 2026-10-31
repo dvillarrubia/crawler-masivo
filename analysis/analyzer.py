@@ -3500,6 +3500,8 @@ class SEOAnalyzer:
         finales_noindex = self._finales_noindex()
         # Destino noindex -> origenes que acaban en el.
         a_noindex: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        # Portada final -> origenes que acaban en ella (decision 228).
+        a_portada: dict[str, list[dict[str, Any]]] = defaultdict(list)
         # Los origenes cuyo aviso ya es el destino: su meta refresh no se avisa.
         con_aviso_de_destino: set[int] = set()
 
@@ -3585,6 +3587,15 @@ class SEOAnalyzer:
                     {"id": origin_id, "url": origin_url, "chain": visited, "hops": hops,
                      "final": current})
                 con_aviso_de_destino.add(origin_id)
+            elif (not supera and final_status == 200
+                    and _redirige_a_portada(origin_url, current)):
+                # Una pagina que redirige a la portada (#11, decision 228): lo
+                # que habia en la URL vieja no tiene sustituto, y Google trata
+                # ese salto como un soft 404. Como los de arriba, sustituye a
+                # `redirect_chain`: redirigir a una sustituta arregla los dos.
+                a_portada[current].append(
+                    {"id": origin_id, "url": origin_url, "chain": visited, "hops": hops})
+                con_aviso_de_destino.add(origin_id)
             elif supera or hops > self.max_redirect_chain:
                 detalle: dict[str, Any] = {"chain": visited, "hops": hops}
                 if supera:
@@ -3620,6 +3631,7 @@ class SEOAnalyzer:
             )
 
         self._avisar_redireccion_a_noindex(a_noindex)
+        self._avisar_redireccion_a_portada(a_portada)
         self._avisar_meta_refresh(con_aviso_de_destino)
         self._flush_issues()
 
@@ -3659,6 +3671,36 @@ class SEOAnalyzer:
                     o["id"], "redireccion_a_noindex", "warning",
                     {"alcance": "origen", "chain": o["chain"], "hops": o["hops"],
                      "final": o["final"]},
+                )
+
+    def _avisar_redireccion_a_portada(self, a_portada: dict[str, list[dict[str, Any]]]) -> None:
+        """`redireccion_a_portada` (decision 228), con el reparto de
+        `redireccion_a_noindex`: por origen, o UNA fila en la portada cuando le
+        llegan `enlaces_plantilla_min_paginas` o mas —«todo lo borrado, a la
+        home»—, que es una regla del servidor."""
+        if not a_portada:
+            return
+        ids = dict(self.session.execute(
+            select(Url.url, Url.id).where(Url.job_id == self.job_id,
+                                          Url.url.in_(list(a_portada)))
+        ).all())
+        for final, origenes in a_portada.items():
+            origenes.sort(key=lambda o: o["url"])
+            if len(origenes) >= self.enlaces_plantilla_min_paginas and final in ids:
+                self._add_issue(
+                    ids[final], "redireccion_a_portada", "warning",
+                    {"alcance": "destino", "final": final,
+                     "redirecciones_que_llegan": len(origenes),
+                     "paginas_afectadas": len(origenes),
+                     "ejemplos": [o["url"] for o in origenes[: self._MUESTRA_EJEMPLOS]]},
+                    group_key=_clave_de_grupo(final),
+                )
+                continue
+            for o in origenes:
+                self._add_issue(
+                    o["id"], "redireccion_a_portada", "warning",
+                    {"alcance": "origen", "chain": o["chain"], "hops": o["hops"],
+                     "final": final},
                 )
 
     def _avisar_meta_refresh(self, con_aviso_de_destino: set[int]) -> None:
@@ -5634,6 +5676,40 @@ def _solo_normaliza(a: str | None, b: str | None) -> bool:
         return r.rstrip("/") or "/"
 
     return _host(ha) == _host(hb) and _ruta(ra) == _ruta(rb) and qa == qb
+
+
+# Lo que en la raiz de un sitio (o de un idioma) es la propia portada con otro
+# nombre: redirigirlo a `/` es consolidarla, no tirar una pagina.
+_ALIAS_DE_PORTADA = frozenset({
+    "index", "index.html", "index.htm", "index.php", "index.asp", "index.aspx",
+    "index.jsp", "default.asp", "default.aspx", "home", "home.html", "inicio",
+    "portada", "start", "accueil", "startseite",
+})
+
+
+def _redirige_a_portada(origen: str | None, final: str | None) -> bool:
+    """¿La redireccion de *origen* acaba en una portada (`/` o la de un idioma,
+    `/es/`) sin que *origen* lo sea? (decision 228)
+
+    No cuenta lo que ya es la portada: otra portada (`/es/` → `/`, el idioma
+    por el navegador), un alias (`/index.html`, `/inicio`), la propia con
+    parametros (`/?utm_source=x`) ni un http → https o un www.
+    """
+    from shared.soft404 import es_portada
+
+    if not origen or not final or _solo_normaliza(origen, final):
+        return False
+    try:
+        ruta_final = urlsplit(final).path
+        ruta_origen = urlsplit(origen).path
+    except ValueError:
+        return False
+    if not es_portada(ruta_final) or es_portada(ruta_origen):
+        return False
+    tramos = [t for t in ruta_origen.split("/") if t]
+    if tramos and tramos[-1].lower() in _ALIAS_DE_PORTADA and es_portada("/".join(tramos[:-1])):
+        return False
+    return True
 
 
 def _buscar_en(por_url: dict[Any, Any], url: str | None):

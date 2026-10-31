@@ -7428,7 +7428,7 @@ const EXP_TABS = [
   { key: 'a_canon',    label: 'Canonicals',    icon: 'link-2',       filter: HTML_INTERNO, ambito: ['canonical_missing','canonical_cross_domain','canonical_a_error','canonical_a_redireccion','canonical_a_no_indexable','canonical_encadenado','canonical_sin_enlazar','canonical_broken','canonical_multiple','canonical_in_body','canonical_a_http','canonical_html_y_cabecera_distintos','noindex_y_canonical_a_otra','canonical_relativo','canonical_con_fragmento','google_elige_otro_canonical','google_tiene_canonical_antiguo'],
     columns: ['url','status_code','canonical_href','canonical_header','indexable','indexability_status'] },
   // Las redirecciones no son HTML: el ambito va sobre las internas.
-  { key: 'a_redir',    label: 'Redirecciones', icon: 'corner-down-right', filter: { is_internal: true }, ambito: ['redireccion_a_error','redireccion_a_noindex','meta_refresh_redireccion','redirect_chain','redirect_loop','redireccion_por_javascript'],
+  { key: 'a_redir',    label: 'Redirecciones', icon: 'corner-down-right', filter: { is_internal: true }, ambito: ['redireccion_a_error','redireccion_a_noindex','redireccion_a_portada','meta_refresh_redireccion','redirect_chain','redirect_loop','redireccion_por_javascript'],
     columns: ['url','status_code','redirect_url','redirect_type','inlinks_count','origenes','click_depth'] },
   { key: 'a_robots',   label: 'Directivas',    icon: 'shield',       filter: HTML_INTERNO, ambito: ['noindex_page','noindex_y_canonical_a_otra','robots_invalid_syntax','pagina_nofollow','robots_txt_inaccesible','robots_difiere_para_googlebot','bot_busqueda_ia_bloqueado'],
     columns: ['url','status_code','indexable','indexability_status','bloqueada_googlebot','meta_robots','x_robots_tag','in_sitemap'] },

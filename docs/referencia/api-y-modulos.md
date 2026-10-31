@@ -212,7 +212,7 @@ The `SEOAnalyzer` class runs 17 check methods and populates the `issues` table:
 | `analyze_robots_syntax()` | robots_invalid_syntax (directivas pegadas con `/`, `\|` o `;`; de `X-Robots-Tag`, solo lo que va a Google, decision 107) |
 | `analyze_duplicates()` | content duplicates (byte-idénticos) |
 | `analyze_near_duplicates()` | near_duplicate_content (MinHash, umbral 0.9 configurable), solo internas e indexables como `analyze_duplicates` (decisión 118) |
-| `analyze_redirect_chains()` | redirect_chain (uno por cadena, `error` pasados 10 saltos: decision 117), redirect_loop, **redireccion_a_error** (decision 101), **redireccion_a_noindex** y **meta_refresh_redireccion** (retardo con `shared/meta_refresh.py`; decision 120) |
+| `analyze_redirect_chains()` | redirect_chain (uno por cadena, `error` pasados 10 saltos: decision 117), redirect_loop, **redireccion_a_error** (decision 101), **redireccion_a_noindex** y **meta_refresh_redireccion** (retardo con `shared/meta_refresh.py`; decision 120), **redireccion_a_portada** (decision 228) |
 | `analyze_images()` | image_missing_alt |
 | `analyze_security()` | http_url, mixed_content, missing_hsts, missing_csp |
 | `analyze_content()` | low_word_count (sobre el contenido propio, solo en indexables) |

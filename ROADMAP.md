@@ -79,6 +79,10 @@ milestone.
   página que es soft 404 no lleva además los avisos de su contenido (escaso,
   título duplicado, sin description, sin h1), y en el Informe SEO resta en la
   nota de contenido con su propia recomendación.
+- **Redirección a la portada** (31 de octubre, decisión 228): una página que
+  redirige a la home (o a la de un idioma), que Google trata como soft 404.
+  No cuentan los alias de la portada ni la normalización; diez o más a la misma
+  son una fila en ella.
 - PageRank interno:
   - las redirecciones y los canonicals pasan la autoridad a la página correcta;
   - los menús y enlaces repetidos no cuentan como contenido;
