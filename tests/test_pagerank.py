@@ -206,3 +206,24 @@ def test_casos_degenerados():
     # Todo a cero (un grafo sin aristas ni teletransporte).
     assert list(puntuacion_log(np.array([0.0, 0.0]))) == [0.0, 0.0]
     assert list(puntuacion_log(np.array([]))) == []
+
+
+def test_la_tabla_de_pesos_es_el_vocabulario_del_extractor():
+    """Cada posicion con peso la emite `extract_links`, y cada una que emite
+    tiene peso (#13): `aside` y `form` pesaron aqui sin aplicar nunca, y una
+    posicion nueva sin peso caeria callada en el valor por defecto."""
+    parsel = pytest.importorskip("parsel")
+    from seo_crawler.extractors import extract_links
+
+    regiones = [
+        "<nav><a href='/a'>a</a></nav>", "<header><a href='/b'>b</a></header>",
+        "<footer><a href='/c'>c</a></footer>", "<aside><a href='/d'>d</a></aside>",
+        "<form><a href='/e'>e</a></form>", "<main><a href='/f'>f</a></main>",
+        "<div role='complementary'><a href='/g'>g</a></div>",
+        "<div id='secondary'><a href='/h'>h</a></div>",
+        "<div class='menu'><a href='/i'>i</a></div>", "<a href='/j'>j</a>",
+    ]
+    html = "<html><body>" + "".join(regiones) + "</body></html>"
+    emitidas = {e["link_position"] for e in extract_links(
+        parsel.Selector(text=html), "https://x.com/", {"x.com"})}
+    assert emitidas == set(prk.PESO_POSICION) - {None}
