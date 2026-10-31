@@ -52,6 +52,7 @@ from analysis import avisos_de_sitemaps
 from analysis import avisos_de_html
 from analysis import avisos_de_medios
 from analysis import avisos_de_nosnippet
+from analysis import avisos_de_entidad
 from analysis import avisos_de_nofollow
 from analysis import avisos_de_wordpress
 from analysis import avisos_de_backlinks
@@ -445,6 +446,7 @@ class SEOAnalyzer:
         self._fase("analyze_canonicals", self.analyze_canonicals)
         self._fase("analyze_hreflang", self.analyze_hreflang)
         self._fase("analyze_structured_data", self.analyze_structured_data)
+        self._fase("avisos_de_entidad.avisar", avisos_de_entidad.avisar, self)  # decision 229
         self._fase("analyze_html_ignorado", self.analyze_html_ignorado)
         self._fase("avisos_de_html.avisar_declaraciones_html", avisos_de_html.avisar_declaraciones_html, self)  # decision 108
         self._fase("avisos_de_medios.avisar", avisos_de_medios.avisar, self)  # decisiones 154, 155 y 156

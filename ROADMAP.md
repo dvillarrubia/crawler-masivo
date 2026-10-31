@@ -83,6 +83,10 @@ milestone.
   redirige a la home (o a la de un idioma), que Google trata como soft 404.
   No cuentan los alias de la portada ni la normalización; diez o más a la misma
   son una fila en ella.
+- **Portada sin quién está detrás** (31 de octubre, decisión 229): avisa (como
+  información) si la portada no declara `Organization` o `Person` en sus datos
+  estructurados, con todos sus subtipos (un hotel, una clínica). Es lo que usan
+  el panel de conocimiento de Google y los buscadores de IA (#199).
 - PageRank interno:
   - las redirecciones y los canonicals pasan la autoridad a la página correcta;
   - los menús y enlaces repetidos no cuentan como contenido;

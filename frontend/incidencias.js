@@ -660,6 +660,11 @@ const ISSUE_INFO = {
     google: 'Lo acepta, pero el resultado enriquecido puede ser más pobre.',
     arreglo: 'Completar la propiedad en la plantilla si el dato existe.',
   },
+  'portada_sin_entidad': {
+    que: 'La portada no lleva datos estructurados que digan quién está detrás del sitio: ni Organization (o un subtipo: LocalBusiness, Hotel, Store…) ni Person en un sitio personal. Cuenta cualquier bloque de la portada, también el publisher de un WebSite. Una vez por host. Si el bloque lo añade JavaScript (Tag Manager) y el rastreo no renderizó, puede estar y no verse aquí.',
+    google: 'No lo exige, pero es de donde saca el nombre, el logo y los perfiles (sameAs) de la empresa para el panel de conocimiento; los buscadores de IA también lo usan para saber de quién es el sitio. Sin él, lo deduce del texto, o no lo deduce.',
+    arreglo: 'Añadir en la portada un bloque Organization (o el subtipo que corresponda) con name, url, logo y sameAs con los perfiles oficiales.',
+  },
   'structured_data_info': {
     que: 'El bloque es de un tipo cuyo resultado enriquecido Google ha retirado (FAQPage desde mayo de 2026, HowTo desde septiembre de 2023).',
     google: 'Lo lee, pero ya no lo muestra como resultado enriquecido: no da preguntas desplegables ni pasos en la búsqueda.',
@@ -1044,6 +1049,7 @@ const ISSUE_LABEL_EXTRA = {
   // Decisiones 120 y 121
   redireccion_a_noindex: 'Redirección a una noindex',
   redireccion_a_portada: 'Redirección a la portada',
+  portada_sin_entidad: 'Portada sin Organization',
   meta_refresh_redireccion: 'Redirección por meta refresh',
   noindex_y_canonical_a_otra: 'Noindex con canonical a otra',
   canonical_html_y_cabecera_distintos: 'Canonical del HTML ≠ cabecera',
